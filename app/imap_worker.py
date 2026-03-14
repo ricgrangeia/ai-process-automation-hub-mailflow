@@ -1,47 +1,27 @@
-"""
-IMAP Worker Utilities
-
-Responsible for:
-- Connecting to IMAP server
-- Fetching unseen messages
-- Marking messages as seen
-- Moving messages between folders
-- Creating folders if missing
-
-⚠ All functions here are blocking.
-They should be executed using asyncio.to_thread()
-from async workers.
-"""
-
 import imaplib
 import logging
 import socket
 import time
 from typing import Iterable, Tuple
 
-
 logger = logging.getLogger("imap-worker")
 
 
 # ------------------------------------------------------------------------------
-# Connection Helper
+# Connection
 # ------------------------------------------------------------------------------
 
-def _connect(host: str, port: int, username: str, password: str):
-    """
-    Establish secure IMAP SSL connection.
-    """
+def connect_imap(host: str, port: int, username: str, password: str):
 
     host = (host or "").strip()
 
     if not host:
         raise Exception("IMAP host not configured")
 
-    logger.info(f"Connecting to IMAP server '{host}:{port}'")
+    logger.info(f"[{username}] Connecting to IMAP {host}:{port}")
 
     for attempt in range(3):
         try:
-            # Check DNS resolution first
             socket.gethostbyname(host)
 
             conn = imaplib.IMAP4_SSL(host, port, timeout=20)
@@ -49,189 +29,97 @@ def _connect(host: str, port: int, username: str, password: str):
 
             return conn
 
-        except socket.gaierror as e:
-            logger.error(f"DNS resolution failed for {host}: {e}")
-
         except Exception as e:
-            logger.warning(f"IMAP connection attempt {attempt+1}/3 failed: {e}")
+            logger.warning(f"[{username}] IMAP connection attempt {attempt+1}/3 failed: {e}")
+            time.sleep(3)
 
-        time.sleep(5)
-
-    raise Exception(f"IMAP connection failed for {host}")
+    raise Exception(f"[{username}] IMAP connection failed")
 
 
 # ------------------------------------------------------------------------------
-# Fetch Unseen Emails
+# Fetch messages
 # ------------------------------------------------------------------------------
 
 def fetch_unseen_raw_messages(
-    host: str,
-    port: int,
-    username: str,
-    password: str,
+    conn,
     folder: str,
     max_n: int
 ) -> Iterable[Tuple[str, bytes, str]]:
-    """
-    Fetch unseen emails.
 
-    Yields:
-        (uid, raw_bytes, uid_for_seen)
+    conn.select(folder, readonly=True)
 
-    - uid: IMAP UID (string)
-    - raw_bytes: full RFC822 email content
-    - uid_for_seen: used for marking message as seen
-    """
+    status, data = conn.uid("search", None, "UNSEEN")
 
-    conn = _connect(host, port, username, password)
+    if status != "OK":
+        logger.warning("Failed to search UNSEEN messages.")
+        return []
 
-    try:
-        conn.select(folder)
+    uids = (data[0] or b"").split()[:max_n]
 
-        # Search UNSEEN messages
-        status, data = conn.uid("search", None, "UNSEEN")
+    for uid_b in uids:
+
+        uid = uid_b.decode()
+
+        status, msg_data = conn.uid("fetch", uid, "(RFC822)")
 
         if status != "OK":
-            logger.warning("Failed to search UNSEEN messages.")
-            return
+            continue
 
-        uids = (data[0] or b"").split()
-        uids = uids[:max_n]
+        raw = msg_data[0][1]
 
-        for uid_b in uids:
-            uid = uid_b.decode("utf-8", errors="ignore")
-
-            status, msg_data = conn.uid("fetch", uid, "(RFC822)")
-
-            if status != "OK" or not msg_data or not msg_data[0]:
-                logger.warning(f"Failed to fetch UID {uid}")
-                continue
-
-            raw = msg_data[0][1]
-
-            yield uid, raw, uid
-
-    finally:
-        try:
-            conn.logout()
-        except Exception:
-            pass
+        yield uid, raw, uid
 
 
 # ------------------------------------------------------------------------------
-# Mark Message as Seen
+# Mark seen
 # ------------------------------------------------------------------------------
 
-def mark_seen(
-    host: str,
-    port: int,
-    username: str,
-    password: str,
-    folder: str,
-    uid: str
-) -> None:
-    """
-    Mark a specific message as Seen using UID.
-    """
+def mark_seen(conn, folder: str, uid: str):
 
-    conn = _connect(host, port, username, password)
-
-    try:
-        conn.select(folder)
-        conn.uid("store", uid, "+FLAGS", r"(\Seen)")
-    finally:
-        try:
-            conn.logout()
-        except Exception:
-            pass
+    conn.select(folder)
+    conn.uid("store", uid, "+FLAGS", r"(\Seen")
 
 
 # ------------------------------------------------------------------------------
-# Move Message Between Folders
+# Move message
 # ------------------------------------------------------------------------------
 
 def move_message(
-    host: str,
-    port: int,
-    username: str,
-    password: str,
+    conn,
     source_folder: str,
     target_folder: str,
     uid: str
 ):
-    """
-    Move message safely using UID.
 
-    Steps:
-    1. Ensure target folder exists
-    2. COPY message
-    3. Mark original as Deleted
-    4. Expunge
-    """
+    ensure_folder_exists(conn, target_folder)
 
-    imap = _connect(host, port, username, password)
+    conn.select(source_folder)
 
-    try:
-        # Ensure target folder exists
-        ensure_folder_exists(imap, target_folder)
+    result = conn.uid("COPY", uid, target_folder)
 
-        # Select source folder
-        status, _ = imap.select(source_folder)
-        if status != "OK":
-            raise Exception(f"Failed to select folder {source_folder}")
+    if result[0] != "OK":
+        raise Exception(f"Failed to copy UID {uid}")
 
-        # Copy message
-        result = imap.uid("COPY", uid, target_folder)
+    conn.uid("STORE", uid, "+FLAGS", r"(\Deleted)")
+    conn.expunge()
 
-        if result[0] != "OK":
-            raise Exception(
-                f"Failed to copy UID {uid} to {target_folder}. Result: {result}"
-            )
-
-        # Mark original as deleted
-        imap.uid("STORE", uid, "+FLAGS", r"(\Deleted)")
-        imap.expunge()
-
-        logger.info(f"Moved UID {uid} → {target_folder}")
-
-    finally:
-        try:
-            imap.logout()
-        except Exception:
-            pass
+    logger.info(f"Moved UID {uid} → {target_folder}")
 
 
 # ------------------------------------------------------------------------------
-# Ensure Folder Exists
+# Ensure folder exists
 # ------------------------------------------------------------------------------
 
-def ensure_folder_exists(imap, folder_name: str):
-    """
-    Ensure folder exists in IMAP.
+def ensure_folder_exists(conn, folder_name: str):
 
-    If not found, create it.
-
-    Works with Gmail labels as well.
-    """
-
-    status, folders = imap.list()
+    status, folders = conn.list()
 
     if status != "OK":
         raise Exception("Failed to list IMAP folders")
 
-    folder_exists = False
-
     for f in folders:
-        decoded = f.decode(errors="ignore")
+        if folder_name in f.decode():
+            return
 
-        # Gmail and others return different formats
-        if f'"{folder_name}"' in decoded or decoded.endswith(f" {folder_name}"):
-            folder_exists = True
-            break
-
-    if not folder_exists:
-        logger.info(f"Creating folder: {folder_name}")
-        create_status, _ = imap.create(folder_name)
-
-        if create_status != "OK":
-            raise Exception(f"Failed to create folder {folder_name}")
+    logger.info(f"Creating folder: {folder_name}")
+    conn.create(folder_name)

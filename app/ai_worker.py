@@ -28,7 +28,7 @@ from sqlalchemy import select
 from .config import get_settings
 from .db import make_engine, make_session_factory
 from .models import EmailMessage, EmailAccount
-from .imap_worker import move_message
+from .imap_worker import connect_imap, move_message
 
 from .classifier.rule_classifier import RuleClassifier
 from .classifier.llm_classifier import LLMClassifier
@@ -126,16 +126,26 @@ async def ai_worker_loop():
                 # 4️⃣ Move email via IMAP
                 # ------------------------------------------------------------------
                 # IMAP is blocking, so run it in thread to avoid blocking event loop
-                await asyncio.to_thread(
-                    move_message,
-                    account.imap_host,
-                    account.imap_port,
-                    account.username,
-                    account.password_encrypted,
-                    settings.inbox_folder,
-                    folder,
-                    email.imap_uid
-                )
+                def _move():
+                    conn = connect_imap(
+                        account.imap_host,
+                        account.imap_port or 993,
+                        account.username,
+                        account.password_encrypted
+                    )
+
+                    try:
+                        move_message(
+                            conn,
+                            settings.inbox_folder,
+                            folder,
+                            email.imap_uid
+                        )
+                    finally:
+                        conn.logout()
+
+
+                await asyncio.to_thread(_move)
 
                 # ------------------------------------------------------------------
                 # 5️⃣ Update DB status

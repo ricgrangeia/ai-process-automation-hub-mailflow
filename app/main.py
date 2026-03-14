@@ -12,7 +12,7 @@ from .models import EmailAccount, EmailMessage, Attachment
 from .mail_parser import parse_email
 from .storage import save_raw_email, save_attachment
 from .queue import enqueue_email_job
-from .imap_worker import fetch_unseen_raw_messages, mark_seen
+from .imap_worker import connect_imap, fetch_unseen_raw_messages, mark_seen
 from .db_init import init_db
 
 
@@ -50,17 +50,29 @@ async def process_account_once(settings, session_factory, r, acc: EmailAccount):
     password = acc.password_encrypted
 
     def _fetch():
-        return list(fetch_unseen_raw_messages(
-            host=acc.imap_host,
-            port=acc.imap_port or 993,
-            username=acc.username,
-            password=password,
-            folder=settings.inbox_folder,
-            max_n=settings.max_unseen_per_cycle
-        ))
+
+        conn = connect_imap(
+            acc.imap_host,
+            acc.imap_port or 993,
+            acc.username,
+            password
+        )
+
+        try:
+            messages = list(fetch_unseen_raw_messages(
+                conn,
+                settings.inbox_folder,
+                settings.max_unseen_per_cycle
+            ))
+
+            return messages, conn
+
+        except Exception:
+            conn.logout()
+            raise
 
     try:
-        messages = await asyncio.to_thread(_fetch)
+        messages, conn = await asyncio.to_thread(_fetch)
     except Exception as e:
         logger.error(f"[{acc.username}] IMAP connection failed: {e}")
         raise
@@ -139,14 +151,11 @@ async def process_account_once(settings, session_factory, r, acc: EmailAccount):
 
             if settings.mark_seen_after_store:
                 await asyncio.to_thread(
-                    mark_seen,
-                    acc.imap_host,
-                    acc.imap_port or 993,
-                    acc.username,
-                    password,
-                    settings.inbox_folder,
-                    uid_for_seen
-                )
+                                mark_seen,
+                                conn,
+                                settings.inbox_folder,
+                                uid_for_seen
+                            )
                 logger.info(f"[{acc.username}] Marked UID {uid} as seen")
 
 
