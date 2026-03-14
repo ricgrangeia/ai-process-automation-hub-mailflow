@@ -15,7 +15,7 @@ class Settings:
     llm_model: str
 
     # Worker behavior
-    poll_interval_sec: int = 60
+    poll_interval_sec: int = 240
     max_unseen_per_cycle: int = 20
     inbox_folder: str = "INBOX"
     mark_seen_after_store: bool = True
@@ -34,7 +34,7 @@ def get_settings() -> Settings:
         llm_model=os.environ["LLM_MODEL"],
 
         # Optional behavior config
-        poll_interval_sec=int(os.environ.get("POLL_INTERVAL_SEC", "120")),
+        poll_interval_sec=int(os.environ.get("POLL_INTERVAL_SEC", "240")),
         max_unseen_per_cycle=int(os.environ.get("MAX_UNSEEN_PER_CYCLE", "20")),
         inbox_folder=os.environ.get("INBOX_FOLDER", "INBOX"),
         mark_seen_after_store=os.environ.get("MARK_SEEN_AFTER_STORE", "true").lower() == "true",
