@@ -1,0 +1,92 @@
+
+networks:
+  mail:
+    name: mail-network
+    external: true
+  database:
+    name: 'database-network'
+    external: true
+  ai:
+    name: 'ai-network'
+    external: true
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: mailflow-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - mail
+      - database
+      - ai
+
+  email-worker:
+    build: .
+    container_name: mailflow-email-worker
+    restart: unless-stopped
+    depends_on:
+      - redis
+    command: ["python", "-m", "app.main"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      STORAGE_ROOT: ${STORAGE_ROOT}
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+    volumes:
+      - mail_storage:/storage
+    networks:
+      - mail
+      - database
+
+  api-worker:
+    build: .
+    container_name: mailflow-api-worker
+    restart: unless-stopped
+    depends_on:
+      - redis
+    command: ["python", "-m", "app.api_worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      STORAGE_ROOT: ${STORAGE_ROOT}
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+    volumes:
+      - mail_storage:/storage
+    networks:
+      - mail
+      - database
+      - ai
+
+  ai-worker:
+    build: .
+    container_name: mailflow-ai-worker
+    restart: unless-stopped
+    depends_on:
+      - redis
+    command: ["python", "-m", "app.ai_worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      STORAGE_ROOT: ${STORAGE_ROOT}
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+    volumes:
+      - mail_storage:/storage
+    networks:
+      - mail
+      - database
+      - ai
+
+volumes:
+  redis_data:
+  mail_storage:

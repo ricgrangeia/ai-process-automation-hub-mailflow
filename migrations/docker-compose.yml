@@ -1,0 +1,32 @@
+
+volumes:
+  pg_data:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pg-mailflow-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mailai
+      POSTGRES_USER: mailai
+      POSTGRES_PASSWORD: mailai_password_change
+    ports:
+      - "5433:5432"   # expõe na porta 5433 local
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mailai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  mailflow-migrations:
+    build:
+      context: ./services/mailflow_migrations
+    container_name: mailflow-migrations
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mailai:mailai_password_change@postgres:5432/mailai
+    depends_on:
+      - postgres
+    networks:
+      - internal
