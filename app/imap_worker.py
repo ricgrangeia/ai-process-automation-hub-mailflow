@@ -15,6 +15,8 @@ from async workers.
 
 import imaplib
 import logging
+import socket
+import time
 from typing import Iterable, Tuple
 
 
@@ -29,10 +31,33 @@ def _connect(host: str, port: int, username: str, password: str):
     """
     Establish secure IMAP SSL connection.
     """
-    logger.info(f"Connecting to IMAP server {host}:{port}")
-    conn = imaplib.IMAP4_SSL(host, port)
-    conn.login(username, password)
-    return conn
+
+    host = (host or "").strip()
+
+    if not host:
+        raise Exception("IMAP host not configured")
+
+    logger.info(f"Connecting to IMAP server '{host}:{port}'")
+
+    for attempt in range(3):
+        try:
+            # Check DNS resolution first
+            socket.gethostbyname(host)
+
+            conn = imaplib.IMAP4_SSL(host, port, timeout=20)
+            conn.login(username, password)
+
+            return conn
+
+        except socket.gaierror as e:
+            logger.error(f"DNS resolution failed for {host}: {e}")
+
+        except Exception as e:
+            logger.warning(f"IMAP connection attempt {attempt+1}/3 failed: {e}")
+
+        time.sleep(5)
+
+    raise Exception(f"IMAP connection failed for {host}")
 
 
 # ------------------------------------------------------------------------------
