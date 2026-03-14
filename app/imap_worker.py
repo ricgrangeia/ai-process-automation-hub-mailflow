@@ -84,20 +84,19 @@ def mark_seen(conn, folder: str, uid: str):
 # Move message
 # ------------------------------------------------------------------------------
 
-def move_message(
-    conn,
-    source_folder: str,
-    target_folder: str,
-    uid: str
-):
+def move_message(conn, source_folder: str, target_folder: str, uid: str):
 
     ensure_folder_exists(conn, target_folder)
 
-    conn.select(source_folder)
+    status, _ = conn.select(source_folder)
+
+    if status != "OK":
+        raise Exception(f"Failed to select folder {source_folder}")
 
     result = conn.uid("COPY", uid, target_folder)
 
     if result[0] != "OK":
+        logger.error(f"IMAP COPY failed: {result}")
         raise Exception(f"Failed to copy UID {uid}")
 
     conn.uid("STORE", uid, "+FLAGS", r"(\Deleted)")

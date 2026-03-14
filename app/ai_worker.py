@@ -141,6 +141,8 @@ async def ai_worker_loop():
                             folder,
                             email.imap_uid
                         )
+                    except Exception as e:
+                        logger.error(f"Move failed: {e}")    
                     finally:
                         conn.logout()
 
