@@ -89,24 +89,23 @@ Infrastructure:
 
 ### Completed
 
-- Vue frontend project initialized
-- Clean project structure
 - Worker architecture
 - Docker-based development environment
+- Check Imap Emails Accounts
+- Add Email to Redis Queue
+- AI Worker check Queue Send to LLM for AI classification
+- In Imap Account Move Email to Folder related to classification
 
 ### In Progress
 
-- Hot-reload via Vite
 - Basic application layout
 - Routing system
   - `/dashboard`
   - `/mail-accounts`
-- ESLint + Prettier configuration
 - Backend API integration
 
 ### Planned
 
-- AI email classification
 - Invoice extraction
 - Supplier detection
 - Multi-tenant support
