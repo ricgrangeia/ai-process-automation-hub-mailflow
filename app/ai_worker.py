@@ -1,29 +1,19 @@
 """
-AI Worker
-
-Responsible for:
-- Listening to Redis queue for new email jobs
-- Loading stored emails from database
-- Classifying emails using Hybrid classifier (Rules + LLM)
-- Moving email to appropriate IMAP folder
-- Updating email status in database
-
-Architecture:
-
-Email Worker (store email)  →
-Redis Queue                  →
-AI Worker (this file)        →
-IMAP move + DB update
-
-This worker runs continuously and blocks on Redis BRPOP.
+AI Worker - Multi-Tenant Email Processor
+- Listen to Redis jobs
+- Classify with Hybrid (Rules + Qwen 2.5)
+- Move IMAP folders
+- Save ROI & Telemetry with high reliability
 """
 
 import asyncio
 import json
 import logging
+import time
+from datetime import datetime, timezone
 
 import redis.asyncio as redis
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from .config import get_settings
 from .db import make_engine, make_session_factory
@@ -38,8 +28,10 @@ from .classifier.hybrid_classifier import HybridClassifier
 # ------------------------------------------------------------------------------
 # Logging Configuration
 # ------------------------------------------------------------------------------
-
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 logger = logging.getLogger("ai-worker")
 
 
@@ -49,24 +41,13 @@ logger = logging.getLogger("ai-worker")
 
 async def ai_worker_loop():
     """
-    Main infinite loop.
-
-    Steps:
-    1. Connect to DB and Redis
-    2. Wait for email job from Redis
-    3. Load email + account from DB
-    4. Classify email (Rules + LLM fallback)
-    5. Move email in IMAP
-    6. Update DB status
+    Infinite loop for processing email classification jobs.
     """
-
     settings = get_settings()
 
-    # Database
+    # Database & Redis setup
     engine = make_engine(settings.database_url)
     session_factory = make_session_factory(engine)
-
-    # Redis (job queue)
     r = redis.from_url(settings.redis_url, decode_responses=True)
 
     # Classifier setup
@@ -74,35 +55,31 @@ async def ai_worker_loop():
     llm = LLMClassifier(settings)
     classifier = HybridClassifier(rule, llm, threshold=0.75)
 
-    logger.info("AI worker started.")
+    logger.info("🚀 AI worker is active and waiting for Redis jobs...")
 
     while True:
-
         try:
-            # ------------------------------------------------------------------
-            # 1️⃣ Wait for job from Redis (blocking)
-            # ------------------------------------------------------------------
-            # BRPOP blocks until a job is available.
-            # Queue format: mailai:jobs:email
-            _, job_data = await r.brpop("mailai:jobs:email")
-
+            # 1️⃣ Wait for job from Redis (Blocking BRPOP)
+            result = await r.brpop("mailai:jobs:email")
+            if not result:
+                continue
+                
+            _, job_data = result
             job = json.loads(job_data)
             email_id = job["email_id"]
 
-            logger.info(f"Processing email job {email_id}")
+            start_time = time.time()
+            logger.info(f"📥 Processing job for Email ID: {email_id}")
 
-            # ------------------------------------------------------------------
-            # 2️⃣ Load email + account from database
-            # ------------------------------------------------------------------
+            # 2️⃣ Load metadata (Email & Account)
             async with session_factory() as session:
-
-                result = await session.execute(
+                email_result = await session.execute(
                     select(EmailMessage).where(EmailMessage.id == email_id)
                 )
-                email = result.scalar_one_or_none()
+                email = email_result.scalar_one_or_none()
 
                 if not email:
-                    logger.warning(f"Email {email_id} not found in DB.")
+                    logger.warning(f"❌ Email {email_id} not found in DB. Skipping.")
                     continue
 
                 acc_result = await session.execute(
@@ -110,22 +87,15 @@ async def ai_worker_loop():
                 )
                 account = acc_result.scalar_one()
 
-                # ------------------------------------------------------------------
-                # 3️⃣ Classify email
-                # ------------------------------------------------------------------
+                # 3️⃣ Classify email (Intelligence Layer)
+                # classification returns .folder, .confidence, .source, .prompt_tokens, etc.
                 classification = await classifier.classify(email)
-
+                
                 folder = classification.folder
+                confidence = classification.confidence
+                source = getattr(classification, 'source', 'llm') 
 
-                logger.info(
-                    f"Email {email_id} → {folder} "
-                    f"(confidence={classification.confidence})"
-                )
-
-                # ------------------------------------------------------------------
-                # 4️⃣ Move email via IMAP
-                # ------------------------------------------------------------------
-                # IMAP is blocking, so run it in thread to avoid blocking event loop
+                # 4️⃣ Move email via IMAP (Isolated in Thread)
                 def _move():
                     conn = connect_imap(
                         account.imap_host,
@@ -133,45 +103,62 @@ async def ai_worker_loop():
                         account.username,
                         account.password_encrypted
                     )
-
                     try:
-                        move_message(
-                            conn,
-                            settings.inbox_folder,
-                            folder,
-                            email.imap_uid
-                        )
+                        move_message(conn, settings.inbox_folder, folder, email.imap_uid)
+                        return True
                     except Exception as e:
-                        logger.error(f"Move failed: {e}")    
+                        logger.error(f"IMAP Error for email {email_id}: {e}")
+                        return False
                     finally:
-                        conn.logout()
+                        try:
+                            conn.logout()
+                        except:
+                            pass
 
+                move_success = await asyncio.to_thread(_move)
 
-                await asyncio.to_thread(_move)
+                # 5️⃣ PERSISTENCE: Explicit Database Update
+                # We open a dedicated update transaction to avoid row-locking issues
+                processing_time = time.time() - start_time
+                new_status = "moved" if move_success else "failed_move"
 
-                # ------------------------------------------------------------------
-                # 5️⃣ Update DB status
-                # ------------------------------------------------------------------
-                email.status = "moved"
-                await session.commit()
+                async with session_factory() as update_session:
+                    stmt = (
+                        update(EmailMessage)
+                        .where(EmailMessage.id == email_id)
+                        .values(
+                            status=new_status,
+                            classification_label=str(folder),
+                            ai_confidence=float(confidence),
+                            ai_source=str(source),
+                            processing_time_seconds=float(processing_time),
+                            processed_at=datetime.now(timezone.utc),
+                            # ROI Tracking Columns
+                            prompt_tokens=getattr(classification, 'prompt_tokens', 0),
+                            completion_tokens=getattr(classification, 'completion_tokens', 0),
+                            total_tokens=getattr(classification, 'total_tokens', 0)
+                        )
+                    )
 
-                logger.info(f"Email {email_id} moved successfully.")
+                    result = await update_session.execute(stmt)
+                    await update_session.commit()
+                    
+                    if result.rowcount > 0:
+                        logger.info(f"✅ DB Updated: ID {email_id} -> {folder} ({source})")
+                    else:
+                        logger.error(f"❌ DB Update failed: No row with ID {email_id} was affected.")
 
         except Exception as e:
-            # Never let worker crash
-            logger.exception(f"AI worker error: {e}")
-            await asyncio.sleep(2)
+            logger.exception(f"🔥 Critical Error in Worker Loop: {e}")
+            await asyncio.sleep(5) # Cooldown on failure
 
-
-# ------------------------------------------------------------------------------
-# Entrypoint
-# ------------------------------------------------------------------------------
 
 def main():
-    """
-    Entrypoint for container execution.
-    """
-    asyncio.run(ai_worker_loop())
+    """Entrypoint for the worker process."""
+    try:
+        asyncio.run(ai_worker_loop())
+    except KeyboardInterrupt:
+        logger.info("👋 Worker stopped by user.")
 
 
 if __name__ == "__main__":

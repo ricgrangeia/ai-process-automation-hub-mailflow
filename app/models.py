@@ -63,8 +63,6 @@ class EmailMessage(Base):
     account_id: Mapped[int] = mapped_column(ForeignKey("email_accounts.id"), index=True)
 
     message_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    # We reuse imap_uid to store either IMAP UID or Outlook Graph message id
     imap_uid: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
 
     from_name: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -78,6 +76,19 @@ class EmailMessage(Base):
 
     raw_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="new", index=True)
+
+    # --- TELEMETRIA IA & PERFORMANCE ---
+    classification_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ai_confidence: Mapped[float | None] = mapped_column(nullable=True)
+    ai_source: Mapped[str | None] = mapped_column(String(32), nullable=True) # 'rule' ou 'llm'
+    processing_time_seconds: Mapped[float | None] = mapped_column(nullable=True)
+    processed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # --- NOVOS CAMPOS PARA ROI (DINHEIRO POUPADO) ---
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    # ----------------------------------------
 
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

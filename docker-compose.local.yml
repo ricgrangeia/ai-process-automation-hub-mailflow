@@ -1,8 +1,5 @@
 
 networks:
-  proxy:
-    name: 'proxy-network'
-    external: true
   mail:
     name: mail-network
     external: true
@@ -36,7 +33,7 @@ services:
       - redis
     command: ["python", "-m", "app.main"]
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL2}
       REDIS_URL: ${REDIS_URL}
       STORAGE_ROOT: ${STORAGE_ROOT}
       LLM_BASE_URL: ${LLM_BASE_URL}
@@ -56,7 +53,7 @@ services:
       - redis
     command: ["python", "-m", "app.api_worker"]
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL2}
       REDIS_URL: ${REDIS_URL}
       STORAGE_ROOT: ${STORAGE_ROOT}
       LLM_BASE_URL: ${LLM_BASE_URL}
@@ -77,7 +74,7 @@ services:
       - redis
     command: ["python", "-m", "app.ai_worker"]
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL2}
       REDIS_URL: ${REDIS_URL}
       STORAGE_ROOT: ${STORAGE_ROOT}
       LLM_BASE_URL: ${LLM_BASE_URL}
@@ -89,35 +86,6 @@ services:
       - mail
       - database
       - ai
-
-  dashboard:
-    build: 
-      context: .
-      dockerfile: Dockerfile.dashboard  # Lembra-te de criar este ficheiro
-    container_name: mailflow-dashboard
-    restart: unless-stopped
-    depends_on:
-      - redis
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - DASHBOARD_USER=${DASHBOARD_USER}
-      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}
-      - LLM_MODEL=${LLM_MODEL}
-    networks:
-      - mail
-      - database
-      - proxy
-    labels:
-      - "traefik.enable=true"
-      # Roteamento HTTP (Porta 80) -> Redireciona para HTTPS se tiveres isso no Traefik
-      - "traefik.http.routers.mailflow-dash.rule=Host(`ai-mailflow-dashboard.appa8.com`)"
-      - "traefik.http.routers.mailflow-dash.entrypoints=websecure"
-      - "traefik.http.routers.mailflow-dash.tls=true"
-      - "traefik.http.routers.mailflow-dash.tls.certresolver=letsencrypt" # O nome do teu resolver no Traefik
-      # Porta interna do Streamlit
-      - "traefik.http.services.mailflow-dash.loadbalancer.server.port=8501"
-
 
 volumes:
   redis_data:

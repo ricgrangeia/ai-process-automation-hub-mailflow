@@ -41,10 +41,12 @@ Redis Queue
      │
      ▼
 AI Worker
-(LLM classification)
+(LLM classification)  -> On Imap Move mail to Classification Folders
      │
      ▼
 Database + Storage
+
+
 ```
 
 Components:
