@@ -48,6 +48,7 @@ services:
     networks:
       - mail
       - database
+      - ai
 
   api-worker:
     build: .
