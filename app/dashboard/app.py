@@ -6,9 +6,13 @@ import plotly.express as px
 from dotenv import load_dotenv
 import os
 import sys
+from pathlib import Path
 
-# Resolve paths for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+# Ensure project root (parent of app/) is first in sys.path so `app.*` imports resolve
+# regardless of where Streamlit is launched from.
+_project_root = str(Path(__file__).resolve().parent.parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
 try:
     from app.core.config import get_settings
