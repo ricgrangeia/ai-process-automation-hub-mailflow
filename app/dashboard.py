@@ -160,14 +160,21 @@ def page_email_accounts(engine, settings):
                                 {"val": not row["active"], "id": int(row["id"])},
                             )
                         st.rerun()
-                    if st.button("🗑 Delete", key=f"delete_{row['id']}"):
-                        with engine.begin() as conn:
-                            conn.execute(
-                                text("DELETE FROM email_accounts WHERE id = :id"),
-                                {"id": int(row["id"])},
-                            )
-                        st.success(f"Account {row['email']} deleted.")
-                        st.rerun()
+
+                new_pw_key = f"new_pw_{row['id']}"
+                with st.expander(f"🔑 Reset password — {row['email']}"):
+                    new_pw = st.text_input("New password", type="password", key=new_pw_key)
+                    if st.button("Save new password", key=f"save_pw_{row['id']}"):
+                        if not new_pw:
+                            st.error("Password cannot be empty.")
+                        else:
+                            encrypted_pw = encrypt_secret(settings.master_key, new_pw)
+                            with engine.begin() as conn:
+                                conn.execute(
+                                    text("UPDATE email_accounts SET password_encrypted = :pw WHERE id = :id"),
+                                    {"pw": encrypted_pw, "id": int(row["id"])},
+                                )
+                            st.success("Password updated and encrypted.")
 
     st.divider()
 
