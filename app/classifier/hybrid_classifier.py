@@ -1,3 +1,6 @@
+from .base import ClassificationResult
+
+
 class HybridClassifier:
 
     def __init__(self, rule_classifier, llm_classifier, threshold=0.75):

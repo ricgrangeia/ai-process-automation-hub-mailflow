@@ -54,7 +54,7 @@ async def process_outlook_account_once(settings, session_factory, r, acc: EmailA
         logger.warning(f"[tenant={acc.tenant_id}] No Outlook credentials found. Skipping.")
         return
 
-    client_secret = decrypt_secret("master-key-disabled", cred.client_secret_encrypted)
+    client_secret = decrypt_secret(settings.master_key, cred.client_secret_encrypted)
 
     token = await get_app_token(
         azure_tenant_id=cred.azure_tenant_id,

@@ -13,6 +13,7 @@ from .mail_parser import parse_email
 from .storage import save_raw_email, save_attachment
 from .queue import enqueue_email_job
 from .imap_worker import connect_imap, fetch_unseen_raw_messages, mark_seen
+from .crypto import decrypt_secret
 from .db_init import init_db
 
 
@@ -47,7 +48,7 @@ async def process_account_once(settings, session_factory, r, acc: EmailAccount):
 
     logger.info(f"[{acc.username}] Checking account...")
 
-    password = acc.password_encrypted
+    password = decrypt_secret(settings.master_key, acc.password_encrypted)
 
     def _fetch():
 

@@ -9,6 +9,9 @@ class Settings:
     redis_url: str
     storage_root: str
 
+    # Encryption
+    master_key: str
+
     # LLM configuration
     llm_base_url: str
     llm_api_key: str
@@ -27,6 +30,9 @@ def get_settings() -> Settings:
         database_url=os.environ["DATABASE_URL"],
         redis_url=os.environ["REDIS_URL"],
         storage_root=os.environ.get("STORAGE_ROOT", "/storage"),
+
+        # Encryption key
+        master_key=os.environ["MASTER_KEY"],
 
         # Required LLM fields
         llm_base_url=os.environ["LLM_BASE_URL"],

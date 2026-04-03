@@ -1,9 +1,11 @@
 # Variáveis
 DC = docker-compose
 DC_LOCAL = $(DC) -f docker-compose.local.yml
-APP_CONTAINER = yii2-demo-app
+AI_WORKER = ai-worker
+EMAIL_WORKER = email-worker
+DASHBOARD = dashboard
 
-.PHONY: up down restart build logs shell fresh seed-epic help restart-local
+.PHONY: up down restart build logs shell help restart-local
 
 ## up: Inicia os contentores em background
 up:
@@ -13,7 +15,7 @@ up:
 down:
 	$(DC) down
 
-## build: Reconstrói as imagens (sem cache para evitar erros de extensão)
+## build: Reconstrói as imagens (sem cache)
 build:
 	$(DC) build --no-cache
 
@@ -26,25 +28,21 @@ restart-local:
 	$(DC_LOCAL) up -d
 	@echo "Serviços locais reiniciados com sucesso!"
 
-## logs: Mostra os logs do contentor PHP em tempo real
+## logs: Mostra os logs de todos os serviços em tempo real
 logs:
-	$(DC) logs -f $(APP_CONTAINER)
+	$(DC) logs -f
 
-## shell: Entra no terminal do contentor PHP
+## logs-ai: Mostra os logs do ai-worker
+logs-ai:
+	$(DC) logs -f $(AI_WORKER)
+
+## logs-email: Mostra os logs do email-worker
+logs-email:
+	$(DC) logs -f $(EMAIL_WORKER)
+
+## shell: Entra no terminal do ai-worker
 shell:
-	docker exec -it $(APP_CONTAINER) sh
-
-## fresh: Limpa a base de dados e recria a estrutura (Migrate Fresh)
-fresh:
-	docker exec -it $(APP_CONTAINER) php yii migrate/fresh --interactive=0
-
-## seed-epic: Aplica o teu seeder do Super-Homem e Zeus
-seed-epic:
-	docker exec -it $(APP_CONTAINER) php yii migrate --interactive=0
-
-## demo-reset: O comando mestre para a tua apresentação (Limpa e Poe os dados épicos)
-demo-reset: fresh seed-epic
-	@echo "Base de dados limpa e personagens épicos inseridos com sucesso!"
+	docker exec -it $(AI_WORKER) sh
 
 ## help: Mostra esta ajuda
 help:

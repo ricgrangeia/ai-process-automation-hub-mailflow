@@ -77,7 +77,7 @@ def fetch_unseen_raw_messages(
 def mark_seen(conn, folder: str, uid: str):
 
     conn.select(folder)
-    conn.uid("store", uid, "+FLAGS", r"(\Seen")
+    conn.uid("store", uid, "+FLAGS", r"(\Seen)")
 
 
 # ------------------------------------------------------------------------------

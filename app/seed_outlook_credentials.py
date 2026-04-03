@@ -16,7 +16,7 @@ async def upsert_outlook_credential(
     engine = make_engine(settings.database_url)
     session_factory = make_session_factory(engine)
 
-    secret_enc = encrypt_secret("master-key-disabled", client_secret)
+    secret_enc = encrypt_secret(settings.master_key, client_secret)
 
     async with session_factory() as session:
         res = await session.execute(

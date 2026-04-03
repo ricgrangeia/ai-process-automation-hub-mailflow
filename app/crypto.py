@@ -8,18 +8,10 @@ def _fernet_from_master(master_key: str) -> Fernet:
     key = base64.urlsafe_b64encode(digest)
     return Fernet(key)
 
-# def decrypt_secret(master_key: str, token: str) -> str:
-#     f = _fernet_from_master(master_key)
-#     return f.decrypt(token.encode("utf-8")).decode("utf-8")
-
-# def encrypt_secret(master_key: str, plain: str) -> str:
-#     f = _fernet_from_master(master_key)
-#     return f.encrypt(plain.encode("utf-8")).decode("utf-8")
-
 def encrypt_secret(master_key: str, plain: str) -> str:
-    # encryption disabled
-    return plain
+    f = _fernet_from_master(master_key)
+    return f.encrypt(plain.encode("utf-8")).decode("utf-8")
 
 def decrypt_secret(master_key: str, token: str) -> str:
-    # encryption disabled
-    return token
+    f = _fernet_from_master(master_key)
+    return f.decrypt(token.encode("utf-8")).decode("utf-8")
