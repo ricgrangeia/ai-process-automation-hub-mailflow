@@ -27,6 +27,81 @@ st.set_page_config(page_title="AI Supervisor Ops", layout="wide", page_icon="�
 
 
 # ---------------------------------------------------------------------------
+# Mobile CSS
+# ---------------------------------------------------------------------------
+
+def _inject_mobile_css():
+    st.markdown("""
+    <style>
+    /* ── Stack columns vertically on mobile ─────────────────────────────── */
+    @media (max-width: 768px) {
+        [data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+        }
+        [data-testid="column"] {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            min-width: 100% !important;
+        }
+
+        /* ── Touch-friendly buttons ──────────────────────────────────────── */
+        [data-testid="stButton"] > button,
+        [data-testid="stFormSubmitButton"] > button {
+            min-height: 48px !important;
+            width: 100% !important;
+            font-size: 1rem !important;
+        }
+
+        /* ── Touch-friendly inputs ───────────────────────────────────────── */
+        [data-testid="stTextInput"] input,
+        [data-testid="stNumberInput"] input {
+            font-size: 1rem !important;
+            min-height: 44px !important;
+        }
+
+        /* ── Dataframe: horizontal scroll instead of overflow ────────────── */
+        [data-testid="stDataFrame"] {
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+        }
+
+        /* ── Charts: ensure full width ───────────────────────────────────── */
+        .js-plotly-plot, .plotly {
+            width: 100% !important;
+        }
+
+        /* ── Sidebar: decent width when open ────────────────────────────── */
+        [data-testid="stSidebar"] {
+            min-width: 260px !important;
+        }
+
+        /* ── Reduce page padding ─────────────────────────────────────────── */
+        .block-container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            padding-top: 1.5rem !important;
+        }
+
+        /* ── Scale down headings ─────────────────────────────────────────── */
+        h1 { font-size: 1.6rem !important; }
+        h2 { font-size: 1.3rem !important; }
+        h3 { font-size: 1.1rem !important; }
+
+        /* ── Tabs: scrollable on narrow screens ──────────────────────────── */
+        .stTabs [data-baseweb="tab-list"] {
+            overflow-x: auto !important;
+            flex-wrap: nowrap !important;
+        }
+        .stTabs [data-baseweb="tab"] {
+            min-width: max-content !important;
+            padding: 10px 16px !important;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
 # Login
 # ---------------------------------------------------------------------------
 
@@ -266,6 +341,8 @@ def page_email_accounts(engine, settings):
 # ---------------------------------------------------------------------------
 # App entry point
 # ---------------------------------------------------------------------------
+
+_inject_mobile_css()
 
 if login_screen():
 
