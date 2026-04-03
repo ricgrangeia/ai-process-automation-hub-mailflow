@@ -226,6 +226,8 @@ make shell          # Shell into ai-worker container
 - [ ] Webhook notifications on classification events
 - [ ] Docker health check endpoints
 - [ ] Audit log viewer in dashboard
+- [ ] On System reboot how not lose Redis queue
+- [ ] Add communication thru telegram to ask something about the emails if needed
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
