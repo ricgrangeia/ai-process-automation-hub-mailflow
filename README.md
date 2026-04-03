@@ -1,198 +1,225 @@
 # MailFlow Engine
 
-AI-powered email automation and classification engine.
+> Version 1.0.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
-MailFlow is part of the **Appa8 AI Process Automation Hub**, designed to process emails automatically, extract information, classify messages using AI, and trigger automated workflows.
+AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
-The system is designed with a **modular worker architecture** and can run fully **on-premise**.
-
----
-
-# Features
-
-- IMAP email ingestion
-- Email parsing (RFC822)
-- Attachment storage
-- AI classification
-- Redis-based task queue
-- PostgreSQL persistence
-- Modular worker architecture
-- Docker-based deployment
+MailFlow ingests emails from IMAP or Microsoft 365 / Outlook, classifies them using a hybrid AI engine (rules + local LLM), moves them to the correct folder automatically, and provides a web dashboard for supervision and account management.
 
 ---
 
-# Architecture
+## What's Working
 
-The system is composed of multiple independent workers:
+| Feature | Status |
+|---|---|
+| IMAP email ingestion | ✅ |
+| Microsoft Graph / Outlook ingestion | ✅ |
+| RFC822 email parsing + attachment storage | ✅ |
+| Hybrid classifier — rule-based + LLM (Qwen 2.5) | ✅ |
+| Redis job queue (LPUSH / BRPOP) | ✅ |
+| Auto-move emails to classified IMAP folders | ✅ |
+| PostgreSQL persistence (async SQLAlchemy 2.0) | ✅ |
+| ROI telemetry — token counts, processing time | ✅ |
+| Fernet encryption for stored credentials | ✅ |
+| Streamlit dashboard — KPIs, charts, audit log | ✅ |
+| Email Accounts UI — add / toggle / delete | ✅ |
+| Docker Compose — dev + production (Traefik/HTTPS) | ✅ |
+| GitHub Actions → Portainer auto-deploy | ✅ |
+
+---
+
+## Architecture
 
 ```
-Email Inbox
-     │
-     ▼
-Email Worker
-(fetch IMAP messages)
-     │
-     ▼
-Parser
-(email + attachments)
-     │
-     ▼
-Redis Queue
-     │
-     ▼
-AI Worker
-(LLM classification)  -> On Imap Move mail to Classification Folders
-     │
-     ▼
-Database + Storage
-
-
+IMAP / Outlook
+      │
+      ▼
+ email-worker / api-worker
+ (fetch unseen messages, parse RFC822)
+      │
+      ▼
+  Redis Queue
+      │
+      ▼
+   ai-worker
+   ├─ Rule Classifier  (fast, deterministic)
+   └─ LLM Classifier   (Qwen 2.5 · OpenAI-compatible)
+      │
+      ├─▶ Move email to classified IMAP folder
+      └─▶ Store metadata + telemetry in PostgreSQL
+                        │
+                        ▼
+                   Dashboard
+              (Streamlit · port 8501)
 ```
 
-Components:
+### Services
 
-| Service | Description |
-|-------|-------------|
-| email-worker | Fetches emails from IMAP |
-| api-worker | Handles API-triggered processing |
-| ai-worker | Runs AI classification |
-| Redis | Task queue |
-| PostgreSQL | Persistence layer |
-| Storage | Attachment and email storage |
-
----
-
-# Tech Stack
-
-Backend:
-
-- Python
-- FastAPI
-- AsyncIO
-- SQLAlchemy
-- PostgreSQL
-- Redis
-
-AI:
-
-- Local LLM support
-- OpenAI-compatible APIs
-- Qwen models
-
-Infrastructure:
-
-- Docker
-- Docker Compose
-- Linux
+| Service | Role |
+|---|---|
+| `email-worker` | Polls IMAP, parses emails, enqueues jobs |
+| `api-worker` | Polls Microsoft Graph (Outlook), enqueues jobs |
+| `ai-worker` | Classifies emails, moves to folder, records telemetry |
+| `dashboard` | Streamlit UI — supervision + account management |
+| `redis` | Job queue |
+| `postgres` | Persistence (external, via `database-network`) |
 
 ---
 
-# Project Status
+## Classification Categories
 
-### Completed
-
-- Worker architecture
-- Docker-based development environment
-- Check Imap Emails Accounts
-- Add Email to Redis Queue
-- AI Worker check Queue Send to LLM for AI classification
-- In Imap Account Move Email to Folder related to classification
-
-### In Progress
-
-- Basic application layout
-- Routing system
-  - `/dashboard`
-  - `/mail-accounts`
-- Backend API integration
-
-### Planned
-
-- Invoice extraction
-- Supplier detection
-- Multi-tenant support
-- Workflow automation
-- Dashboard and analytics
+| Label | Trigger |
+|---|---|
+| `Invoices` | Rule: invoice, fatura, recibo keywords |
+| `Work` | LLM |
+| `Personal` | LLM |
+| `Marketing` | Rule: unsubscribe, newsletter |
+| `Spam` | LLM |
+| `Other` | LLM default |
+| `NeedsReview` | LLM confidence below threshold (0.75) |
 
 ---
 
-# Installation
+## Quick Start
 
-Clone the repository:
+**1. Clone and configure**
 
 ```bash
-git clone https://github.com/yourusername/mailflow-engine.git
-cd mailflow-engine
-```
-
-Create environment file:
-
-```bash
+git clone https://github.com/ricgrangeia/ai-process-automation-hub-mailflow.git
+cd ai-process-automation-hub-mailflow
 cp .env.example .env
 ```
 
-Edit `.env` with your configuration.
-
-Start services:
+**2. Generate a master key for credential encryption**
 
 ```bash
-docker compose up -d
+python -c "import secrets; print(secrets.token_hex(32))"
 ```
+
+Paste the output into `.env` as `MASTER_KEY=...`
+
+**3. Fill in the remaining `.env` values** (see [Configuration](#configuration))
+
+**4. Start services**
+
+```bash
+make up
+# or: docker compose up -d
+```
+
+**5. Open the dashboard**
+
+- Local: `http://localhost:8501`
+- Production: configured via Traefik label in `docker-compose.yml`
 
 ---
 
-# Environment Configuration
+## Configuration
 
-Example `.env.example`:
-
-```
+```env
+# Infrastructure
 DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/mailaiworker
 REDIS_URL=redis://redis:6379/0
 STORAGE_ROOT=/storage
+
+# Credential encryption (required — generate with secrets.token_hex(32))
+MASTER_KEY=change-me-to-a-random-secret
+
+# LLM (OpenAI-compatible endpoint)
 LLM_BASE_URL=http://fastapi:8000/v1
 LLM_API_KEY=your-api-key
 LLM_MODEL=qwen2.5-7b-instruct
+
+# Worker behaviour (optional)
+POLL_INTERVAL_SEC=240
+MAX_UNSEEN_PER_CYCLE=20
+INBOX_FOLDER=INBOX
+MARK_SEEN_AFTER_STORE=true
+
+# Dashboard credentials
+DASHBOARD_USER=admin
+DASHBOARD_PASSWORD=mudar123
 ```
 
 ---
 
-# Development
+## Dashboard
 
-Run workers locally:
+After login, two pages are available from the sidebar:
 
+**📊 Dashboard**
+- Total emails processed, average AI confidence, average processing time
+- Pie chart — classification distribution
+- Bar chart — rule vs LLM decisions
+- Audit table — last 200 processed emails
+
+**✉️ Email Accounts**
+- List all configured accounts with active/inactive status
+- Add IMAP account (password encrypted at rest with Fernet)
+- Add Outlook / Microsoft 365 account
+- Activate / deactivate / delete accounts
+
+---
+
+## Development
+
+Run workers individually:
+
+```bash
+python -m app.main          # email-worker (IMAP)
+python -m app.api_worker    # api-worker (Outlook)
+python -m app.ai_worker     # ai-worker (classification)
+streamlit run app/dashboard.py  # dashboard
 ```
-python -m app.main
-python -m app.api_worker
-python -m app.ai_worker
+
+Useful Makefile commands:
+
+```bash
+make up             # Start all services
+make down           # Stop all services
+make build          # Rebuild images (no cache)
+make restart        # down + up
+make restart-local  # Local compose down + up
+make logs           # Tail all service logs
+make logs-ai        # Tail ai-worker logs
+make shell          # Shell into ai-worker container
 ```
 
 ---
 
-# Future Vision
+## Roadmap
 
-MailFlow is intended to become a **modular AI automation platform for business workflows**, including:
+- [ ] Alembic database migrations
+- [ ] Invoice / document OCR extraction
+- [ ] Supplier detection and matching
+- [ ] REST API (FastAPI) for external integrations
+- [ ] Webhook notifications on classification events
+- [ ] Docker health check endpoints
+- [ ] Audit log viewer in dashboard
 
-- email automation
-- document processing
-- invoice recognition
-- supplier management
-- internal knowledge assistants
-
-The system is designed to support **on-premise deployments for companies that require full data privacy**.
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 ---
 
-# Author
+## Tech Stack
 
-Ricardo Grangeia  
-Senior Software Engineer  
-Portugal
+- **Python 3.12** — AsyncIO, SQLAlchemy 2.0, httpx, tenacity
+- **PostgreSQL** — asyncpg (workers) + psycopg2 (dashboard)
+- **Redis** — job queue
+- **Streamlit** + Plotly + Pandas — dashboard
+- **Cryptography (Fernet)** — credential encryption
+- **Docker Compose** + Traefik — deployment
+- **GitHub Actions** + Portainer — CI/CD
 
-Website  
+---
+
+## Author
+
+Ricardo Grangeia — Senior Software Engineer — Portugal
 <https://ricardo.grangeia.pt>
 
 ---
 
-# License
+## License
 
 MIT License
