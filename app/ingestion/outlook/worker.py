@@ -5,15 +5,15 @@ from sqlalchemy import select
 
 import redis.asyncio as redis
 
-from .config import get_settings
-from .db import make_engine, make_session_factory
-from .db_init import init_db
-from .models import EmailAccount, EmailMessage, ApiCredential
-from .storage import save_raw_email
-from .queue import enqueue_email_job
-from .crypto import decrypt_secret
-
-from .outlook_graph import get_app_token, list_unread_inbox_messages, mark_message_read
+from app.core.config import get_settings
+from app.core.database.engine import make_engine, make_session_factory
+from app.core.database.init import init_db
+from app.core.crypto import decrypt_secret
+from app.accounts.models import EmailAccount, ApiCredential
+from app.messages.models import EmailMessage
+from app.messages.storage import save_raw_email
+from app.processing.queue import enqueue_email_job
+from app.ingestion.outlook.client import get_app_token, list_unread_inbox_messages, mark_message_read
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("api-worker")

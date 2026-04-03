@@ -6,15 +6,16 @@ import redis.asyncio as redis
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
-from .config import get_settings
-from .db import make_engine, make_session_factory
-from .models import EmailAccount, EmailMessage, Attachment
-from .mail_parser import parse_email
-from .storage import save_raw_email, save_attachment
-from .queue import enqueue_email_job
-from .imap_worker import connect_imap, fetch_unseen_raw_messages, mark_seen
-from .crypto import decrypt_secret
-from .db_init import init_db
+from app.core.config import get_settings
+from app.core.database.engine import make_engine, make_session_factory
+from app.core.database.init import init_db
+from app.core.crypto import decrypt_secret
+from app.accounts.models import EmailAccount
+from app.messages.models import EmailMessage, Attachment
+from app.messages.storage import save_raw_email, save_attachment
+from app.processing.queue import enqueue_email_job
+from app.ingestion.parser import parse_email
+from app.ingestion.imap.client import connect_imap, fetch_unseen_raw_messages, mark_seen
 
 
 # -----------------------------
@@ -183,7 +184,7 @@ async def worker_loop():
                 res = await session.execute(
                     select(EmailAccount).where(
                         EmailAccount.active == True,
-                        EmailAccount.provider == "imap"  # 🔥 FIX HERE
+                        EmailAccount.provider == "imap"
                     )
                 )
                 accounts = list(res.scalars().all())

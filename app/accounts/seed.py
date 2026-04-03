@@ -1,10 +1,11 @@
 import asyncio
 from sqlalchemy import select
 
-from .db import make_engine, make_session_factory
-from .models import ApiCredential
-from .crypto import encrypt_secret
-from .config import get_settings
+from app.core.database.engine import make_engine, make_session_factory
+from app.core.crypto import encrypt_secret
+from app.core.config import get_settings
+from app.accounts.models import ApiCredential
+
 
 async def upsert_outlook_credential(
     tenant_id: int,

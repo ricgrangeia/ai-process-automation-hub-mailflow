@@ -17,4 +17,4 @@ COPY . .
 EXPOSE 8501
 
 # Forçar o streamlit a rodar na porta correta e aceitar conexões externas
-CMD ["streamlit", "run", "app/dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "app/dashboard/app.py", "--server.port=8501", "--server.address=0.0.0.0"]

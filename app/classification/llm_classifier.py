@@ -1,7 +1,7 @@
 import json
 import logging
 import httpx
-from .base import ClassificationResult
+from .contracts import ClassificationResult
 
 logger = logging.getLogger("llm-classifier")
 

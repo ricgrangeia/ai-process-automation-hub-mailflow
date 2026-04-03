@@ -34,7 +34,7 @@ services:
     restart: unless-stopped
     depends_on:
       - redis
-    command: ["python", "-m", "app.main"]
+    command: ["python", "-m", "app.ingestion.imap.worker"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
@@ -56,7 +56,7 @@ services:
     restart: unless-stopped
     depends_on:
       - redis
-    command: ["python", "-m", "app.api_worker"]
+    command: ["python", "-m", "app.ingestion.outlook.worker"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
@@ -78,7 +78,7 @@ services:
     restart: unless-stopped
     depends_on:
       - redis
-    command: ["python", "-m", "app.ai_worker"]
+    command: ["python", "-m", "app.processing.worker"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}

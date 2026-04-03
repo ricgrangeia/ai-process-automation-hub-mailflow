@@ -8,13 +8,13 @@ import os
 import sys
 
 # Resolve paths for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 try:
-    from app.config import get_settings
-    from app.crypto import encrypt_secret, decrypt_secret
+    from app.core.config import get_settings
+    from app.core.crypto import encrypt_secret, decrypt_secret
 except ImportError:
-    st.error("❌ Erro: Módulo 'app.config' não encontrado. Corre da raiz do projeto.")
+    st.error("❌ Erro: Módulo 'app.core.config' não encontrado. Corre da raiz do projeto.")
     st.stop()
 
 load_dotenv()

@@ -34,6 +34,30 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [1.1.0] — 2026-04-04
+
+### Changed
+
+- Restructured `app/` from a flat layout into a modular domain architecture
+- Each domain (`accounts`, `messages`, `classification`, `ingestion`, `processing`, `dashboard`) is now a self-contained package — changes to one domain no longer require reading others
+- Shared kernel extracted to `app/core/` (config, crypto, database engine, SQLAlchemy Base)
+- `app/models.py` split into `app/accounts/models.py` and `app/messages/models.py`
+- `app/classifier/` moved to `app/classification/` with `base.py` renamed to `contracts.py`
+- `app/imap_worker.py` → `app/ingestion/imap/client.py`
+- `app/main.py` → `app/ingestion/imap/worker.py`
+- `app/outlook_graph.py` → `app/ingestion/outlook/client.py`
+- `app/api_worker.py` → `app/ingestion/outlook/worker.py`
+- `app/mail_parser.py` → `app/ingestion/parser.py`
+- `app/ai_worker.py` → `app/processing/worker.py`
+- `app/queue.py` → `app/processing/queue.py`
+- `app/storage.py` → `app/messages/storage.py`
+- `app/dashboard.py` → `app/dashboard/app.py`
+- `app/seed_outlook_credentials.py` → `app/accounts/seed.py`
+- Docker Compose and Dockerfile entry points updated to new module paths
+- All imports converted from relative to absolute (`app.domain.module`)
+
+---
+
 ## [Unreleased]
 
 ### Planned

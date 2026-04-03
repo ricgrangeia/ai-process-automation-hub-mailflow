@@ -64,6 +64,36 @@ IMAP / Outlook
 | `redis` | Job queue |
 | `postgres` | Persistence (external, via `database-network`) |
 
+### Code Structure
+
+The codebase is organised as a **modular monolith** — each domain is a self-contained Python package. To change or extend a domain you only need to read that domain's folder.
+
+```text
+app/
+├── core/                   # Shared kernel — config, crypto, database engine
+│   └── database/           # Base ORM class, async engine, table init
+├── accounts/               # Email accounts & API credentials (models + seed)
+├── messages/               # Email messages, attachments, disk storage
+├── classification/         # Classifiers: rule, LLM (Qwen 2.5), hybrid
+│   └── contracts.py        # ClassificationResult — the shared boundary type
+├── ingestion/
+│   ├── parser.py           # RFC822 email parser (shared by all sources)
+│   ├── imap/               # IMAP client + polling worker
+│   └── outlook/            # Microsoft Graph client + polling worker
+├── processing/             # Redis queue interface + AI worker loop
+└── dashboard/              # Streamlit UI
+```
+
+**Dependency rule:** arrows flow inward toward `core/`. No domain imports another domain's internals — only its public `__init__.py` or `contracts.py`.
+
+| To add... | You only touch... |
+|---|---|
+| New email source (e.g. Gmail) | `ingestion/gmail/` |
+| New classifier | `classification/` |
+| New processing action (webhook, forward) | `processing/` |
+| New dashboard page | `dashboard/` |
+| New account type | `accounts/` |
+
 ---
 
 ## Classification Categories
@@ -166,10 +196,10 @@ After login, two pages are available from the sidebar:
 Run workers individually:
 
 ```bash
-python -m app.main          # email-worker (IMAP)
-python -m app.api_worker    # api-worker (Outlook)
-python -m app.ai_worker     # ai-worker (classification)
-streamlit run app/dashboard.py  # dashboard
+python -m app.ingestion.imap.worker      # email-worker (IMAP)
+python -m app.ingestion.outlook.worker   # api-worker (Outlook)
+python -m app.processing.worker          # ai-worker (classification)
+streamlit run app/dashboard/app.py       # dashboard
 ```
 
 Useful Makefile commands:

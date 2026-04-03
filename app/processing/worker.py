@@ -15,14 +15,14 @@ from datetime import datetime, timezone
 import redis.asyncio as redis
 from sqlalchemy import select, update
 
-from .config import get_settings
-from .db import make_engine, make_session_factory
-from .models import EmailMessage, EmailAccount
-from .imap_worker import connect_imap, move_message
-
-from .classifier.rule_classifier import RuleClassifier
-from .classifier.llm_classifier import LLMClassifier
-from .classifier.hybrid_classifier import HybridClassifier
+from app.core.config import get_settings
+from app.core.database.engine import make_engine, make_session_factory
+from app.accounts.models import EmailAccount
+from app.messages.models import EmailMessage
+from app.ingestion.imap.client import connect_imap, move_message
+from app.classification.rule_classifier import RuleClassifier
+from app.classification.llm_classifier import LLMClassifier
+from app.classification.hybrid_classifier import HybridClassifier
 
 
 # ------------------------------------------------------------------------------
@@ -63,7 +63,7 @@ async def ai_worker_loop():
             result = await r.brpop("mailai:jobs:email")
             if not result:
                 continue
-                
+
             _, job_data = result
             job = json.loads(job_data)
             email_id = job["email_id"]
@@ -90,10 +90,10 @@ async def ai_worker_loop():
                 # 3️⃣ Classify email (Intelligence Layer)
                 # classification returns .folder, .confidence, .source, .prompt_tokens, etc.
                 classification = await classifier.classify(email)
-                
+
                 folder = classification.folder
                 confidence = classification.confidence
-                source = getattr(classification, 'source', 'llm') 
+                source = getattr(classification, 'source', 'llm')
 
                 # 4️⃣ Move email via IMAP (Isolated in Thread)
                 def _move():
@@ -142,7 +142,7 @@ async def ai_worker_loop():
 
                     result = await update_session.execute(stmt)
                     await update_session.commit()
-                    
+
                     if result.rowcount > 0:
                         logger.info(f"✅ DB Updated: ID {email_id} -> {folder} ({source})")
                     else:
@@ -150,7 +150,7 @@ async def ai_worker_loop():
 
         except Exception as e:
             logger.exception(f"🔥 Critical Error in Worker Loop: {e}")
-            await asyncio.sleep(5) # Cooldown on failure
+            await asyncio.sleep(5)  # Cooldown on failure
 
 
 def main():
