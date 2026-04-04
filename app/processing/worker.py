@@ -16,6 +16,7 @@ import redis.asyncio as redis
 from sqlalchemy import select, update
 
 from app.core.config import get_settings
+from app.core.crypto import decrypt_secret
 from app.core.database.engine import make_engine, make_session_factory
 from app.accounts.models import EmailAccount
 from app.messages.models import EmailMessage
@@ -96,12 +97,14 @@ async def ai_worker_loop():
                 source = getattr(classification, 'source', 'llm')
 
                 # 4️⃣ Move email via IMAP (Isolated in Thread)
+                imap_password = decrypt_secret(settings.master_key, account.password_encrypted)
+
                 def _move():
                     conn = connect_imap(
                         account.imap_host,
                         account.imap_port or 993,
                         account.username,
-                        account.password_encrypted
+                        imap_password
                     )
                     try:
                         move_message(conn, settings.inbox_folder, folder, email.imap_uid)
