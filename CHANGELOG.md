@@ -58,6 +58,24 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [1.1.1] — 2026-04-04
+
+### Fixed
+
+- `processing/worker.py`: IMAP move was using `account.password_encrypted` directly instead of decrypting it — caused `AUTHENTICATIONFAILED` on every classification job
+- `processing/worker.py`: added startup recovery — on boot, re-enqueues emails stuck with `status='new'` older than 2 minutes, self-healing after crashes or redeploys
+- `processing/worker.py`: added in-flight retry — failed jobs are re-queued up to 3 times before being marked `failed_retries`; queue key centralised to `QUEUE_KEY` constant
+- `processing/worker.py`: Redis queue key was hardcoded in three places — now imported from `processing/queue.py`
+- `ingestion/parser.py`: email subjects stored as raw RFC 2047 encoded-word strings (`=?UTF-8?Q?...?=`) — now decoded at parse time using `email.header.decode_header`
+- `dashboard/app.py`: RFC 2047 encoded subjects already in the DB are decoded before display
+- `dashboard/app.py`: confidence column now displays as percentage (`95%`, `100%`) instead of raw float (`0.95`, `1`)
+- `dashboard/app.py`: `sys.path` injection replaced with `Path(__file__).resolve()` and `insert(0, ...)` — fixes "module not found" on dashboard startup
+- `docker-compose.yml` / `docker-compose.local.yml`: Redis AOF persistence enabled (`--appendonly yes`) — queue jobs now survive container restarts and reboots
+- `docker-compose.local.yml`: stale module entry points updated to new modular paths
+- `dashboard/app.py`: added responsive mobile CSS — columns stack vertically, touch targets enlarged, tables horizontally scrollable on screens ≤ 768px
+
+---
+
 ## [Unreleased]
 
 ### Planned
