@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import redis.asyncio as redis
 from sqlalchemy import select, update
@@ -24,6 +24,7 @@ from app.ingestion.imap.client import connect_imap, move_message
 from app.classification.rule_classifier import RuleClassifier
 from app.classification.llm_classifier import LLMClassifier
 from app.classification.hybrid_classifier import HybridClassifier
+from app.processing.queue import QUEUE_KEY
 
 
 # ------------------------------------------------------------------------------
@@ -34,6 +35,37 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 logger = logging.getLogger("ai-worker")
+
+MAX_RETRIES = 3  # max times a job is re-queued before being marked failed_retries
+
+
+# ------------------------------------------------------------------------------
+# Startup Recovery
+# Re-enqueue emails stuck with status='new' that are older than the grace period.
+# Covers crashes, bug-fix redeploys, and container restarts.
+# ------------------------------------------------------------------------------
+
+async def recover_stuck_emails(r, session_factory, grace_minutes: int = 2):
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=grace_minutes)
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(EmailMessage.id, EmailMessage.tenant_id).where(
+                EmailMessage.status == "new",
+                EmailMessage.created_at < cutoff,
+            )
+        )
+        stuck = result.all()
+
+    if not stuck:
+        logger.info("✅ No stuck emails found on startup.")
+        return
+
+    logger.info(f"♻️  Recovering {len(stuck)} stuck email(s) from before last restart...")
+    for email_id, tenant_id in stuck:
+        payload = json.dumps({"tenant_id": tenant_id, "email_id": email_id, "type": "process_email", "retries": 0})
+        await r.lpush(QUEUE_KEY, payload)
+        logger.info(f"   ↩️  Re-queued email id={email_id}")
 
 
 # ------------------------------------------------------------------------------
@@ -58,19 +90,24 @@ async def ai_worker_loop():
 
     logger.info("🚀 AI worker is active and waiting for Redis jobs...")
 
+    # Re-enqueue any emails that were left unprocessed from a previous run
+    await recover_stuck_emails(r, session_factory)
+
     while True:
+        job = None
         try:
             # 1️⃣ Wait for job from Redis (Blocking BRPOP)
-            result = await r.brpop("mailai:jobs:email")
+            result = await r.brpop(QUEUE_KEY)
             if not result:
                 continue
 
             _, job_data = result
             job = json.loads(job_data)
             email_id = job["email_id"]
+            retries = job.get("retries", 0)
 
             start_time = time.time()
-            logger.info(f"📥 Processing job for Email ID: {email_id}")
+            logger.info(f"📥 Processing job for Email ID: {email_id} (attempt {retries + 1}/{MAX_RETRIES})")
 
             # 2️⃣ Load metadata (Email & Account)
             async with session_factory() as session:
@@ -153,6 +190,24 @@ async def ai_worker_loop():
 
         except Exception as e:
             logger.exception(f"🔥 Critical Error in Worker Loop: {e}")
+
+            # Re-queue the job if it hasn't exceeded the retry limit
+            if job is not None:
+                retries = job.get("retries", 0) + 1
+                if retries < MAX_RETRIES:
+                    job["retries"] = retries
+                    await r.lpush(QUEUE_KEY, json.dumps(job))
+                    logger.warning(f"↩️  Re-queued email id={job.get('email_id')} (retry {retries}/{MAX_RETRIES})")
+                else:
+                    logger.error(f"🚫 Email id={job.get('email_id')} exceeded {MAX_RETRIES} retries — marking as failed_retries")
+                    async with session_factory() as s:
+                        await s.execute(
+                            update(EmailMessage)
+                            .where(EmailMessage.id == job["email_id"])
+                            .values(status="failed_retries")
+                        )
+                        await s.commit()
+
             await asyncio.sleep(5)  # Cooldown on failure
 
 
