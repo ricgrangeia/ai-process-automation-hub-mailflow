@@ -191,7 +191,15 @@ def page_dashboard(engine, settings):
             )
 
         st.subheader("📋 Registos Recentes")
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        df["Confiança"] = (df["Confiança"] * 100).round(0).astype(int)
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Confiança": st.column_config.NumberColumn(format="%d%%"),
+            },
+        )
 
     except Exception as e:
         st.error(f"❌ Erro na Base de Dados: {e}")
