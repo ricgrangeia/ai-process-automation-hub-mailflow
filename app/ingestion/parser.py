@@ -1,8 +1,18 @@
 import email
 import hashlib
+from email.header import decode_header, make_header
 from email.message import Message
 from email.utils import parseaddr, parsedate_to_datetime
 from bs4 import BeautifulSoup
+
+
+def _decode_header(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        return str(make_header(decode_header(value)))
+    except Exception:
+        return value
 
 def _get_text_from_html(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
@@ -12,7 +22,7 @@ def parse_email(raw_bytes: bytes) -> dict:
     msg: Message = email.message_from_bytes(raw_bytes)
 
     from_name, from_address = parseaddr(msg.get("From", ""))
-    subject = msg.get("Subject", "")
+    subject = _decode_header(msg.get("Subject", ""))
     message_id = msg.get("Message-Id")
     date_hdr = msg.get("Date")
     received_at = None

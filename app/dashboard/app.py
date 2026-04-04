@@ -4,9 +4,20 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 import plotly.express as px
 from dotenv import load_dotenv
+from email.header import decode_header, make_header
 import os
 import sys
 from pathlib import Path
+
+
+def _decode_mime_header(value):
+    """Decode RFC 2047 encoded-word subjects (=?UTF-8?Q?...?=) already stored in DB."""
+    if not value or "=?" not in str(value):
+        return value
+    try:
+        return str(make_header(decode_header(value)))
+    except Exception:
+        return value
 
 # Ensure project root (parent of app/) is first in sys.path so `app.*` imports resolve
 # regardless of where Streamlit is launched from.
@@ -191,6 +202,7 @@ def page_dashboard(engine, settings):
             )
 
         st.subheader("📋 Registos Recentes")
+        df["Assunto"] = df["Assunto"].apply(_decode_mime_header)
         df["Confiança"] = (df["Confiança"] * 100).round(0).astype(int)
         st.dataframe(
             df,
