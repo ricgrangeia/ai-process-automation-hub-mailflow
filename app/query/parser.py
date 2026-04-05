@@ -21,7 +21,7 @@ from datetime import date
 logger = logging.getLogger("query.parser")
 
 _SYSTEM_PROMPT = """
-You are a strict email search filter extractor. Given a natural language query, return ONLY valid JSON with these fields:
+You are a strict email search filter extractor. Given a natural language query about emails, return ONLY valid JSON with these fields:
 
 {
   "sender_domain": "domain.com or null",
@@ -35,9 +35,13 @@ You are a strict email search filter extractor. Given a natural language query, 
 Rules:
 - If a month is mentioned without a year, assume the current year.
 - If only a month+year is mentioned, set date_from=first day, date_to=last day of that month.
-- "invoices" or "faturas" → folder=Invoices
+- "this year" → date_from=YYYY-01-01, date_to=YYYY-12-31 (use current year).
 - "last month" → compute the correct date range.
-- Return ONLY the JSON object, no explanation.
+- "this month" → date_from=first day of current month, date_to=last day of current month.
+- "invoices" or "faturas" → folder=Invoices.
+- "marketing" → folder=Marketing.
+- "how many", "count", "show me", "list" → treat as a search query and extract the relevant filters.
+- Return ONLY the JSON object, no explanation, no markdown.
 """
 
 
@@ -83,4 +87,4 @@ async def parse_query(user_message: str, settings) -> dict:
 
     except Exception as e:
         logger.error(f"Query parsing failed: {e}")
-        return {}
+        return None

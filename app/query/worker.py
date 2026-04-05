@@ -82,10 +82,10 @@ async def _handle_search(job: dict, settings, session_factory, r) -> None:
     logger.info(f"Processing query: '{query_text}' for chat_id={chat_id}")
 
     filters = await parse_query(query_text, settings)
-    if not filters:
+    if filters is None:
         await _telegram_send(
             settings.telegram_bot_token, chat_id,
-            "⚠️ Could not understand the query. Try again with more details."
+            "⚠️ Search service is unavailable right now. Check that the LLM is running and reachable."
         )
         return
 
