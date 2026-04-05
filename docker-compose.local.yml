@@ -78,11 +78,33 @@ services:
       DATABASE_URL: ${DATABASE_URL2}
       REDIS_URL: ${REDIS_URL}
       STORAGE_ROOT: ${STORAGE_ROOT}
+      MASTER_KEY: ${MASTER_KEY}
       LLM_BASE_URL: ${LLM_BASE_URL}
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
     volumes:
       - mail_storage:/storage
+    networks:
+      - mail
+      - database
+      - ai
+
+  telegram-bot:
+    build: .
+    container_name: mailflow-telegram-bot
+    restart: unless-stopped
+    depends_on:
+      - redis
+    command: ["python", "-m", "app.telegram.bot"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL2}
+      REDIS_URL: ${REDIS_URL}
+      STORAGE_ROOT: ${STORAGE_ROOT}
+      MASTER_KEY: ${MASTER_KEY}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
     networks:
       - mail
       - database

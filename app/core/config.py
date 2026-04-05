@@ -23,6 +23,10 @@ class Settings:
     inbox_folder: str = "INBOX"
     mark_seen_after_store: bool = True
 
+    # Telegram (optional — leave empty to disable)
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
 
 def get_settings() -> Settings:
     return Settings(
@@ -44,4 +48,8 @@ def get_settings() -> Settings:
         max_unseen_per_cycle=int(os.environ.get("MAX_UNSEEN_PER_CYCLE", "20")),
         inbox_folder=os.environ.get("INBOX_FOLDER", "INBOX"),
         mark_seen_after_store=os.environ.get("MARK_SEEN_AFTER_STORE", "true").lower() == "true",
+
+        # Telegram
+        telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
     )

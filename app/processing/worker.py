@@ -25,6 +25,7 @@ from app.classification.rule_classifier import RuleClassifier
 from app.classification.llm_classifier import LLMClassifier
 from app.classification.hybrid_classifier import HybridClassifier
 from app.processing.queue import QUEUE_KEY
+from app.telegram.notifications import send_review_request, send_worker_started
 
 
 # ------------------------------------------------------------------------------
@@ -51,7 +52,7 @@ async def recover_stuck_emails(r, session_factory, grace_minutes: int = 2):
     async with session_factory() as session:
         result = await session.execute(
             select(EmailMessage.id, EmailMessage.tenant_id).where(
-                EmailMessage.status == "new",
+                EmailMessage.status == "new",  # pending_review is intentionally excluded
                 EmailMessage.created_at < cutoff,
             )
         )
@@ -93,6 +94,9 @@ async def ai_worker_loop():
     # Re-enqueue any emails that were left unprocessed from a previous run
     await recover_stuck_emails(r, session_factory)
 
+    if settings.telegram_bot_token and settings.telegram_chat_id:
+        await send_worker_started(settings.telegram_bot_token, settings.telegram_chat_id)
+
     while True:
         job = None
         try:
@@ -126,14 +130,41 @@ async def ai_worker_loop():
                 account = acc_result.scalar_one()
 
                 # 3️⃣ Classify email (Intelligence Layer)
-                # classification returns .folder, .confidence, .source, .prompt_tokens, etc.
                 classification = await classifier.classify(email)
 
                 folder = classification.folder
                 confidence = classification.confidence
                 source = getattr(classification, 'source', 'llm')
 
-                # 4️⃣ Move email via IMAP (Isolated in Thread)
+                # 4️⃣ NeedsReview → delegate to human via Telegram
+                if folder == "NeedsReview" and settings.telegram_bot_token and settings.telegram_chat_id:
+                    sent = await send_review_request(
+                        bot_token=settings.telegram_bot_token,
+                        chat_id=settings.telegram_chat_id,
+                        email_id=email_id,
+                        subject=email.subject,
+                        sender=email.from_address,
+                        confidence=confidence,
+                    )
+                    if sent:
+                        async with session_factory() as s:
+                            await s.execute(
+                                update(EmailMessage)
+                                .where(EmailMessage.id == email_id)
+                                .values(
+                                    status="pending_review",
+                                    ai_confidence=float(confidence),
+                                    ai_source=str(source),
+                                    prompt_tokens=getattr(classification, 'prompt_tokens', 0),
+                                    completion_tokens=getattr(classification, 'completion_tokens', 0),
+                                    total_tokens=getattr(classification, 'total_tokens', 0),
+                                )
+                            )
+                            await s.commit()
+                        logger.info(f"📨 Email {email_id} sent to Telegram for review.")
+                        continue
+
+                # 5️⃣ Move email via IMAP (Isolated in Thread)
                 imap_password = decrypt_secret(settings.master_key, account.password_encrypted)
 
                 def _move():
@@ -157,8 +188,7 @@ async def ai_worker_loop():
 
                 move_success = await asyncio.to_thread(_move)
 
-                # 5️⃣ PERSISTENCE: Explicit Database Update
-                # We open a dedicated update transaction to avoid row-locking issues
+                # 6️⃣ PERSISTENCE: Explicit Database Update
                 processing_time = time.time() - start_time
                 new_status = "moved" if move_success else "failed_move"
 
@@ -173,7 +203,6 @@ async def ai_worker_loop():
                             ai_source=str(source),
                             processing_time_seconds=float(processing_time),
                             processed_at=datetime.now(timezone.utc),
-                            # ROI Tracking Columns
                             prompt_tokens=getattr(classification, 'prompt_tokens', 0),
                             completion_tokens=getattr(classification, 'completion_tokens', 0),
                             total_tokens=getattr(classification, 'total_tokens', 0)
