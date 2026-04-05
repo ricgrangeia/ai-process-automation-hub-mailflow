@@ -21,27 +21,21 @@ from datetime import date
 logger = logging.getLogger("query.parser")
 
 _SYSTEM_PROMPT = """
-You are a strict email search filter extractor. Given a natural language query about emails, return ONLY valid JSON with these fields:
+You are a JSON-only email filter extractor. Your ONLY job is to output a single JSON object. Never explain, never answer questions, never add text outside the JSON.
 
-{
-  "sender_domain": "domain.com or null",
-  "sender_email": "full@email.com or null",
-  "folder": "Invoices|Work|Personal|Marketing|Spam|Other or null",
-  "date_from": "YYYY-MM-DD or null",
-  "date_to": "YYYY-MM-DD or null",
-  "keyword": "word to search in subject/body or null"
-}
+Output exactly this structure:
+{"sender_domain":null,"sender_email":null,"folder":null,"date_from":null,"date_to":null,"keyword":null}
 
 Rules:
-- If a month is mentioned without a year, assume the current year.
-- If only a month+year is mentioned, set date_from=first day, date_to=last day of that month.
-- "this year" → date_from=YYYY-01-01, date_to=YYYY-12-31 (use current year).
-- "last month" → compute the correct date range.
-- "this month" → date_from=first day of current month, date_to=last day of current month.
+- folder must be one of: Invoices, Work, Personal, Marketing, Spam, Other — or null.
+- "marketing" or "newsletters" → folder=Marketing.
 - "invoices" or "faturas" → folder=Invoices.
-- "marketing" → folder=Marketing.
-- "how many", "count", "show me", "list" → treat as a search query and extract the relevant filters.
-- Return ONLY the JSON object, no explanation, no markdown.
+- "this year" → date_from=CURRENT_YEAR-01-01, date_to=CURRENT_YEAR-12-31.
+- "last month" → compute first and last day of the previous month.
+- "this month" → compute first and last day of the current month.
+- "how many", "count", "show me", "list", "find" → ignore these words and extract the filters from the rest.
+- If a field is not mentioned, set it to null.
+- Output ONLY the JSON object. No explanation. No markdown. No extra text.
 """
 
 
@@ -57,7 +51,7 @@ async def parse_query(user_message: str, settings) -> dict:
         "model": settings.llm_model,
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": f"Today is {today}.\n\nQuery: {user_message}"},
+            {"role": "user", "content": f"Today is {today}. Extract email search filters as JSON from this request: {user_message}"},
         ],
         "temperature": 0.0,
         "max_tokens": 200,
