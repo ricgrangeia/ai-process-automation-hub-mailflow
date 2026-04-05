@@ -110,6 +110,33 @@ services:
       - database
       - ai
 
+  query-worker:
+    build: .
+    container_name: mailflow-query-worker
+    restart: unless-stopped
+    depends_on:
+      - redis
+    command: ["python", "-m", "app.query.worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL2}
+      REDIS_URL: ${REDIS_URL}
+      STORAGE_ROOT: ${STORAGE_ROOT}
+      MASTER_KEY: ${MASTER_KEY}
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      REPORT_RECIPIENT: ${REPORT_RECIPIENT}
+    networks:
+      - mail
+      - database
+      - ai
+
 volumes:
   redis_data:
   mail_storage:

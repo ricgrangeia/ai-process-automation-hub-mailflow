@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 1.3.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 1.4.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -36,6 +36,8 @@ for supervision and account management.
 | Pluggable action system — move, export PDF, extensible | ✅ |
 | PDF export with path templates (`Company/{year}/{month}/`) | ✅ |
 | Mobile-responsive dashboard (Chrome on phone) | ✅ |
+| Natural language email search via Telegram ("send me all invoices from amazon.com January 2026") | ✅ |
+| Query worker — independent service, processes search jobs from Redis queue | ✅ |
 
 ---
 
@@ -49,7 +51,7 @@ IMAP / Outlook
  (fetch unseen messages, parse RFC822)
       │
       ▼
-  Redis Queue
+  Redis  mailai:jobs:email
       │
       ▼
    ai-worker
@@ -69,6 +71,24 @@ IMAP / Outlook
                         ▼
                    Dashboard
               (Streamlit · port 8501)
+
+── Natural Language Query ───────────────────────────────
+ You (Telegram): "send invoices from amazon.com Jan 2026"
+      │
+      ▼
+  telegram-bot  (thin UI layer — just pushes the job)
+      │
+      ▼
+  Redis  mailai:jobs:query
+      │
+      ▼
+  query-worker
+  ├─ parse_query  (LLM extracts structured filters)
+  ├─ search_emails  (PostgreSQL · up to 50 results)
+  └─ send_results_email  (SMTP · .eml + PDF attachments)
+      │
+      ▼
+  📧 Results email  +  ✅ Telegram confirmation
 ```
 
 ### Services
@@ -78,9 +98,10 @@ IMAP / Outlook
 | `email-worker` | Polls IMAP, parses emails, enqueues jobs |
 | `api-worker` | Polls Microsoft Graph (Outlook), enqueues jobs |
 | `ai-worker` | Classifies emails, executes actions, records telemetry |
-| `telegram-bot` | Handles NeedsReview replies, saves learned rules |
+| `telegram-bot` | Thin UI layer — receives user input, pushes jobs, handles NeedsReview callbacks |
+| `query-worker` | Processes search jobs — LLM parse → DB search → send results email |
 | `dashboard` | Streamlit UI — supervision + account management |
-| `redis` | Job queue (AOF persistent) |
+| `redis` | Job queues (AOF persistent) — `jobs:email` + `jobs:query` |
 | `postgres` | Persistence (external, via `database-network`) |
 
 ### Code Structure
@@ -101,7 +122,12 @@ app/
 │   └── outlook/            # Microsoft Graph client + polling worker
 ├── processing/             # Redis queue interface + AI worker loop
 │   └── actions/            # Pluggable actions: move_folder, export_pdf
-├── telegram/               # Telegram bot — NeedsReview notifications + reply handler
+├── query/                  # Natural language email search domain
+│   ├── parser.py           # LLM extracts structured filters from free text
+│   ├── repository.py       # Dynamic SQLAlchemy query against emails table
+│   ├── exporter.py         # SMTP email with .eml + PDF attachments
+│   └── worker.py           # Redis consumer — processes search jobs independently
+├── telegram/               # Telegram bot — thin UI layer, pushes jobs to Redis
 └── dashboard/              # Streamlit UI
 ```
 
@@ -112,6 +138,7 @@ app/
 | New email source (e.g. Gmail) | `ingestion/gmail/` |
 | New classifier | `classification/` |
 | New processing action (webhook, forward, ticket) | `processing/actions/` |
+| New query output (Slack, webhook, PDF report) | `query/exporter.py` |
 | New dashboard page | `dashboard/` |
 | New account type | `accounts/` |
 
@@ -195,6 +222,13 @@ DASHBOARD_PASSWORD=mudar123
 # Create a bot via @BotFather · get your chat_id via @RawDataBot
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
+
+# SMTP — required to send query results via email (query-worker)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your@email.com
+SMTP_PASSWORD=your-app-password
+REPORT_RECIPIENT=recipient@email.com
 ```
 
 ---
@@ -227,6 +261,8 @@ Run workers individually:
 python -m app.ingestion.imap.worker      # email-worker (IMAP)
 python -m app.ingestion.outlook.worker   # api-worker (Outlook)
 python -m app.processing.worker          # ai-worker (classification)
+python -m app.telegram.bot               # telegram-bot (callbacks + query dispatch)
+python -m app.query.worker               # query-worker (NL search jobs)
 streamlit run app/dashboard/app.py       # dashboard
 ```
 
@@ -258,7 +294,8 @@ make shell          # Shell into ai-worker container
 - [x] Telegram bot — NeedsReview review, learned rules, PDF export actions
 - [ ] Learned rules dashboard page (view, edit, disable rules)
 - [ ] PostgreSQL full-text search (GIN index on subject + body)
-- [ ] Email search via Telegram ("send me all invoices from amazon.com January 2026")
+- [x] Email search via Telegram ("send me all invoices from amazon.com January 2026")
+- [x] Query worker — independent service, decoupled from Telegram bot via Redis queue
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

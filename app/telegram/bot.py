@@ -11,6 +11,7 @@ Callback data formats:
 """
 
 import asyncio
+import json
 import logging
 import sys
 from pathlib import Path
@@ -26,6 +27,8 @@ if _project_root not in sys.path:
 
 from sqlalchemy import select, update
 
+import redis.asyncio as aioredis
+
 from app.core.config import get_settings
 from app.core.crypto import decrypt_secret
 from app.core.database.engine import make_engine, make_session_factory
@@ -33,6 +36,7 @@ from app.accounts.models import EmailAccount
 from app.messages.models import EmailMessage
 from app.classification.learned_rules import LearnedRule
 from app.ingestion.imap.client import connect_imap, move_message
+from app.query.worker import QUERY_QUEUE_KEY
 
 logging.basicConfig(
     level=logging.INFO,
@@ -292,18 +296,53 @@ async def _persist_pdf_rule(query_or_message, email_id, folder, with_move, path)
 
 
 # ------------------------------------------------------------------------------
-# Handler: plain text message — used for custom PDF path input
+# Handler: plain text message
+#   — if chat is awaiting a PDF path, treat text as the path
+#   — otherwise treat it as a natural language email search query
 # ------------------------------------------------------------------------------
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    if chat_id not in _pending_path:
+    text = update.message.text.strip()
+
+    # PDF path input takes priority
+    if chat_id in _pending_path:
+        email_id, folder, with_move = _pending_path.pop(chat_id)
+        await _persist_pdf_rule(update.message, email_id, folder, with_move, text)
         return
 
-    email_id, folder, with_move = _pending_path.pop(chat_id)
-    path = update.message.text.strip()
+    # Treat as email search query — delegate to query-worker via Redis
+    await _enqueue_query(update, text)
 
-    await _persist_pdf_rule(update.message, email_id, folder, with_move, path)
+
+async def _enqueue_query(update: Update, query_text: str):
+    """Push a query job to Redis for the query-worker to process."""
+    _, settings = get_session_factory()
+    r = aioredis.from_url(settings.redis_url, decode_responses=True)
+    job = json.dumps({
+        "type": "query",
+        "chat_id": str(update.effective_chat.id),
+        "tenant_id": 1,
+        "query_text": query_text,
+    })
+    await r.lpush(QUERY_QUEUE_KEY, job)
+    await r.aclose()
+    await update.message.reply_text("🔍 On it… I'll send the results shortly.")
+
+
+# ------------------------------------------------------------------------------
+# Handler: /search <query>
+# ------------------------------------------------------------------------------
+
+async def handle_search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query_text = " ".join(context.args).strip() if context.args else ""
+    if not query_text:
+        await update.message.reply_text(
+            "Usage: `/search <query>`\n\nExample: `/search invoices from amazon.com January 2026`",
+            parse_mode="Markdown",
+        )
+        return
+    await _enqueue_query(update, query_text)
 
 
 # ------------------------------------------------------------------------------
@@ -333,6 +372,7 @@ def main():
         .build()
     )
 
+    app.add_handler(CommandHandler("search", handle_search_command))
     app.add_handler(CallbackQueryHandler(handle_classify,      pattern=r"^classify:"))
     app.add_handler(CallbackQueryHandler(handle_learn_move,    pattern=r"^learn_move:"))
     app.add_handler(CallbackQueryHandler(handle_learn_ask_path,pattern=r"^learn_ask_path:"))

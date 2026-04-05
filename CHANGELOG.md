@@ -119,6 +119,29 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [1.4.0] — 2026-04-05
+
+### Added
+
+- Natural language email search via Telegram — type "send me all invoices from amazon.com January 2026" and receive a results email
+- `app/query/` domain — fully self-contained search module:
+  - `parser.py` — calls local LLM (Qwen 2.5) to extract structured filters (`sender_domain`, `folder`, `date_from`, `date_to`, `keyword`) from free text;
+    resolves relative dates ("last month") using today's date
+  - `repository.py` — dynamic SQLAlchemy query against `emails` table; supports all filter combinations; returns up to 50 results ordered by date
+  - `exporter.py` — builds MIME email with plain-text summary in body, attaches original `.eml` files and PDF attachments from disk, sends via SMTP with STARTTLS
+  - `worker.py` — standalone Redis consumer (`mailai:jobs:query`); runs independently of the Telegram bot; sends Telegram reply when done; falls back to inline chat summary if SMTP is not configured
+- `/search <query>` Telegram command as explicit alternative to free-text queries
+- SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `REPORT_RECIPIENT`) added to `Settings` and `.env.example`
+- `query-worker` Docker service added to both `docker-compose.yml` and `docker-compose.local.yml`
+
+### Changed
+
+- `telegram/bot.py` is now a thin UI layer — on receiving a search query it pushes a job to Redis and replies "On it…"; all query logic moved to `query/worker.py`
+- `telegram-bot` Docker service no longer requires LLM or SMTP environment variables
+- `query-worker` owns LLM and SMTP configuration — each service only has the vars it needs
+
+---
+
 ## [Unreleased]
 
 ### Planned

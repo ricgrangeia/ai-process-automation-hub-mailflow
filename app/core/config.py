@@ -27,6 +27,13 @@ class Settings:
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # SMTP — required for query result emails
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    report_recipient: str = ""
+
 
 def get_settings() -> Settings:
     return Settings(
@@ -52,4 +59,11 @@ def get_settings() -> Settings:
         # Telegram
         telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
+
+        # SMTP
+        smtp_host=os.environ.get("SMTP_HOST", ""),
+        smtp_port=int(os.environ.get("SMTP_PORT", "587")),
+        smtp_user=os.environ.get("SMTP_USER", ""),
+        smtp_password=os.environ.get("SMTP_PASSWORD", ""),
+        report_recipient=os.environ.get("REPORT_RECIPIENT", ""),
     )
