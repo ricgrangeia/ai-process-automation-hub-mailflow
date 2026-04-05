@@ -11,6 +11,7 @@ This project uses [Semantic Versioning](https://semver.org/).
 First stable release. Core email pipeline, AI classification, and dashboard are fully operational.
 
 ### Added
+
 - IMAP email ingestion with polling loop (`email-worker`)
 - Microsoft Graph / Outlook ingestion (`api-worker`)
 - RFC822 email parsing with multipart and attachment support
@@ -26,6 +27,7 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 - GitHub Actions CI → Portainer webhook auto-deploy
 
 ### Fixed
+
 - `imap_worker.py` `mark_seen`: missing closing `)` in IMAP `\Seen` flag
 - `hybrid_classifier.py`: missing `ClassificationResult` import causing runtime crash
 - `crypto.py`: encryption was disabled — plaintext credentials stored in DB
@@ -76,9 +78,29 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [1.2.0] — 2026-04-05
+
+### Added
+
+- Telegram bot integration (`app/telegram/`) — NeedsReview emails trigger an inline-button message asking for human classification
+- Telegram bot service (`app/telegram/bot.py`) — runs as a standalone Docker container, handles callback replies, moves email via IMAP, updates DB with `ai_source=human`
+- Startup notification — AI worker sends a Telegram message when it comes online
+- After classifying via Telegram, user is asked whether to save the decision as a learned rule (rule storage coming in next release)
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` added to `Settings` and `.env.example` — feature is silently disabled when left empty
+- `telegram-bot` service added to both `docker-compose.yml` and `docker-compose.local.yml`
+- Project infographic (`docs/infographic.svg`) added to README — dark-themed SVG showing the full pipeline
+
+### Changed
+
+- `processing/worker.py`: NeedsReview emails with Telegram configured now set `status=pending_review` and skip IMAP move until human replies; startup recovery explicitly excludes `pending_review` emails
+- `docker-compose.local.yml`: `ai-worker` was missing `MASTER_KEY` — added
+
+---
+
 ## [Unreleased]
 
 ### Planned
+
 - Alembic database migrations
 - Invoice / document OCR extraction
 - Supplier detection and matching

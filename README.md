@@ -4,7 +4,13 @@
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
-MailFlow ingests emails from IMAP or Microsoft 365 / Outlook, classifies them using a hybrid AI engine (rules + local LLM), moves them to the correct folder automatically, and provides a web dashboard for supervision and account management.
+MailFlow ingests emails from IMAP or Microsoft 365 / Outlook, classifies them using a hybrid AI engine
+(rules + local LLM), moves them to the correct folder automatically, and provides a web dashboard
+for supervision and account management.
+
+---
+
+![MailFlow Engine Infographic](docs/infographic.svg)
 
 ---
 
@@ -30,7 +36,7 @@ MailFlow ingests emails from IMAP or Microsoft 365 / Outlook, classifies them us
 
 ## Architecture
 
-```
+```text
 IMAP / Outlook
       │
       ▼
@@ -178,12 +184,14 @@ DASHBOARD_PASSWORD=mudar123
 After login, two pages are available from the sidebar:
 
 **📊 Dashboard**
+
 - Total emails processed, average AI confidence, average processing time
 - Pie chart — classification distribution
 - Bar chart — rule vs LLM decisions
 - Audit table — last 200 processed emails
 
 **✉️ Email Accounts**
+
 - List all configured accounts with active/inactive status
 - Add IMAP account (password encrypted at rest with Fernet)
 - Add Outlook / Microsoft 365 account
