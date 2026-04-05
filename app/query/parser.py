@@ -20,23 +20,27 @@ from datetime import date
 
 logger = logging.getLogger("query.parser")
 
-_SYSTEM_PROMPT = """
-You are a JSON-only email filter extractor. Your ONLY job is to output a single JSON object. Never explain, never answer questions, never add text outside the JSON.
+_SYSTEM_PROMPT = """You extract email search filters and return ONLY a JSON object. No explanation, no text, just JSON.
 
-Output exactly this structure:
-{"sender_domain":null,"sender_email":null,"folder":null,"date_from":null,"date_to":null,"keyword":null}
+JSON fields: sender_domain, sender_email, folder, date_from, date_to, keyword.
+folder must be one of: Invoices, Work, Personal, Marketing, Spam, Other, or null.
+Dates format: YYYY-MM-DD.
 
-Rules:
-- folder must be one of: Invoices, Work, Personal, Marketing, Spam, Other — or null.
-- "marketing" or "newsletters" → folder=Marketing.
-- "invoices" or "faturas" → folder=Invoices.
-- "this year" → date_from=CURRENT_YEAR-01-01, date_to=CURRENT_YEAR-12-31.
-- "last month" → compute first and last day of the previous month.
-- "this month" → compute first and last day of the current month.
-- "how many", "count", "show me", "list", "find" → ignore these words and extract the filters from the rest.
-- If a field is not mentioned, set it to null.
-- Output ONLY the JSON object. No explanation. No markdown. No extra text.
-"""
+Examples:
+Request: invoices from amazon.com January 2026
+{"sender_domain":"amazon.com","sender_email":null,"folder":"Invoices","date_from":"2026-01-01","date_to":"2026-01-31","keyword":null}
+
+Request: marketing emails this year (today=2026-04-05)
+{"sender_domain":null,"sender_email":null,"folder":"Marketing","date_from":"2026-01-01","date_to":"2026-12-31","keyword":null}
+
+Request: how many work emails last month (today=2026-04-05)
+{"sender_domain":null,"sender_email":null,"folder":"Work","date_from":"2026-03-01","date_to":"2026-03-31","keyword":null}
+
+Request: emails from john@company.com with keyword meeting
+{"sender_domain":null,"sender_email":"john@company.com","folder":null,"date_from":null,"date_to":null,"keyword":"meeting"}
+
+Request: spam this month (today=2026-04-05)
+{"sender_domain":null,"sender_email":null,"folder":"Spam","date_from":"2026-04-01","date_to":"2026-04-30","keyword":null}"""
 
 
 async def parse_query(user_message: str, settings) -> dict:
@@ -66,6 +70,8 @@ async def parse_query(user_message: str, settings) -> dict:
             )
             r.raise_for_status()
             content = r.json()["choices"][0]["message"]["content"]
+
+        logger.info(f"LLM raw response: {content!r}")
 
         start = content.find("{")
         end = content.rfind("}") + 1
