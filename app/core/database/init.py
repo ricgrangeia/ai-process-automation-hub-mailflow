@@ -3,8 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 # Import Base with all models registered — accounts and messages must be imported
 # before create_all so SQLAlchemy knows about every table.
 from app.core.database.base import Base
-import app.accounts.models  # noqa: F401 — registers EmailAccount, ApiCredential
-import app.messages.models  # noqa: F401 — registers EmailMessage, Attachment
+import app.accounts.models        # noqa: F401 — registers EmailAccount, ApiCredential
+import app.messages.models        # noqa: F401 — registers EmailMessage, Attachment
+import app.classification.learned_rules  # noqa: F401 — registers LearnedRule
 
 
 async def init_db(engine: AsyncEngine):

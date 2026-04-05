@@ -14,6 +14,9 @@ beautifulsoup4==4.12.3
 # --- Telegram Bot ---
 python-telegram-bot==21.6
 
+# --- PDF Export ---
+weasyprint==62.3
+
 # --- Dashboard (Novos) ---
 streamlit==1.32.0            # O motor do Dashboard
 pandas==2.2.1                # Manipulação de dados e tabelas

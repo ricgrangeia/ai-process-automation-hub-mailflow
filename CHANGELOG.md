@@ -97,6 +97,28 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [1.3.0] — 2026-04-05
+
+### Added
+
+- `LearnedRule` model (`classification/learned_rules.py`) — stores human-confirmed decisions as DB rules with a JSON `actions` column; upserts on duplicate domain
+- Pluggable action system (`processing/actions/`) — `EmailAction` base interface + factory registry; new actions require only one new file
+- `MoveFolderAction` (`processing/actions/move_folder.py`) — extracted IMAP move logic into a reusable action
+- `ExportPdfAction` (`processing/actions/export_pdf.py`) — exports email body as PDF and copies PDF attachments to a structured path; supports `{year}`, `{month}`, `{day}` template variables (e.g. `Company/{year}/{month}/Payments/`)
+- `weasyprint==62.3` added to `requirements.txt` for PDF rendering
+- Telegram bot: after classifying a NeedsReview email, user is now asked to choose an action rule — *Move only*, *Export PDF only*, *Move & Export*, or *Just this once*
+- Telegram bot: custom PDF export path can be typed as a free-text reply or accepted from a default; state held in-memory between messages
+- `RuleClassifier` now accepts an optional `session_factory` — when provided, checks learned rules from DB before hardcoded patterns and increments `hit_count` on match
+- `processing/worker.py`: `run_actions()` helper looks up learned rule actions for each classified email and executes them in order; falls back to plain `move_folder` if no rule found
+- `core/database/init.py`: `LearnedRule` registered so table is auto-created on boot
+
+### Changed
+
+- `processing/worker.py`: IMAP move logic removed from inline closure — now delegated to `MoveFolderAction` via `run_actions()`
+- `telegram/bot.py`: `handle_learn` stub replaced with full rule persistence + action-choice flow
+
+---
+
 ## [Unreleased]
 
 ### Planned

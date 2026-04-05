@@ -2,7 +2,7 @@
 AI Worker - Multi-Tenant Email Processor
 - Listen to Redis jobs
 - Classify with Hybrid (Rules + Qwen 2.5)
-- Move IMAP folders
+- Execute actions (move folder, export PDF, etc.)
 - Save ROI & Telemetry with high reliability
 """
 
@@ -16,15 +16,15 @@ import redis.asyncio as redis
 from sqlalchemy import select, update
 
 from app.core.config import get_settings
-from app.core.crypto import decrypt_secret
 from app.core.database.engine import make_engine, make_session_factory
 from app.accounts.models import EmailAccount
 from app.messages.models import EmailMessage
-from app.ingestion.imap.client import connect_imap, move_message
 from app.classification.rule_classifier import RuleClassifier
 from app.classification.llm_classifier import LLMClassifier
 from app.classification.hybrid_classifier import HybridClassifier
+from app.classification.learned_rules import LearnedRule
 from app.processing.queue import QUEUE_KEY
+from app.processing.actions.base import get_action
 from app.telegram.notifications import send_review_request, send_worker_started
 
 
@@ -37,13 +37,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ai-worker")
 
-MAX_RETRIES = 3  # max times a job is re-queued before being marked failed_retries
+MAX_RETRIES = 3
 
 
 # ------------------------------------------------------------------------------
 # Startup Recovery
-# Re-enqueue emails stuck with status='new' that are older than the grace period.
-# Covers crashes, bug-fix redeploys, and container restarts.
 # ------------------------------------------------------------------------------
 
 async def recover_stuck_emails(r, session_factory, grace_minutes: int = 2):
@@ -52,7 +50,7 @@ async def recover_stuck_emails(r, session_factory, grace_minutes: int = 2):
     async with session_factory() as session:
         result = await session.execute(
             select(EmailMessage.id, EmailMessage.tenant_id).where(
-                EmailMessage.status == "new",  # pending_review is intentionally excluded
+                EmailMessage.status == "new",  # pending_review intentionally excluded
                 EmailMessage.created_at < cutoff,
             )
         )
@@ -70,28 +68,85 @@ async def recover_stuck_emails(r, session_factory, grace_minutes: int = 2):
 
 
 # ------------------------------------------------------------------------------
+# Run actions for a classified email
+# Checks learned rules first for any additional actions (e.g. export_pdf),
+# then falls back to a plain move_folder if no learned rule is found.
+# ------------------------------------------------------------------------------
+
+async def run_actions(email, account, settings, session_factory, folder: str) -> bool:
+    # Look for a learned rule that matches this email — it may have richer actions
+    actions_config = None
+
+    try:
+        domain = None
+        if email.from_address and "@" in email.from_address:
+            domain = email.from_address.split("@")[-1].lower()
+        sender = (email.from_address or "").lower()
+
+        async with session_factory() as session:
+            result = await session.execute(
+                select(LearnedRule).where(
+                    LearnedRule.active == True,
+                    LearnedRule.tenant_id == email.tenant_id,
+                )
+            )
+            rules = result.scalars().all()
+
+        for rule in rules:
+            matched = False
+            if rule.match_field == "sender_domain" and domain:
+                matched = domain == rule.match_value.lower()
+            elif rule.match_field == "sender_email":
+                matched = sender == rule.match_value.lower()
+            elif rule.match_field == "subject_contains":
+                matched = rule.match_value.lower() in (email.subject or "").lower()
+            elif rule.match_field == "body_contains":
+                matched = rule.match_value.lower() in (email.body_text or "").lower()
+
+            if matched and rule.actions:
+                actions_config = rule.actions
+                break
+
+    except Exception as e:
+        logger.warning(f"Could not load learned rule actions: {e}")
+
+    # Fall back to plain move_folder if no learned rule found
+    if not actions_config:
+        actions_config = [{"type": "move_folder", "folder": folder}]
+
+    success = True
+    for config in actions_config:
+        try:
+            action = get_action(config)
+            ok = await action.execute(email, account, settings)
+            if not ok:
+                success = False
+                logger.error(f"Action {config.get('type')} failed for email {email.id}")
+        except Exception as e:
+            logger.error(f"Action {config.get('type')} raised an error for email {email.id}: {e}")
+            success = False
+
+    return success
+
+
+# ------------------------------------------------------------------------------
 # Main AI Worker Loop
 # ------------------------------------------------------------------------------
 
 async def ai_worker_loop():
-    """
-    Infinite loop for processing email classification jobs.
-    """
     settings = get_settings()
 
-    # Database & Redis setup
     engine = make_engine(settings.database_url)
     session_factory = make_session_factory(engine)
     r = redis.from_url(settings.redis_url, decode_responses=True)
 
-    # Classifier setup
-    rule = RuleClassifier()
+    # Pass session_factory so RuleClassifier can query learned rules
+    rule = RuleClassifier(session_factory=session_factory)
     llm = LLMClassifier(settings)
     classifier = HybridClassifier(rule, llm, threshold=0.75)
 
     logger.info("🚀 AI worker is active and waiting for Redis jobs...")
 
-    # Re-enqueue any emails that were left unprocessed from a previous run
     await recover_stuck_emails(r, session_factory)
 
     if settings.telegram_bot_token and settings.telegram_chat_id:
@@ -113,7 +168,7 @@ async def ai_worker_loop():
             start_time = time.time()
             logger.info(f"📥 Processing job for Email ID: {email_id} (attempt {retries + 1}/{MAX_RETRIES})")
 
-            # 2️⃣ Load metadata (Email & Account)
+            # 2️⃣ Load metadata
             async with session_factory() as session:
                 email_result = await session.execute(
                     select(EmailMessage).where(EmailMessage.id == email_id)
@@ -129,98 +184,74 @@ async def ai_worker_loop():
                 )
                 account = acc_result.scalar_one()
 
-                # 3️⃣ Classify email (Intelligence Layer)
-                classification = await classifier.classify(email)
+            # 3️⃣ Classify
+            classification = await classifier.classify(email)
+            folder = classification.folder
+            confidence = classification.confidence
+            source = getattr(classification, 'source', 'llm')
 
-                folder = classification.folder
-                confidence = classification.confidence
-                source = getattr(classification, 'source', 'llm')
-
-                # 4️⃣ NeedsReview → delegate to human via Telegram
-                if folder == "NeedsReview" and settings.telegram_bot_token and settings.telegram_chat_id:
-                    sent = await send_review_request(
-                        bot_token=settings.telegram_bot_token,
-                        chat_id=settings.telegram_chat_id,
-                        email_id=email_id,
-                        subject=email.subject,
-                        sender=email.from_address,
-                        confidence=confidence,
-                    )
-                    if sent:
-                        async with session_factory() as s:
-                            await s.execute(
-                                update(EmailMessage)
-                                .where(EmailMessage.id == email_id)
-                                .values(
-                                    status="pending_review",
-                                    ai_confidence=float(confidence),
-                                    ai_source=str(source),
-                                    prompt_tokens=getattr(classification, 'prompt_tokens', 0),
-                                    completion_tokens=getattr(classification, 'completion_tokens', 0),
-                                    total_tokens=getattr(classification, 'total_tokens', 0),
-                                )
+            # 4️⃣ NeedsReview → delegate to human via Telegram
+            if folder == "NeedsReview" and settings.telegram_bot_token and settings.telegram_chat_id:
+                sent = await send_review_request(
+                    bot_token=settings.telegram_bot_token,
+                    chat_id=settings.telegram_chat_id,
+                    email_id=email_id,
+                    subject=email.subject,
+                    sender=email.from_address,
+                    confidence=confidence,
+                )
+                if sent:
+                    async with session_factory() as s:
+                        await s.execute(
+                            update(EmailMessage)
+                            .where(EmailMessage.id == email_id)
+                            .values(
+                                status="pending_review",
+                                ai_confidence=float(confidence),
+                                ai_source=str(source),
+                                prompt_tokens=getattr(classification, 'prompt_tokens', 0),
+                                completion_tokens=getattr(classification, 'completion_tokens', 0),
+                                total_tokens=getattr(classification, 'total_tokens', 0),
                             )
-                            await s.commit()
-                        logger.info(f"📨 Email {email_id} sent to Telegram for review.")
-                        continue
-
-                # 5️⃣ Move email via IMAP (Isolated in Thread)
-                imap_password = decrypt_secret(settings.master_key, account.password_encrypted)
-
-                def _move():
-                    conn = connect_imap(
-                        account.imap_host,
-                        account.imap_port or 993,
-                        account.username,
-                        imap_password
-                    )
-                    try:
-                        move_message(conn, settings.inbox_folder, folder, email.imap_uid)
-                        return True
-                    except Exception as e:
-                        logger.error(f"IMAP Error for email {email_id}: {e}")
-                        return False
-                    finally:
-                        try:
-                            conn.logout()
-                        except:
-                            pass
-
-                move_success = await asyncio.to_thread(_move)
-
-                # 6️⃣ PERSISTENCE: Explicit Database Update
-                processing_time = time.time() - start_time
-                new_status = "moved" if move_success else "failed_move"
-
-                async with session_factory() as update_session:
-                    stmt = (
-                        update(EmailMessage)
-                        .where(EmailMessage.id == email_id)
-                        .values(
-                            status=new_status,
-                            classification_label=str(folder),
-                            ai_confidence=float(confidence),
-                            ai_source=str(source),
-                            processing_time_seconds=float(processing_time),
-                            processed_at=datetime.now(timezone.utc),
-                            prompt_tokens=getattr(classification, 'prompt_tokens', 0),
-                            completion_tokens=getattr(classification, 'completion_tokens', 0),
-                            total_tokens=getattr(classification, 'total_tokens', 0)
                         )
+                        await s.commit()
+                    logger.info(f"📨 Email {email_id} sent to Telegram for review.")
+                    continue
+
+            # 5️⃣ Execute actions (move folder + any learned extras like export_pdf)
+            action_success = await run_actions(email, account, settings, session_factory, folder)
+
+            # 6️⃣ Persist result
+            processing_time = time.time() - start_time
+            new_status = "moved" if action_success else "failed_move"
+
+            async with session_factory() as update_session:
+                stmt = (
+                    update(EmailMessage)
+                    .where(EmailMessage.id == email_id)
+                    .values(
+                        status=new_status,
+                        classification_label=str(folder),
+                        ai_confidence=float(confidence),
+                        ai_source=str(source),
+                        processing_time_seconds=float(processing_time),
+                        processed_at=datetime.now(timezone.utc),
+                        prompt_tokens=getattr(classification, 'prompt_tokens', 0),
+                        completion_tokens=getattr(classification, 'completion_tokens', 0),
+                        total_tokens=getattr(classification, 'total_tokens', 0)
                     )
+                )
+                result = await update_session.execute(stmt)
+                await update_session.commit()
 
-                    result = await update_session.execute(stmt)
-                    await update_session.commit()
-
-                    if result.rowcount > 0:
-                        logger.info(f"✅ DB Updated: ID {email_id} -> {folder} ({source})")
-                    else:
-                        logger.error(f"❌ DB Update failed: No row with ID {email_id} was affected.")
+                if result.rowcount > 0:
+                    logger.info(f"✅ DB Updated: ID {email_id} -> {folder} ({source})")
+                else:
+                    logger.error(f"❌ DB Update failed: No row with ID {email_id} was affected.")
 
         except Exception as e:
             logger.exception(f"🔥 Critical Error in Worker Loop: {e}")
 
-            # Re-queue the job if it hasn't exceeded the retry limit
             if job is not None:
                 retries = job.get("retries", 0) + 1
                 if retries < MAX_RETRIES:
@@ -237,11 +268,10 @@ async def ai_worker_loop():
                         )
                         await s.commit()
 
-            await asyncio.sleep(5)  # Cooldown on failure
+            await asyncio.sleep(5)
 
 
 def main():
-    """Entrypoint for the worker process."""
     try:
         asyncio.run(ai_worker_loop())
     except KeyboardInterrupt:

@@ -211,6 +211,6 @@
 
   <!-- ── Footer ── -->
   <line x1="60" y1="606" x2="840" y2="606" stroke="#4a9eff" stroke-width="0.5" opacity="0.3"/>
-  <text x="450" y="617" text-anchor="middle" fill="#4a6080" font-size="9">Appa8 AI Process Automation Hub · MailFlow Engine v1.2.0 · on-premise · GDPR-friendly</text>
+  <text x="450" y="617" text-anchor="middle" fill="#4a6080" font-size="9">Appa8 AI Process Automation Hub · MailFlow Engine v1.3.0 · on-premise · GDPR-friendly</text>
 
 </svg>

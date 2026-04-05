@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 1.0.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 1.3.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -31,6 +31,11 @@ for supervision and account management.
 | Email Accounts UI — add / toggle / delete | ✅ |
 | Docker Compose — dev + production (Traefik/HTTPS) | ✅ |
 | GitHub Actions → Portainer auto-deploy | ✅ |
+| Telegram bot — NeedsReview inline review + reply | ✅ |
+| Learned rules — human decisions saved, never asked again | ✅ |
+| Pluggable action system — move, export PDF, extensible | ✅ |
+| PDF export with path templates (`Company/{year}/{month}/`) | ✅ |
+| Mobile-responsive dashboard (Chrome on phone) | ✅ |
 
 ---
 
@@ -48,10 +53,17 @@ IMAP / Outlook
       │
       ▼
    ai-worker
+   ├─ Learned Rules  (DB-backed, human-confirmed)
    ├─ Rule Classifier  (fast, deterministic)
    └─ LLM Classifier   (Qwen 2.5 · OpenAI-compatible)
       │
-      ├─▶ Move email to classified IMAP folder
+      ├─ confidence ≥ 0.75 ──▶ Actions
+      │                         ├─▶ move_folder  (IMAP)
+      │                         └─▶ export_pdf   (disk · {year}/{month})
+      │
+      ├─ confidence < 0.75 ──▶ Telegram NeedsReview
+      │                         └─▶ You reply → move + learn rule
+      │
       └─▶ Store metadata + telemetry in PostgreSQL
                         │
                         ▼
@@ -65,9 +77,10 @@ IMAP / Outlook
 |---|---|
 | `email-worker` | Polls IMAP, parses emails, enqueues jobs |
 | `api-worker` | Polls Microsoft Graph (Outlook), enqueues jobs |
-| `ai-worker` | Classifies emails, moves to folder, records telemetry |
+| `ai-worker` | Classifies emails, executes actions, records telemetry |
+| `telegram-bot` | Handles NeedsReview replies, saves learned rules |
 | `dashboard` | Streamlit UI — supervision + account management |
-| `redis` | Job queue |
+| `redis` | Job queue (AOF persistent) |
 | `postgres` | Persistence (external, via `database-network`) |
 
 ### Code Structure
@@ -87,6 +100,8 @@ app/
 │   ├── imap/               # IMAP client + polling worker
 │   └── outlook/            # Microsoft Graph client + polling worker
 ├── processing/             # Redis queue interface + AI worker loop
+│   └── actions/            # Pluggable actions: move_folder, export_pdf
+├── telegram/               # Telegram bot — NeedsReview notifications + reply handler
 └── dashboard/              # Streamlit UI
 ```
 
@@ -96,7 +111,7 @@ app/
 |---|---|
 | New email source (e.g. Gmail) | `ingestion/gmail/` |
 | New classifier | `classification/` |
-| New processing action (webhook, forward) | `processing/` |
+| New processing action (webhook, forward, ticket) | `processing/actions/` |
 | New dashboard page | `dashboard/` |
 | New account type | `accounts/` |
 
@@ -175,6 +190,11 @@ MARK_SEEN_AFTER_STORE=true
 # Dashboard credentials
 DASHBOARD_USER=admin
 DASHBOARD_PASSWORD=mudar123
+
+# Telegram — optional, leave empty to disable
+# Create a bot via @BotFather · get your chat_id via @RawDataBot
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
 ```
 
 ---
@@ -235,7 +255,10 @@ make shell          # Shell into ai-worker container
 - [ ] Docker health check endpoints
 - [ ] Audit log viewer in dashboard
 - [x] Redis queue durability on reboot / restart (AOF persistence)
-- [ ] Add communication thru telegram to ask something about the emails if needed
+- [x] Telegram bot — NeedsReview review, learned rules, PDF export actions
+- [ ] Learned rules dashboard page (view, edit, disable rules)
+- [ ] PostgreSQL full-text search (GIN index on subject + body)
+- [ ] Email search via Telegram ("send me all invoices from amazon.com January 2026")
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
