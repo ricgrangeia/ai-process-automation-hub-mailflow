@@ -64,7 +64,7 @@ async def parse_query(user_message: str, settings) -> dict:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=120) as client:
             r = await client.post(
                 f"{settings.llm_base_url}/chat/completions",
                 json=payload,
@@ -106,5 +106,5 @@ async def parse_query(user_message: str, settings) -> dict:
         }
 
     except Exception as e:
-        logger.error(f"Query parsing failed: {e}")
+        logger.error(f"Query parsing failed: {type(e).__name__}: {e}")
         return None
