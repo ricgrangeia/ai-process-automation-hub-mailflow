@@ -60,6 +60,7 @@ async def parse_query(user_message: str, settings) -> dict:
             {"role": "user", "content": f"Today is {today}.\n\nQuery: {user_message}"},
         ],
         "temperature": 0.0,
+        "max_tokens": 200,
     }
 
     try:
@@ -74,15 +75,34 @@ async def parse_query(user_message: str, settings) -> dict:
 
         start = content.find("{")
         end = content.rfind("}") + 1
-        filters = json.loads(content[start:end])
+        if start == -1 or end == 0:
+            logger.error(f"LLM returned no JSON object. Raw content: {content!r}")
+            return None
+
+        raw_json = content[start:end]
+
+        try:
+            filters = json.loads(raw_json)
+        except json.JSONDecodeError:
+            # Some models return single-quoted or unquoted JSON — try ast.literal_eval as fallback
+            import ast
+            try:
+                filters = ast.literal_eval(raw_json)
+            except Exception:
+                logger.error(f"LLM returned unparseable JSON. Raw: {raw_json!r}")
+                return None
+
+        # Normalise null strings to None
+        def _null(v):
+            return None if v in (None, "null", "NULL", "") else v
 
         return {
-            "sender_domain": filters.get("sender_domain"),
-            "sender_email": filters.get("sender_email"),
-            "folder": filters.get("folder"),
-            "date_from": filters.get("date_from"),
-            "date_to": filters.get("date_to"),
-            "keyword": filters.get("keyword"),
+            "sender_domain": _null(filters.get("sender_domain")),
+            "sender_email":  _null(filters.get("sender_email")),
+            "folder":        _null(filters.get("folder")),
+            "date_from":     _null(filters.get("date_from")),
+            "date_to":       _null(filters.get("date_to")),
+            "keyword":       _null(filters.get("keyword")),
         }
 
     except Exception as e:
