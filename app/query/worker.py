@@ -92,16 +92,20 @@ async def _handle_search(job: dict, settings, session_factory, r) -> None:
 
     logger.info(f"Extracted filters: {filters}")
 
+    active = {k: v for k, v in filters.items() if v}
+    filter_summary = " | ".join(f"{k}={v}" for k, v in active.items()) if active else "no filters"
+
     emails = await search_emails(session_factory, tenant_id=tenant_id, filters=filters)
     if not emails:
         await _telegram_send(
             settings.telegram_bot_token, chat_id,
-            "📭 No emails found matching your query."
+            f"📭 No emails found.\n_Filters used: {filter_summary}_"
         )
         return
 
     # Serialise results to Redis so the delivery job can retrieve them
     result_id = uuid.uuid4().hex
+    filter_summary = " | ".join(f"{k}={v}" for k, v in filters.items() if v) or "no filters"
     result_key = f"{RESULT_KEY_PREFIX}{result_id}"
     payload = {
         "emails": [
@@ -131,7 +135,7 @@ async def _handle_search(job: dict, settings, session_factory, r) -> None:
     smtp_note = "" if settings.smtp_host else "\n_(SMTP not configured — only inline available)_"
     await _telegram_send(
         settings.telegram_bot_token, chat_id,
-        f"✅ Found *{len(emails)}* email(s) matching your query.\nHow would you like the results?{smtp_note}",
+        f"✅ Found *{len(emails)}* email(s).\n_Filters: {filter_summary}_\n\nHow would you like the results?{smtp_note}",
         keyboard=keyboard,
     )
 
