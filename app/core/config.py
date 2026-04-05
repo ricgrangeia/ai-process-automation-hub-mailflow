@@ -12,10 +12,10 @@ class Settings:
     # Encryption
     master_key: str
 
-    # LLM configuration
-    llm_base_url: str
-    llm_api_key: str
-    llm_model: str
+    # LLM configuration (required by ai-worker and query-worker; optional elsewhere)
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model: str = ""
 
     # Worker behavior
     poll_interval_sec: int = 240
@@ -45,10 +45,10 @@ def get_settings() -> Settings:
         # Encryption key
         master_key=os.environ["MASTER_KEY"],
 
-        # Required LLM fields
-        llm_base_url=os.environ["LLM_BASE_URL"],
-        llm_api_key=os.environ["LLM_API_KEY"],
-        llm_model=os.environ["LLM_MODEL"],
+        # LLM (required by ai-worker and query-worker; leave empty for other services)
+        llm_base_url=os.environ.get("LLM_BASE_URL", ""),
+        llm_api_key=os.environ.get("LLM_API_KEY", ""),
+        llm_model=os.environ.get("LLM_MODEL", ""),
 
         # Optional behavior config
         poll_interval_sec=int(os.environ.get("POLL_INTERVAL_SEC", "240")),
