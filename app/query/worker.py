@@ -22,6 +22,7 @@ import json
 import logging
 import sys
 import uuid
+from email.header import decode_header, make_header
 from pathlib import Path
 
 import httpx
@@ -88,6 +89,8 @@ async def _handle_search(job: dict, settings, session_factory, r) -> None:
             "⚠️ Search service is unavailable right now. Check that the LLM is running and reachable."
         )
         return
+
+    logger.info(f"Extracted filters: {filters}")
 
     emails = await search_emails(session_factory, tenant_id=tenant_id, filters=filters)
     if not emails:
@@ -183,12 +186,22 @@ async def _handle_deliver(job: dict, settings, r) -> None:
         )
 
 
+def _decode_subject(subject: str) -> str:
+    if not subject:
+        return "(no subject)"
+    try:
+        return str(make_header(decode_header(subject)))
+    except Exception:
+        return subject
+
+
 def _build_inline_summary_from_dicts(emails_data: list) -> str:
     lines = [f"📬 Found *{len(emails_data)}* email(s):\n"]
     for i, e in enumerate(emails_data[:10], 1):
         received = e["received_at"][:10] if e.get("received_at") else "?"
+        subject = _decode_subject(e.get("subject") or "")[:60]
         lines.append(
-            f"{i}. *{(e.get('subject') or '(no subject)')[:60]}*\n"
+            f"{i}. *{subject}*\n"
             f"   {e.get('from_address') or '?'} | {received} | {e.get('classification_label') or '?'}"
         )
     if len(emails_data) > 10:
