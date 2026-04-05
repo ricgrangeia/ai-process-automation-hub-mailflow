@@ -27,6 +27,7 @@ if _project_root not in sys.path:
 
 from app.core.config import get_settings
 from app.core.database.engine import make_engine, make_session_factory
+from app.query.queue import QUERY_QUEUE_KEY
 from app.query.parser import parse_query
 from app.query.repository import search_emails
 from app.query.exporter import send_results_email
@@ -36,8 +37,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("query-worker")
-
-QUERY_QUEUE_KEY = "mailai:jobs:query"
 
 
 async def _telegram_reply(bot_token: str, chat_id: str, text: str) -> None:

@@ -36,7 +36,7 @@ from app.accounts.models import EmailAccount
 from app.messages.models import EmailMessage
 from app.classification.learned_rules import LearnedRule
 from app.ingestion.imap.client import connect_imap, move_message
-from app.query.worker import QUERY_QUEUE_KEY
+from app.query.queue import QUERY_QUEUE_KEY
 
 logging.basicConfig(
     level=logging.INFO,
