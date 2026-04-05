@@ -36,7 +36,7 @@ from app.accounts.models import EmailAccount
 from app.messages.models import EmailMessage
 from app.classification.learned_rules import LearnedRule
 from app.ingestion.imap.client import connect_imap, move_message
-from app.query.queue import QUERY_QUEUE_KEY
+from app.query.queue import QUERY_QUEUE_KEY, RESULT_KEY_PREFIX
 
 logging.basicConfig(
     level=logging.INFO,
@@ -346,6 +346,40 @@ async def handle_search_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 # ------------------------------------------------------------------------------
+# Handlers: query_show:{result_id} / query_email:{result_id}
+# Push a delivery job back to the query-worker via Redis
+# ------------------------------------------------------------------------------
+
+async def handle_query_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    result_id = query.data.split(":", 1)[1]
+    await _push_delivery_job(query, result_id, "inline")
+    await query.edit_message_text("📱 Fetching results…")
+
+
+async def handle_query_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    result_id = query.data.split(":", 1)[1]
+    await _push_delivery_job(query, result_id, "email")
+    await query.edit_message_text("📧 Sending results by email…")
+
+
+async def _push_delivery_job(query, result_id: str, method: str):
+    _, settings = get_session_factory()
+    r = aioredis.from_url(settings.redis_url, decode_responses=True)
+    job = json.dumps({
+        "type": "query_deliver",
+        "result_id": result_id,
+        "method": method,
+        "chat_id": str(query.message.chat_id),
+    })
+    await r.lpush(QUERY_QUEUE_KEY, job)
+    await r.aclose()
+
+
+# ------------------------------------------------------------------------------
 # Handler: skip_learn:{email_id}
 # ------------------------------------------------------------------------------
 
@@ -373,11 +407,13 @@ def main():
     )
 
     app.add_handler(CommandHandler("search", handle_search_command))
-    app.add_handler(CallbackQueryHandler(handle_classify,      pattern=r"^classify:"))
-    app.add_handler(CallbackQueryHandler(handle_learn_move,    pattern=r"^learn_move:"))
-    app.add_handler(CallbackQueryHandler(handle_learn_ask_path,pattern=r"^learn_ask_path:"))
-    app.add_handler(CallbackQueryHandler(handle_learn_pdf,     pattern=r"^learn_pdf:"))
-    app.add_handler(CallbackQueryHandler(handle_skip_learn,    pattern=r"^skip_learn:"))
+    app.add_handler(CallbackQueryHandler(handle_classify,       pattern=r"^classify:"))
+    app.add_handler(CallbackQueryHandler(handle_learn_move,     pattern=r"^learn_move:"))
+    app.add_handler(CallbackQueryHandler(handle_learn_ask_path, pattern=r"^learn_ask_path:"))
+    app.add_handler(CallbackQueryHandler(handle_learn_pdf,      pattern=r"^learn_pdf:"))
+    app.add_handler(CallbackQueryHandler(handle_skip_learn,     pattern=r"^skip_learn:"))
+    app.add_handler(CallbackQueryHandler(handle_query_show,     pattern=r"^query_show:"))
+    app.add_handler(CallbackQueryHandler(handle_query_email,    pattern=r"^query_email:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     logger.info("🤖 Telegram bot started — polling for callbacks...")
