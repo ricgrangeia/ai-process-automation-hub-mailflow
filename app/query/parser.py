@@ -51,11 +51,14 @@ async def parse_query(user_message: str, settings) -> dict:
     """
     today = date.today().isoformat()
 
+    user_prompt = f"""{_SYSTEM_PROMPT}
+
+Request: {user_message} (today={today})
+"""
     payload = {
         "model": settings.llm_model,
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": f"Today is {today}. Extract email search filters as JSON from this request: {user_message}"},
+            {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.0,
         "max_tokens": 200,
