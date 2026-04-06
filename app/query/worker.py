@@ -99,7 +99,7 @@ async def _handle_search(job: dict, settings, session_factory, r) -> None:
     if not emails:
         await _telegram_send(
             settings.telegram_bot_token, chat_id,
-            f"📭 No emails found.\n_Filters used: {filter_summary}_"
+            f"📭 No emails found matching your query.\nFilters used: {filter_summary}"
         )
         return
 
@@ -132,10 +132,10 @@ async def _handle_search(job: dict, settings, session_factory, r) -> None:
             {"text": "📧 Send by email", "callback_data": f"query_email:{result_id}"},
         ]
     ]
-    smtp_note = "" if settings.smtp_host else "\n_(SMTP not configured — only inline available)_"
+    smtp_note = "" if settings.smtp_host else "\nSMTP not configured — only inline available."
     await _telegram_send(
         settings.telegram_bot_token, chat_id,
-        f"✅ Found *{len(emails)}* email(s).\n_Filters: {filter_summary}_\n\nHow would you like the results?{smtp_note}",
+        f"✅ Found *{len(emails)}* email(s).\nFilters: {filter_summary}\n\nHow would you like the results?{smtp_note}",
         keyboard=keyboard,
     )
 

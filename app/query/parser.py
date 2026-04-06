@@ -27,19 +27,22 @@ folder must be one of: Invoices, Work, Personal, Marketing, Spam, Other, or null
 Dates format: YYYY-MM-DD.
 
 Examples:
-Request: invoices from amazon.com January 2026
-{"sender_domain":"amazon.com","sender_email":null,"folder":"Invoices","date_from":"2026-01-01","date_to":"2026-01-31","keyword":null}
+Request: invoices from shop.pt January 2026
+{"sender_domain":"shop.pt","sender_email":null,"folder":"Invoices","date_from":"2026-01-01","date_to":"2026-01-31","keyword":null}
 
-Request: marketing emails this year (today=2026-04-05)
+Request: any invoice emails
+{"sender_domain":null,"sender_email":null,"folder":"Invoices","date_from":null,"date_to":null,"keyword":null}
+
+Request: marketing emails this year (today=2026-04-06)
 {"sender_domain":null,"sender_email":null,"folder":"Marketing","date_from":"2026-01-01","date_to":"2026-12-31","keyword":null}
 
-Request: how many work emails last month (today=2026-04-05)
+Request: how many work emails last month (today=2026-04-06)
 {"sender_domain":null,"sender_email":null,"folder":"Work","date_from":"2026-03-01","date_to":"2026-03-31","keyword":null}
 
 Request: emails from john@company.com with keyword meeting
 {"sender_domain":null,"sender_email":"john@company.com","folder":null,"date_from":null,"date_to":null,"keyword":"meeting"}
 
-Request: spam this month (today=2026-04-05)
+Request: spam this month (today=2026-04-06)
 {"sender_domain":null,"sender_email":null,"folder":"Spam","date_from":"2026-04-01","date_to":"2026-04-30","keyword":null}"""
 
 
