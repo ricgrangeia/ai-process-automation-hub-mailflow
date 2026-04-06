@@ -138,6 +138,8 @@ services:
       SMTP_USER: ${SMTP_USER}
       SMTP_PASSWORD: ${SMTP_PASSWORD}
       REPORT_RECIPIENT: ${REPORT_RECIPIENT}
+    volumes:
+      - mail_storage:/storage
     networks:
       - mail
       - database
