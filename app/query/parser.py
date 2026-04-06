@@ -69,7 +69,7 @@ Request: {user_message} (today={today})
             r = await client.post(
                 f"{settings.llm_base_url}/chat/completions",
                 json=payload,
-                headers={"x-api-key": settings.llm_api_key},
+                headers={"Authorization": f"Bearer {settings.llm_api_key}"},
             )
             r.raise_for_status()
             content = r.json()["choices"][0]["message"]["content"]
