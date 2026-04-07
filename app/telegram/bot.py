@@ -25,7 +25,7 @@ _project_root = str(Path(__file__).resolve().parent.parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update as sa_update
 
 import redis.asyncio as aioredis
 
@@ -160,7 +160,7 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async with session_factory() as session:
         await session.execute(
-            update(EmailMessage)
+            sa_update(EmailMessage)
             .where(EmailMessage.id == email_id)
             .values(
                 status="moved" if move_success else "failed_move",
@@ -346,7 +346,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )).scalar_one_or_none()
             if email_row:
                 await session.execute(
-                    update(EmailMessage)
+                    sa_update(EmailMessage)
                     .where(EmailMessage.id == email_id)
                     .values(sender_name=text)
                 )
@@ -473,7 +473,7 @@ async def handle_rv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async with session_factory() as session:
         await session.execute(
-            update(EmailMessage)
+            sa_update(EmailMessage)
             .where(EmailMessage.id == email_id)
             .values(status="moved", classification_label=folder,
                     processed_at=datetime.now(timezone.utc))
@@ -532,7 +532,7 @@ async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYP
 
     async with session_factory() as session:
         await session.execute(
-            update(EmailMessage)
+            sa_update(EmailMessage)
             .where(EmailMessage.id == email_id)
             .values(status="moved", classification_label=folder,
                     processed_at=datetime.now(timezone.utc))
@@ -627,7 +627,7 @@ async def handle_rv_set_sender(update: Update, context: ContextTypes.DEFAULT_TYP
     session_factory, _ = get_session_factory()
     async with session_factory() as session:
         await session.execute(
-            update(EmailMessage)
+            sa_update(EmailMessage)
             .where(EmailMessage.id == email_id)
             .values(sender_type=sender_type)
         )
