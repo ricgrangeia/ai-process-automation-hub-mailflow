@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 1.6.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 1.7.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -47,6 +47,7 @@ for supervision and account management.
 | Alembic migrations — auto-applied on ai-worker startup, schema always up to date | ✅ |
 | Audit log — every action recorded with actor, timestamp, details | ✅ |
 | Dashboard Audit Log page — filterable by actor, action type, date range | ✅ |
+| Dashboard Learned Rules page — view, enable/disable, edit, delete, add manually | ✅ |
 
 ---
 
@@ -266,14 +267,27 @@ After login, two pages are available from the sidebar:
 - Total emails processed, average AI confidence, average processing time
 - Pie chart — classification distribution
 - Bar chart — rule vs LLM decisions
-- Audit table — last 200 processed emails
+- Audit table — last 200 processed emails with sender identity
 
 **✉️ Email Accounts**
 
 - List all configured accounts with active/inactive status
 - Add IMAP account (password encrypted at rest with Fernet)
 - Add Outlook / Microsoft 365 account
-- Activate / deactivate / delete accounts
+- Activate / deactivate / reset password
+
+**📚 Learned Rules**
+
+- View all learned rules with hit count, match condition, and action summary
+- Enable / disable rules without deleting them
+- Edit match field, match value, target folder, and PDF path inline
+- Delete rules permanently
+- Add rules manually without going through Telegram
+
+**📋 Audit Log**
+
+- Filterable by actor name, action type, and date range
+- Covers all system actions: AI classifications, human corrections, rule changes, account management, admin commands, DB migrations
 
 ---
 
@@ -313,7 +327,6 @@ make shell          # Shell into ai-worker container
 - [ ] REST API (FastAPI) for external integrations
 - [ ] Webhook notifications on classification events
 - [ ] Docker health check endpoints
-- [ ] Learned rules dashboard page (view, edit, disable rules)
 - [ ] PostgreSQL full-text search (GIN index on subject + body)
 - [x] Alembic database migrations — auto-applied on startup
 - [x] Redis queue durability on reboot / restart (AOF persistence)
@@ -324,6 +337,7 @@ make shell          # Shell into ai-worker container
 - [x] Sender identity extraction — company/person + name via LLM
 - [x] Admin commands — /status, /recover, /restart, /learn
 - [x] Audit log — full action trail with actor, timestamp, details; dashboard page with filters
+- [x] Learned rules dashboard page — view, enable/disable, edit, delete, add manually
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

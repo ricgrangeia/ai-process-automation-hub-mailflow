@@ -403,6 +403,263 @@ def page_email_accounts(engine, settings):
 
 
 # ---------------------------------------------------------------------------
+# Page: Learned Rules
+# ---------------------------------------------------------------------------
+
+FOLDERS = ["Invoices", "Work", "Personal", "Marketing", "Spam", "Other"]
+MATCH_FIELDS = ["sender_domain", "sender_email", "subject_contains", "body_contains"]
+
+
+def _actions_summary(actions: list) -> str:
+    """Human-readable summary of a rule's actions list."""
+    parts = []
+    for a in actions or []:
+        if a.get("type") == "move_folder":
+            parts.append(f"📁 Move → {a.get('folder', '?')}")
+        elif a.get("type") == "export_pdf":
+            parts.append(f"📄 PDF → {a.get('path', '?')}")
+    return "  |  ".join(parts) if parts else "—"
+
+
+def page_learned_rules(engine, settings):
+    st.title("📚 Learned Rules")
+    st.caption("Rules are applied before the AI classifier — zero LLM cost, instant decisions.")
+
+    try:
+        df = pd.read_sql(
+            """
+            SELECT id, tenant_id, match_field, match_value, actions,
+                   hit_count, active, created_at
+            FROM learned_rules
+            ORDER BY active DESC, hit_count DESC, created_at DESC
+            """,
+            engine,
+        )
+    except Exception as e:
+        st.error(f"❌ Could not load rules: {e}")
+        return
+
+    if df.empty:
+        st.info("No learned rules yet. Rules are created when you correct an email in Telegram.")
+    else:
+        st.metric("Total rules", len(df))
+        active_count = df["active"].sum()
+        st.caption(f"{active_count} active · {len(df) - active_count} disabled")
+
+        for _, row in df.iterrows():
+            rule_id = int(row["id"])
+            is_active = bool(row["active"])
+            border_color = "#34d399" if is_active else "#4a4a4a"
+
+            with st.container(border=True):
+                c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
+
+                with c1:
+                    field_icon = {
+                        "sender_domain": "🌐",
+                        "sender_email": "📧",
+                        "subject_contains": "📝",
+                        "body_contains": "📄",
+                    }.get(row["match_field"], "❓")
+                    st.markdown(
+                        f"**{field_icon} {row['match_field']}** = `{row['match_value']}`  \n"
+                        f"{_actions_summary(row['actions'])}"
+                    )
+
+                with c2:
+                    st.markdown(
+                        f"Hits: **{int(row['hit_count'])}**  \n"
+                        f"Tenant: `{row['tenant_id']}`  \n"
+                        f"Created: {str(row['created_at'])[:10]}"
+                    )
+
+                with c3:
+                    st.markdown(f"{'🟢 Active' if is_active else '🔴 Disabled'}")
+
+                with c4:
+                    toggle_label = "Disable" if is_active else "Enable"
+                    if st.button(toggle_label, key=f"rule_toggle_{rule_id}"):
+                        with engine.begin() as conn:
+                            conn.execute(
+                                text("UPDATE learned_rules SET active = :val WHERE id = :id"),
+                                {"val": not is_active, "id": rule_id},
+                            )
+                        from app.core.audit import log_audit_sync
+                        log_audit_sync(
+                            engine,
+                            actor_type="dashboard",
+                            actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                            action="rule.toggled",
+                            entity_type="rule",
+                            entity_id=rule_id,
+                            details={
+                                "match_field": row["match_field"],
+                                "match_value": row["match_value"],
+                                "active": not is_active,
+                            },
+                        )
+                        st.rerun()
+
+                # Edit expander
+                with st.expander(f"✏️ Edit rule #{rule_id}"):
+                    with st.form(f"edit_rule_{rule_id}"):
+                        ef1, ef2 = st.columns(2)
+                        new_field = ef1.selectbox(
+                            "Match field", MATCH_FIELDS,
+                            index=MATCH_FIELDS.index(row["match_field"])
+                            if row["match_field"] in MATCH_FIELDS else 0,
+                            key=f"field_{rule_id}",
+                        )
+                        new_value = ef2.text_input(
+                            "Match value", value=row["match_value"], key=f"value_{rule_id}"
+                        )
+
+                        # Parse existing actions for prefill
+                        acts = row["actions"] or []
+                        existing_folder = next(
+                            (a.get("folder") for a in acts if a.get("type") == "move_folder"), None
+                        )
+                        existing_pdf = next(
+                            (a.get("path") for a in acts if a.get("type") == "export_pdf"), None
+                        )
+
+                        af1, af2 = st.columns(2)
+                        new_folder = af1.selectbox(
+                            "Move to folder",
+                            ["(none)"] + FOLDERS,
+                            index=(FOLDERS.index(existing_folder) + 1)
+                            if existing_folder in FOLDERS else 0,
+                            key=f"folder_{rule_id}",
+                        )
+                        new_pdf_path = af2.text_input(
+                            "Export PDF path (blank = off)",
+                            value=existing_pdf or "",
+                            key=f"pdf_{rule_id}",
+                        )
+
+                        if st.form_submit_button("💾 Save changes", use_container_width=True):
+                            new_actions = []
+                            if new_folder != "(none)":
+                                new_actions.append({"type": "move_folder", "folder": new_folder})
+                            if new_pdf_path.strip():
+                                new_actions.append({"type": "export_pdf", "path": new_pdf_path.strip()})
+
+                            import json as _json
+                            with engine.begin() as conn:
+                                conn.execute(
+                                    text(
+                                        "UPDATE learned_rules "
+                                        "SET match_field = :mf, match_value = :mv, actions = :ac::jsonb "
+                                        "WHERE id = :id"
+                                    ),
+                                    {
+                                        "mf": new_field,
+                                        "mv": new_value,
+                                        "ac": _json.dumps(new_actions),
+                                        "id": rule_id,
+                                    },
+                                )
+                            from app.core.audit import log_audit_sync
+                            log_audit_sync(
+                                engine,
+                                actor_type="dashboard",
+                                actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                                action="rule.updated",
+                                entity_type="rule",
+                                entity_id=rule_id,
+                                details={
+                                    "match_field": new_field,
+                                    "match_value": new_value,
+                                    "actions": new_actions,
+                                },
+                            )
+                            st.success("Rule updated.")
+                            st.rerun()
+
+                    # Delete button outside form
+                    if st.button("🗑️ Delete rule", key=f"del_{rule_id}", type="secondary"):
+                        with engine.begin() as conn:
+                            conn.execute(
+                                text("DELETE FROM learned_rules WHERE id = :id"), {"id": rule_id}
+                            )
+                        from app.core.audit import log_audit_sync
+                        log_audit_sync(
+                            engine,
+                            actor_type="dashboard",
+                            actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                            action="rule.deleted",
+                            entity_type="rule",
+                            entity_id=rule_id,
+                            details={
+                                "match_field": row["match_field"],
+                                "match_value": row["match_value"],
+                            },
+                        )
+                        st.rerun()
+
+    st.divider()
+
+    # ── Add rule manually ──
+    st.subheader("➕ Add Rule Manually")
+    with st.form("add_rule_form"):
+        ac1, ac2 = st.columns(2)
+        a_tenant = ac1.number_input("Tenant ID", min_value=1, value=1, step=1)
+        a_field = ac2.selectbox("Match field", MATCH_FIELDS)
+        a_value = st.text_input("Match value", placeholder="amazon.com")
+        ac3, ac4 = st.columns(2)
+        a_folder = ac3.selectbox("Move to folder", ["(none)"] + FOLDERS)
+        a_pdf = ac4.text_input("Export PDF path (blank = off)", placeholder="Company/{year}/{month}/")
+        submitted = st.form_submit_button("Add Rule", use_container_width=True)
+
+    if submitted:
+        if not a_value.strip():
+            st.error("Match value is required.")
+        else:
+            import json as _json
+            new_actions = []
+            if a_folder != "(none)":
+                new_actions.append({"type": "move_folder", "folder": a_folder})
+            if a_pdf.strip():
+                new_actions.append({"type": "export_pdf", "path": a_pdf.strip()})
+            if not new_actions:
+                st.error("At least one action (folder or PDF) is required.")
+            else:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text(
+                                "INSERT INTO learned_rules "
+                                "(tenant_id, match_field, match_value, actions, active) "
+                                "VALUES (:tid, :mf, :mv, :ac::jsonb, true)"
+                            ),
+                            {
+                                "tid": int(a_tenant),
+                                "mf": a_field,
+                                "mv": a_value.strip(),
+                                "ac": _json.dumps(new_actions),
+                            },
+                        )
+                    from app.core.audit import log_audit_sync
+                    log_audit_sync(
+                        engine,
+                        actor_type="dashboard",
+                        actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                        action="rule.created",
+                        entity_type="rule",
+                        details={
+                            "match_field": a_field,
+                            "match_value": a_value.strip(),
+                            "actions": new_actions,
+                        },
+                        tenant_id=int(a_tenant),
+                    )
+                    st.success(f"Rule added: `{a_field}` = `{a_value.strip()}`")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Page: Audit Log
 # ---------------------------------------------------------------------------
 
@@ -415,9 +672,10 @@ def page_audit_log(engine):
     action_filter = col_action.selectbox(
         "Action",
         ["(all)", "email.classified", "email.reclassified", "email.approved",
-         "email.sender_corrected", "rule.created", "system.restart",
-         "system.recover", "system.learning_mode", "query.searched",
-         "db.migrated", "account.added", "account.toggled", "account.password_changed"],
+         "email.sender_corrected", "rule.created", "rule.updated", "rule.toggled",
+         "rule.deleted", "system.restart", "system.recover", "system.learning_mode",
+         "query.searched", "db.migrated", "account.added", "account.toggled",
+         "account.password_changed"],
     )
     days = col_days.number_input("Last N days", min_value=1, max_value=365, value=7)
 
@@ -466,6 +724,9 @@ def page_audit_log(engine):
             "email.approved": "✅",
             "email.sender_corrected": "🏷️",
             "rule.created": "📚",
+            "rule.updated": "✏️",
+            "rule.toggled": "🔁",
+            "rule.deleted": "🗑️",
             "system.restart": "🔄",
             "system.recover": "♻️",
             "system.learning_mode": "🎓",
@@ -512,7 +773,7 @@ if login_screen():
     st.sidebar.info(f"**Model:** {settings.llm_model}")
     st.sidebar.info(f"**Inbox:** {settings.inbox_folder}")
 
-    page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts", "📋 Audit Log"])
+    page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts", "📚 Learned Rules", "📋 Audit Log"])
 
     if st.sidebar.button("Logout"):
         st.session_state["authenticated"] = False
@@ -522,5 +783,7 @@ if login_screen():
         page_dashboard(engine, settings)
     elif page == "✉️ Email Accounts":
         page_email_accounts(engine, settings)
+    elif page == "📚 Learned Rules":
+        page_learned_rules(engine, settings)
     elif page == "📋 Audit Log":
         page_audit_log(engine)

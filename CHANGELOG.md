@@ -142,6 +142,22 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [1.7.0] — 2026-04-07
+
+### Added
+
+- **Dashboard — 📚 Learned Rules page** — full CRUD management of learned rules without touching the database:
+  - Cards show match condition (`🌐 sender_domain`, `📧 sender_email`, `📝 subject_contains`, `📄 body_contains`),
+    action summary (`📁 Move → Invoices  |  📄 PDF → path`), hit count, tenant, and creation date
+  - **Enable / Disable** toggle per rule — disabling a rule keeps it for reference without deleting it
+  - **✏️ Edit** expander — change match field, match value, target folder, and PDF export path inline
+  - **🗑️ Delete** button — permanently removes the rule
+  - **➕ Add Rule Manually** form at the bottom — create rules without needing to go through Telegram
+  - All changes (toggle, edit, delete, add) are written to the audit log
+- `rule.toggled`, `rule.updated`, `rule.deleted` added to audit log action filter and icon map in dashboard
+
+---
+
 ## [1.6.0] — 2026-04-07
 
 ### Added

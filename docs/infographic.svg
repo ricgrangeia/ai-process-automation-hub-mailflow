@@ -181,33 +181,32 @@
   <text x="695" y="460" text-anchor="middle" fill="#8892a4" font-size="10">Alembic Migrations · Audit Log</text>
 
   <!-- PostgreSQL → Dashboard -->
-  <line x1="695" y1="470" x2="695" y2="510" stroke="#4a9eff" stroke-width="1.5" opacity="0.6" marker-end="url(#arrow)"/>
+  <line x1="695" y1="470" x2="695" y2="508" stroke="#4a9eff" stroke-width="1.5" opacity="0.6" marker-end="url(#arrow)"/>
 
   <!-- ── Dashboard ── -->
-  <rect x="490" y="510" width="410" height="85" rx="8" fill="url(#blueGrad)" stroke="#60a5fa" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="490" y="510" width="410" height="100" rx="8" fill="url(#blueGrad)" stroke="#60a5fa" stroke-width="1" filter="url(#shadow)"/>
   <text x="695" y="530" text-anchor="middle" fill="#60a5fa" font-size="9" letter-spacing="2">SUPERVISION</text>
   <text x="695" y="548" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600">📊 Streamlit Dashboard</text>
 
-  <!-- Dashboard items -->
-  <rect x="502" y="556" width="86" height="30" rx="4" fill="#0d2137" stroke="#4a9eff" stroke-width="0.5"/>
-  <text x="545" y="567" text-anchor="middle" fill="#93c5fd" font-size="9">KPI Metrics</text>
-  <text x="545" y="579" text-anchor="middle" fill="#8892a4" font-size="8">Confidence · Speed</text>
+  <!-- Dashboard items — row 1 -->
+  <rect x="502" y="556" width="92" height="24" rx="4" fill="#0d2137" stroke="#4a9eff" stroke-width="0.5"/>
+  <text x="548" y="572" text-anchor="middle" fill="#93c5fd" font-size="9">📊 KPI + Charts</text>
 
-  <rect x="596" y="556" width="86" height="30" rx="4" fill="#0d2137" stroke="#4a9eff" stroke-width="0.5"/>
-  <text x="639" y="567" text-anchor="middle" fill="#93c5fd" font-size="9">Classification</text>
-  <text x="639" y="579" text-anchor="middle" fill="#8892a4" font-size="8">Charts · Breakdown</text>
+  <rect x="602" y="556" width="92" height="24" rx="4" fill="#0d2137" stroke="#4a9eff" stroke-width="0.5"/>
+  <text x="648" y="572" text-anchor="middle" fill="#93c5fd" font-size="9">✉️ Email Accounts</text>
 
-  <rect x="690" y="556" width="86" height="30" rx="4" fill="#0d2137" stroke="#4a9eff" stroke-width="0.5"/>
-  <text x="733" y="567" text-anchor="middle" fill="#93c5fd" font-size="9">Sender Identity</text>
-  <text x="733" y="579" text-anchor="middle" fill="#8892a4" font-size="8">🏢 Company · 👤 Person</text>
+  <!-- Dashboard items — row 2 -->
+  <rect x="502" y="584" width="92" height="24" rx="4" fill="#180d2e" stroke="#a78bfa" stroke-width="0.8"/>
+  <text x="548" y="600" text-anchor="middle" fill="#c4b5fd" font-size="9">📚 Learned Rules</text>
 
-  <rect x="784" y="556" width="50" height="30" rx="4" fill="#0d2137" stroke="#4a9eff" stroke-width="0.5"/>
-  <text x="809" y="567" text-anchor="middle" fill="#93c5fd" font-size="9">Accounts</text>
-  <text x="809" y="579" text-anchor="middle" fill="#8892a4" font-size="8">IMAP · Outlook</text>
+  <rect x="602" y="584" width="92" height="24" rx="4" fill="#180d2e" stroke="#a78bfa" stroke-width="0.8"/>
+  <text x="648" y="600" text-anchor="middle" fill="#c4b5fd" font-size="9">📋 Audit Log</text>
 
-  <rect x="838" y="556" width="50" height="30" rx="4" fill="#180d2e" stroke="#a78bfa" stroke-width="0.8"/>
-  <text x="863" y="567" text-anchor="middle" fill="#c4b5fd" font-size="9">Audit Log</text>
-  <text x="863" y="579" text-anchor="middle" fill="#8892a4" font-size="8">📋 filterable</text>
+  <!-- Learned rules callout -->
+  <rect x="702" y="556" width="186" height="52" rx="4" fill="#100d1a" stroke="#a78bfa" stroke-width="0.8"/>
+  <text x="795" y="572" text-anchor="middle" fill="#c4b5fd" font-size="9" font-weight="600">📚 Learned Rules CRUD</text>
+  <text x="795" y="585" text-anchor="middle" fill="#8892a4" font-size="8">Enable · Disable · Edit · Delete</text>
+  <text x="795" y="597" text-anchor="middle" fill="#8892a4" font-size="8">Add manually · Hit count · Audited</text>
 
   <!-- ── Audit Log badge (anchored to PostgreSQL row) ── -->
   <rect x="40" y="408" width="160" height="62" rx="8" fill="#100d1a" stroke="#a78bfa" stroke-width="1" filter="url(#shadow)"/>
@@ -322,6 +321,6 @@
 
   <!-- ── Footer ── -->
   <line x1="60" y1="844" x2="840" y2="844" stroke="#4a9eff" stroke-width="0.5" opacity="0.3"/>
-  <text x="450" y="866" text-anchor="middle" fill="#4a6080" font-size="9">Appa8 AI Process Automation Hub · MailFlow Engine v1.6.0 · on-premise · GDPR-friendly</text>
+  <text x="450" y="866" text-anchor="middle" fill="#4a6080" font-size="9">Appa8 AI Process Automation Hub · MailFlow Engine v1.7.0 · on-premise · GDPR-friendly</text>
 
 </svg>
