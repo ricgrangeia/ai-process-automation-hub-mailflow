@@ -328,6 +328,9 @@ async def ai_worker_loop():
                     subject=email.subject,
                     sender=email.from_address,
                     confidence=confidence,
+                    source=source,
+                    rule_folder=getattr(classification, 'rule_folder', None),
+                    llm_folder=getattr(classification, 'llm_folder', None),
                 )
                 if sent:
                     async with session_factory() as s:

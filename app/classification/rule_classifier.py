@@ -40,7 +40,9 @@ class RuleClassifier:
 
         for match_fn, folder, confidence in _HARDCODED:
             if match_fn(subject, body):
-                return ClassificationResult(folder, confidence)
+                result = ClassificationResult(folder, confidence)
+                result.source = "rule"
+                return result
 
         return None
 
@@ -91,7 +93,9 @@ class RuleClassifier:
                         "NeedsReview"
                     )
                     logger.info(f"Learned rule matched: {rule.match_field}={rule.match_value} → {folder}")
-                    return ClassificationResult(folder, 1.0)
+                    result = ClassificationResult(folder, 1.0)
+                    result.source = "rule"
+                    return result
 
         except Exception as e:
             logger.warning(f"Learned rule check failed (falling through to LLM): {e}")

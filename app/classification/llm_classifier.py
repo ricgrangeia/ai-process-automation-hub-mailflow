@@ -11,7 +11,28 @@ class LLMClassifier:
     def __init__(self, settings):
         self.settings = settings
 
-    async def classify(self, email):
+    async def classify(self, email, rule_hint: str | None = None):
+        """
+        Classify an email.
+
+        rule_hint: if provided, a learned rule has already suggested this folder.
+                   The LLM is asked to validate the suggestion rather than classify
+                   from scratch — it should agree (high confidence) or flag a conflict.
+        """
+
+        if rule_hint:
+            hint_block = (
+                f"\nA learned rule — based on a previous human-confirmed decision for "
+                f"this sender — suggests this email belongs to: **{rule_hint}**\n"
+                f"Validate this carefully:\n"
+                f"- If the email content matches what you would expect for \"{rule_hint}\", "
+                f"return \"{rule_hint}\" with confidence ≥ 0.90.\n"
+                f"- If the content seems different from what the rule expects "
+                f"(e.g. same sender domain but this email is a newsletter, not an invoice), "
+                f"return the correct folder independently with your honest confidence.\n"
+            )
+        else:
+            hint_block = ""
 
         payload = {
             "model": self.settings.llm_model,
@@ -25,7 +46,7 @@ class LLMClassifier:
                     "content": f"""
 Classify into one of:
 Invoices, Work, Personal, Marketing, Spam, Other
-
+{hint_block}
 Also identify the sender:
 - sender_type: "company" if sent by a business/organisation, "person" if sent by an individual
 - sender_name: the company name (e.g. "Amazon", "LinkedIn") or person's name (e.g. "João Silva") — NOT the email address

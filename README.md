@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 1.9.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 2.0.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -54,6 +54,8 @@ for supervision and account management.
 | `/status` shows current operation mode | ✅ |
 | Unit test suite — 62+ tests, no external services required | ✅ |
 | CI pipeline — tests gate every push; deploy to Portainer only if tests pass | ✅ |
+| Rule validation — LLM always confirms rule matches; conflicts routed to human | ✅ |
+| Rule conflict card — Telegram shows rule vs AI disagreement for human decision | ✅ |
 
 ---
 
@@ -72,27 +74,32 @@ IMAP / Outlook
       ▼
    ai-worker  [Operation Mode — reads from Redis per job]
    │
-   ├─ hybrid (default)  Rules first → LLM fallback
+   ├─ hybrid (default)  Rule as hint → LLM always validates
    ├─ rules_only        Only learned rules · unmatched → NeedsReview · zero LLM cost
    ├─ llm_only          Always LLM · skips rules · model quality audit
    └─ auto_learn        Hybrid + auto-save rules when confidence ≥ 0.90
       │
       ├─ Learned Rules  (DB-backed · source: human | ai_auto)
-      ├─ Rule Classifier  (fast, deterministic)
-      └─ LLM Classifier   (Qwen 2.5 · extracts folder + sender identity)
+      ├─ Rule Classifier  (fast, deterministic — produces a hint, not a final answer)
+      └─ LLM Classifier   (Qwen 2.5 · validates rule hint · extracts sender identity)
          │
-         ├─ confidence ≥ 0.75 + Learning Mode OFF ──▶ Actions
-         │                                             ├─▶ move_folder  (IMAP)
-         │                                             └─▶ export_pdf   (disk · {year}/{month})
+         ├─ Rule matched + LLM agrees ──▶ source="rule_confirmed" · confidence ≥ 0.95
+         │                                 └─▶ Actions (move_folder · export_pdf)
          │
-         ├─ confidence ≥ 0.75 + Learning Mode ON  ──▶ review-worker
-         │   (only if not matched by learned rule)      └─▶ Telegram review card
-         │                                                   ├─▶ Approve → move
-         │                                                   ├─▶ Change folder → move + save rule?
-         │                                                   └─▶ Fix sender → update identity
+         ├─ Rule matched + LLM disagrees ──▶ source="rule_conflict" · Telegram conflict card
+         │                                    ⚠️ "Rule says Invoices · AI says Marketing"
+         │                                    └─▶ You decide → move + optionally update rule
          │
-         ├─ confidence < 0.75 ──▶ Telegram NeedsReview
-         │                         └─▶ You reply → move + learn rule
+         ├─ No rule + confidence ≥ 0.75 + Learning Mode OFF ──▶ Actions
+         │
+         ├─ No rule + confidence ≥ 0.75 + Learning Mode ON  ──▶ review-worker
+         │                                                        └─▶ Telegram review card
+         │                                                            ├─▶ Approve → move
+         │                                                            ├─▶ Change folder → move + save rule?
+         │                                                            └─▶ Fix sender → update identity
+         │
+         ├─ No rule + confidence < 0.75 ──▶ Telegram NeedsReview
+         │                                   └─▶ You reply → move + learn rule
          │
          └─▶ Store metadata + telemetry + sender identity in PostgreSQL
                         │
@@ -374,6 +381,8 @@ make shell          # Shell into ai-worker container
 - [x] Auto-learn — high-confidence LLM decisions auto-saved as learned rules (source: ai_auto)
 - [x] Unit test suite — crypto, classifiers, operation mode, auto-save logic; no external services needed
 - [x] CI pipeline — tests gate every push; Portainer deploy only fires on master after green tests
+- [x] Rule validation — LLM always confirms rule matches; rule_confirmed (agree) or rule_conflict (disagree → human)
+- [x] Rule conflict card — Telegram shows exactly what rule said vs what AI said; human decides
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

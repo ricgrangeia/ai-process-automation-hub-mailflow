@@ -142,6 +142,39 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [2.0.0] — 2026-04-07
+
+### Changed (Breaking — classification behaviour)
+
+- **Rules are no longer hard overrides.** The LLM now always runs, using the matched rule as a hint for validation. This enables the system to catch exceptions — same sender domain, different email type (e.g. Amazon invoice vs Amazon newsletter).
+- **New classification sources:**
+  - `rule_confirmed` — rule matched AND LLM agreed; confidence boosted to ≥ 0.95; email moved automatically
+  - `rule_conflict` — rule and LLM disagree; email routed to Telegram for human decision
+  - `rule` — hardcoded pattern match (LLM validation not yet applied to hardcoded rules)
+- **`hybrid_classifier.py`** — complete rewrite of orchestration logic:
+  - Rule match → `llm.classify(email, rule_hint=folder)` — LLM receives the rule suggestion in its prompt
+  - Agreement → `source="rule_confirmed"`, confidence boosted
+  - Disagreement → `ClassificationResult("NeedsReview")` with `rule_folder` and `llm_folder` set
+  - No rule → pure LLM unchanged
+- **`llm_classifier.py`** — new `rule_hint` parameter; when provided, injects a validation context block into the user prompt explaining what the rule expects and asking the model to agree or flag a conflict
+- **`classification/contracts.py`** — `ClassificationResult` now has typed defaults for all attributes (`source`, `sender_type`, `sender_name`, token counts, `rule_folder`, `llm_folder`) — no more implicit dynamic attribute setting
+- **`rule_classifier.py`** — hardcoded and learned rule results now explicitly set `source="rule"`
+- **`telegram/notifications.py`** — `send_review_request` now accepts `source`, `rule_folder`, `llm_folder`; when `source="rule_conflict"` shows a distinct conflict card:
+  ```
+  ⚠️ Rule Conflict — human input needed
+  📚 Learned rule says: Invoices
+  🧠 AI says: Marketing (82%)
+  Which is correct?
+  ```
+- **`processing/worker.py`** — passes `source`, `rule_folder`, `llm_folder` from classification result to `send_review_request`
+- `rules_only` operation mode is unchanged — still hard override, LLM never runs
+
+### Fixed
+
+- `telegram/bot.py` — `update(EmailMessage)` crashed with `TypeError: 'Update' object is not callable` because the SQLAlchemy `update` import was shadowed by the Telegram `Update` handler parameter in all async handlers; fixed by aliasing import to `sa_update`
+
+---
+
 ## [1.9.0] — 2026-04-07
 
 ### Added
