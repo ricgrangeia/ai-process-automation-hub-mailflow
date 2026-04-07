@@ -165,6 +165,11 @@ def page_dashboard(engine, settings):
             SELECT
                 subject        AS "Assunto",
                 classification_label AS "Categoria",
+                CASE
+                    WHEN sender_type = 'company' THEN '🏢 ' || COALESCE(sender_name, from_address)
+                    WHEN sender_type = 'person'  THEN '👤 ' || COALESCE(sender_name, from_address)
+                    ELSE COALESCE(sender_name, from_address)
+                END            AS "Remetente",
                 ai_confidence  AS "Confiança",
                 ai_source      AS "Origem",
                 processing_time_seconds AS "Tempo(s)",

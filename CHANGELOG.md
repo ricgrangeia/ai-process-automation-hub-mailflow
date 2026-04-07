@@ -142,14 +142,55 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [1.5.0] — 2026-04-07
+
+### Added
+
+- **Learning Mode** — `/learn on/off` Telegram command; when ON, emails classified by the LLM (not a learned rule) are routed to human review before being moved, so the AI learns from every correction
+- **Review domain** (`app/review/`) — fully self-contained review module:
+  - `queue.py` — `REVIEW_QUEUE_KEY` and `LEARNING_MODE_KEY` constants (Redis flag `mailai:learning_mode`)
+  - `worker.py` — standalone Redis consumer that sends a rich Telegram review card with inline buttons per email
+- **Review card flow** — three actions per card:
+  - *Approve* — accept AI decision, move email immediately
+  - *Change folder* — pick correct folder from inline list; optionally save as a learned rule for that sender domain
+  - *Fix sender* — pick type (company / person) then free-type the name; updates DB record
+- **Sender identity extraction** — LLM extracts `sender_type` ("company" / "person") and `sender_name` (e.g. "Amazon", "João Silva") in the same classification call, zero extra inference cost
+- `sender_name` (TEXT) and `sender_type` (VARCHAR 16) columns added to `emails` table
+- **Dashboard Remetente column** — shows `🏢 Amazon` / `👤 João Silva` instead of raw email addresses
+- **Admin Telegram commands** with Telegram menu (set via `set_my_commands` on bot startup):
+  - `/status` — DB counts (total, moved, pending review) + Redis queue depths
+  - `/recover` — resets all `pending_review` emails back to `new` and re-enqueues them (fixes lost button taps during bot downtime)
+  - `/restart` — sends a poison-pill restart signal to all workers (email, ai, query, review); Docker restarts each automatically
+  - `/learn on|off` — toggle Learning Mode
+- **Query delivery choice** — before delivering search results the bot asks inline: *Show here* (Telegram summary) or *Send by email* (SMTP); result stored in Redis (10 min TTL)
+- **Alembic database migrations** — full setup with async engine support:
+  - `alembic.ini` — config at project root, DATABASE_URL read from environment
+  - `alembic/env.py` — async SQLAlchemy engine, all models imported for `--autogenerate`
+  - `alembic/versions/001_baseline.py` — no-op marking existing schema
+  - `alembic/versions/002_add_sender_fields.py` — adds `sender_name` and `sender_type`
+  - `app/core/migrations.py` — `run_migrations()` helper called on ai-worker startup
+  - ai-worker runs `alembic upgrade head` automatically on every start
+- `review-worker` service added to both `docker-compose.yml` and `docker-compose.local.yml`
+
+### Fixed
+
+- `classification/llm_classifier.py`: Authorization header was `x-api-key` — vLLM requires `Authorization: Bearer`; caused 401 on every LLM classification call
+- `query/parser.py`: same Bearer auth fix; timeout increased 30 s → 120 s; `ast.literal_eval` fallback for
+  single-quoted JSON from Qwen; null normalisation; all instructions moved from system prompt to user message
+  (FastAPI wrapper was stripping the system prompt); few-shot examples added (required for Qwen 2.5 to
+  reliably return clean JSON)
+- `telegram/bot.py`: filter summary with underscores caused Telegram 400 Bad Request with Markdown parse mode — removed italic markers from filter summary text
+- `processing/worker.py`: Learning Mode check correctly excludes emails already matched by a learned rule (`ai_source == "rule"`) to avoid re-reviewing already-known senders
+- `query/worker.py` container: `/storage` volume was not mounted — query results had 0 attachments; fixed in compose files
+
 ## [Unreleased]
 
 ### Planned
 
-- Alembic database migrations
 - Invoice / document OCR extraction
 - Supplier detection and matching
 - REST API (FastAPI) for external integrations
 - Webhook notifications on classification events
 - Health check endpoints for Docker liveness probes
 - Audit log viewer in dashboard
+- Learned rules dashboard page (view, edit, disable rules)

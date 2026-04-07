@@ -26,6 +26,8 @@ from app.classification.learned_rules import LearnedRule
 from app.processing.queue import QUEUE_KEY
 from app.processing.actions.base import get_action
 from app.telegram.notifications import send_review_request, send_worker_started
+from app.review.queue import REVIEW_QUEUE_KEY, LEARNING_MODE_KEY
+from app.core.migrations import run_migrations
 
 
 # ------------------------------------------------------------------------------
@@ -134,6 +136,9 @@ async def run_actions(email, account, settings, session_factory, folder: str) ->
 # ------------------------------------------------------------------------------
 
 async def ai_worker_loop():
+    # Apply any pending DB migrations before anything else touches the schema.
+    run_migrations()
+
     settings = get_settings()
 
     engine = make_engine(settings.database_url)
@@ -194,8 +199,46 @@ async def ai_worker_loop():
             folder = classification.folder
             confidence = classification.confidence
             source = getattr(classification, 'source', 'llm')
+            sender_type = getattr(classification, 'sender_type', None)
+            sender_name = getattr(classification, 'sender_name', None)
 
-            # 4️⃣ NeedsReview → delegate to human via Telegram
+            # 3b️⃣ Persist sender identity regardless of what happens next
+            async with session_factory() as s:
+                await s.execute(
+                    update(EmailMessage)
+                    .where(EmailMessage.id == email_id)
+                    .values(sender_type=sender_type, sender_name=sender_name)
+                )
+                await s.commit()
+
+            # 4️⃣ Learning Mode — route to review queue if not matched by a learned rule
+            learning_mode = await r.get(LEARNING_MODE_KEY)
+            if learning_mode and source != "rule" and folder != "NeedsReview":
+                review_job = json.dumps({
+                    "type": "review",
+                    "email_id": email_id,
+                    "folder": folder,
+                    "confidence": confidence,
+                    "source": source,
+                    "sender_type": sender_type,
+                    "sender_name": sender_name,
+                })
+                await r.lpush(REVIEW_QUEUE_KEY, review_job)
+                async with session_factory() as s:
+                    await s.execute(
+                        update(EmailMessage)
+                        .where(EmailMessage.id == email_id)
+                        .values(
+                            status="pending_review",
+                            ai_confidence=float(confidence),
+                            ai_source=str(source),
+                        )
+                    )
+                    await s.commit()
+                logger.info(f"📋 Email {email_id} sent to review-worker (learning mode).")
+                continue
+
+            # 5️⃣ NeedsReview → delegate to human via Telegram
             if folder == "NeedsReview" and settings.telegram_bot_token and settings.telegram_chat_id:
                 sent = await send_review_request(
                     bot_token=settings.telegram_bot_token,
@@ -243,7 +286,9 @@ async def ai_worker_loop():
                         processed_at=datetime.now(timezone.utc),
                         prompt_tokens=getattr(classification, 'prompt_tokens', 0),
                         completion_tokens=getattr(classification, 'completion_tokens', 0),
-                        total_tokens=getattr(classification, 'total_tokens', 0)
+                        total_tokens=getattr(classification, 'total_tokens', 0),
+                        sender_type=sender_type,
+                        sender_name=sender_name,
                     )
                 )
                 result = await update_session.execute(stmt)

@@ -38,6 +38,7 @@ from app.classification.learned_rules import LearnedRule
 from app.ingestion.imap.client import connect_imap, move_message
 from app.processing.queue import QUEUE_KEY as EMAIL_QUEUE_KEY
 from app.query.queue import QUERY_QUEUE_KEY, RESULT_KEY_PREFIX
+from app.review.queue import REVIEW_QUEUE_KEY, LEARNING_MODE_KEY
 
 logging.basicConfig(
     level=logging.INFO,
@@ -312,6 +313,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _persist_pdf_rule(update.message, email_id, folder, with_move, text)
         return
 
+    # Sender name input
+    if chat_id in _pending_sender_name:
+        email_id = _pending_sender_name.pop(chat_id)
+        session_factory, _ = get_session_factory()
+        async with session_factory() as session:
+            await session.execute(
+                update(EmailMessage)
+                .where(EmailMessage.id == email_id)
+                .values(sender_name=text)
+            )
+            await session.commit()
+        await update.message.reply_text(f"✅ Sender name saved: *{text}*", parse_mode="Markdown")
+        return
+
     # Treat as email search query — delegate to query-worker via Redis
     await _enqueue_query(update, text)
 
@@ -381,7 +396,176 @@ async def _push_delivery_job(query, result_id: str, method: str):
 
 
 # ------------------------------------------------------------------------------
-# Admin commands: /status, /recover, /restart
+# Review handlers: rv_approve / rv_folder / rv_set_folder / rv_save_rule /
+#                  rv_skip_rule / rv_sender / rv_set_sender
+# ------------------------------------------------------------------------------
+
+FOLDERS = ["Invoices", "Work", "Personal", "Marketing", "Spam", "Other"]
+
+# Pending sender name input: {chat_id: email_id}
+_pending_sender_name: dict[int, int] = {}
+
+
+async def handle_rv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    _, email_id_str, folder = query.data.split(":", 2)
+    email_id = int(email_id_str)
+
+    session_factory, settings = get_session_factory()
+
+    async with session_factory() as session:
+        email = (await session.execute(
+            select(EmailMessage).where(EmailMessage.id == email_id)
+        )).scalar_one_or_none()
+        account = (await session.execute(
+            select(EmailAccount).where(EmailAccount.id == email.account_id)
+        )).scalar_one_or_none() if email else None
+
+    if email and account:
+        await _do_move(settings, email, account, folder)
+
+    async with session_factory() as session:
+        await session.execute(
+            update(EmailMessage)
+            .where(EmailMessage.id == email_id)
+            .values(status="moved", classification_label=folder,
+                    processed_at=datetime.now(timezone.utc))
+        )
+        await session.commit()
+
+    await query.edit_message_text(f"✅ Approved → *{folder}*. No rule saved.", parse_mode="Markdown")
+
+
+async def handle_rv_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split(":", 2)
+    email_id = parts[1]
+    current = parts[2] if len(parts) > 2 else ""
+
+    keyboard = [
+        [{"text": f"{'✅ ' if f == current else ''}📁 {f}",
+          "callback_data": f"rv_set_folder:{email_id}:{f}"}]
+        for f in FOLDERS
+    ]
+    await query.edit_message_text(
+        "📁 Choose the correct folder:",
+        reply_markup={"inline_keyboard": keyboard},
+    )
+
+
+async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    _, email_id_str, folder = query.data.split(":", 2)
+    email_id = int(email_id_str)
+
+    session_factory, settings = get_session_factory()
+
+    async with session_factory() as session:
+        email = (await session.execute(
+            select(EmailMessage).where(EmailMessage.id == email_id)
+        )).scalar_one_or_none()
+        account = (await session.execute(
+            select(EmailAccount).where(EmailAccount.id == email.account_id)
+        )).scalar_one_or_none() if email else None
+
+    if email and account:
+        await _do_move(settings, email, account, folder)
+
+    async with session_factory() as session:
+        await session.execute(
+            update(EmailMessage)
+            .where(EmailMessage.id == email_id)
+            .values(status="moved", classification_label=folder,
+                    processed_at=datetime.now(timezone.utc))
+        )
+        await session.commit()
+
+    keyboard = [
+        [{"text": "💾 Save as rule", "callback_data": f"rv_save_rule:{email_id}:{folder}"}],
+        [{"text": "Skip — just this once", "callback_data": f"rv_skip_rule:{email_id}"}],
+    ]
+    await query.edit_message_text(
+        f"📁 Moved to *{folder}*.\n\nSave as a learned rule for future emails from this sender?",
+        parse_mode="Markdown",
+        reply_markup={"inline_keyboard": keyboard},
+    )
+
+
+async def handle_rv_save_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    _, email_id_str, folder = query.data.split(":", 2)
+    email_id = int(email_id_str)
+
+    session_factory, _ = get_session_factory()
+    async with session_factory() as session:
+        email = (await session.execute(
+            select(EmailMessage).where(EmailMessage.id == email_id)
+        )).scalar_one_or_none()
+
+    actions = [{"type": "move_folder", "folder": folder}]
+    domain = await _save_rule(session_factory, email, folder, actions)
+
+    if domain:
+        await query.edit_message_text(
+            f"📚 Rule saved — *{domain}* → *{folder}*.", parse_mode="Markdown"
+        )
+    else:
+        await query.edit_message_text("⚠️ Could not extract sender domain.")
+
+
+async def handle_rv_skip_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("👍 Done — no rule saved.")
+
+
+async def handle_rv_sender(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    email_id = query.data.split(":")[1]
+
+    keyboard = [
+        [{"text": "🏢 Company", "callback_data": f"rv_set_sender:{email_id}:company"}],
+        [{"text": "👤 Person",  "callback_data": f"rv_set_sender:{email_id}:person"}],
+    ]
+    await query.edit_message_text(
+        "👤 Is the sender a company or a person?",
+        reply_markup={"inline_keyboard": keyboard},
+    )
+
+
+async def handle_rv_set_sender(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    _, email_id_str, sender_type = query.data.split(":", 2)
+    email_id = int(email_id_str)
+    chat_id = query.message.chat_id
+
+    # Save type immediately, then ask for name via free text
+    session_factory, _ = get_session_factory()
+    async with session_factory() as session:
+        await session.execute(
+            update(EmailMessage)
+            .where(EmailMessage.id == email_id)
+            .values(sender_type=sender_type)
+        )
+        await session.commit()
+
+    _pending_sender_name[chat_id] = email_id
+    icon = "🏢" if sender_type == "company" else "👤"
+    await query.edit_message_text(
+        f"{icon} Sender type saved as *{sender_type}*.\n\n"
+        f"Type the sender name (e.g. 'Amazon', 'João Silva') or send /skip to leave it as-is.",
+        parse_mode="Markdown",
+    )
+
+
+# ------------------------------------------------------------------------------
+# Admin commands: /status, /recover, /restart, /learn
 # ------------------------------------------------------------------------------
 
 async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -437,6 +621,35 @@ async def handle_recover(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
+async def handle_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    arg = (context.args[0] if context.args else "").lower()
+    _, settings = get_session_factory()
+    r = aioredis.from_url(settings.redis_url, decode_responses=True)
+
+    if arg == "on":
+        await r.set(LEARNING_MODE_KEY, "1")
+        await r.aclose()
+        await update.message.reply_text(
+            "🎓 *Learning Mode ON*\n\n"
+            "Every new email (except learned rule matches) will be sent for your review.\n"
+            "You'll see the AI decision, sender identity, and can approve or correct it.\n"
+            "Corrections will prompt to save as a learned rule.",
+            parse_mode="Markdown",
+        )
+    elif arg == "off":
+        await r.delete(LEARNING_MODE_KEY)
+        await r.aclose()
+        await update.message.reply_text("✅ *Learning Mode OFF* — running autonomously.", parse_mode="Markdown")
+    else:
+        is_on = await r.exists(LEARNING_MODE_KEY)
+        await r.aclose()
+        status = "🟢 ON" if is_on else "🔴 OFF"
+        await update.message.reply_text(
+            f"🎓 Learning Mode is currently *{status}*.\n\nUse `/learn on` or `/learn off`.",
+            parse_mode="Markdown",
+        )
+
+
 async def handle_restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, settings = get_session_factory()
     r = aioredis.from_url(settings.redis_url, decode_responses=True)
@@ -444,10 +657,11 @@ async def handle_restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     restart_job = json.dumps({"type": "restart"})
     await r.lpush(EMAIL_QUEUE_KEY, restart_job)
     await r.lpush(QUERY_QUEUE_KEY, restart_job)
+    await r.lpush(REVIEW_QUEUE_KEY, restart_job)
     await r.aclose()
 
     await update.message.reply_text(
-        "🔄 Restart signal sent to *ai-worker* and *query-worker*.\n"
+        "🔄 Restart signal sent to *ai-worker*, *query-worker* and *review-worker*.\n"
         "Docker will restart them automatically.\n\n"
         "You'll receive a startup notification when ai-worker is back online.",
         parse_mode="Markdown",
@@ -480,6 +694,7 @@ def main():
             ("status",  "📊 System status — DB counts + queue depths"),
             ("recover", "♻️ Reset stuck pending_review emails to new"),
             ("restart", "🔄 Restart ai-worker and query-worker"),
+            ("learn",   "🎓 Toggle learning mode — /learn on | off | (status)"),
             ("search",  "🔍 Search emails by folder, sender, date or keyword"),
         ])
 
@@ -493,14 +708,25 @@ def main():
     app.add_handler(CommandHandler("status",  handle_status))
     app.add_handler(CommandHandler("recover", handle_recover))
     app.add_handler(CommandHandler("restart", handle_restart))
+    app.add_handler(CommandHandler("learn",   handle_learn))
     app.add_handler(CommandHandler("search",  handle_search_command))
+    # NeedsReview callbacks
     app.add_handler(CallbackQueryHandler(handle_classify,       pattern=r"^classify:"))
     app.add_handler(CallbackQueryHandler(handle_learn_move,     pattern=r"^learn_move:"))
     app.add_handler(CallbackQueryHandler(handle_learn_ask_path, pattern=r"^learn_ask_path:"))
     app.add_handler(CallbackQueryHandler(handle_learn_pdf,      pattern=r"^learn_pdf:"))
     app.add_handler(CallbackQueryHandler(handle_skip_learn,     pattern=r"^skip_learn:"))
-    app.add_handler(CallbackQueryHandler(handle_query_show,     pattern=r"^query_show:"))
-    app.add_handler(CallbackQueryHandler(handle_query_email,    pattern=r"^query_email:"))
+    # Review (learning mode) callbacks
+    app.add_handler(CallbackQueryHandler(handle_rv_approve,    pattern=r"^rv_approve:"))
+    app.add_handler(CallbackQueryHandler(handle_rv_folder,     pattern=r"^rv_folder:"))
+    app.add_handler(CallbackQueryHandler(handle_rv_set_folder, pattern=r"^rv_set_folder:"))
+    app.add_handler(CallbackQueryHandler(handle_rv_save_rule,  pattern=r"^rv_save_rule:"))
+    app.add_handler(CallbackQueryHandler(handle_rv_skip_rule,  pattern=r"^rv_skip_rule:"))
+    app.add_handler(CallbackQueryHandler(handle_rv_sender,     pattern=r"^rv_sender:"))
+    app.add_handler(CallbackQueryHandler(handle_rv_set_sender, pattern=r"^rv_set_sender:"))
+    # Query callbacks
+    app.add_handler(CallbackQueryHandler(handle_query_show,    pattern=r"^query_show:"))
+    app.add_handler(CallbackQueryHandler(handle_query_email,   pattern=r"^query_email:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     logger.info("🤖 Telegram bot started — polling for callbacks...")

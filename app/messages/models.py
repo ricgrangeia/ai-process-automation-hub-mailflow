@@ -39,6 +39,10 @@ class EmailMessage(Base):
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     # ----------------------------------------
 
+    # --- SENDER IDENTITY ---
+    sender_name: Mapped[str | None] = mapped_column(Text, nullable=True)       # e.g. "Amazon", "João Silva"
+    sender_type: Mapped[str | None] = mapped_column(String(16), nullable=True)  # "company" or "person"
+
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

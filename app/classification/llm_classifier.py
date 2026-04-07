@@ -26,10 +26,16 @@ class LLMClassifier:
 Classify into one of:
 Invoices, Work, Personal, Marketing, Spam, Other
 
+Also identify the sender:
+- sender_type: "company" if sent by a business/organisation, "person" if sent by an individual
+- sender_name: the company name (e.g. "Amazon", "LinkedIn") or person's name (e.g. "João Silva") — NOT the email address
+
 Return exactly:
 {{
   "folder": "FolderName",
-  "confidence": 0.0-1.0
+  "confidence": 0.0-1.0,
+  "sender_type": "company" or "person",
+  "sender_name": "Name or null"
 }}
 
 From: {email.from_address}
@@ -87,6 +93,8 @@ Body:
 
             folder = parsed.get("folder", "NeedsReview")
             confidence = parsed.get("confidence", 0.0)
+            sender_type = parsed.get("sender_type")
+            sender_name = parsed.get("sender_name")
 
             try:
                 confidence = float(confidence)
@@ -96,7 +104,16 @@ Body:
             # Clamp confidence
             confidence = max(0.0, min(confidence, 1.0))
 
-            return ClassificationResult(folder, confidence)
+            # Normalise sender fields
+            if sender_type not in ("company", "person"):
+                sender_type = None
+            if sender_name in (None, "null", "NULL", ""):
+                sender_name = None
+
+            result = ClassificationResult(folder, confidence)
+            result.sender_type = sender_type
+            result.sender_name = sender_name
+            return result
 
         except httpx.RequestError as e:
             logger.error(f"LLM request failed: {e}")

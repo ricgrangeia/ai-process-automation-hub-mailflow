@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 1.4.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 1.5.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -38,6 +38,13 @@ for supervision and account management.
 | Mobile-responsive dashboard (Chrome on phone) | ✅ |
 | Natural language email search via Telegram ("send me all invoices from amazon.com January 2026") | ✅ |
 | Query worker — independent service, processes search jobs from Redis queue | ✅ |
+| Query delivery choice — show inline in Telegram or send by email | ✅ |
+| Learning Mode — `/learn on/off` routes LLM-classified emails to human review | ✅ |
+| Review worker — sends rich Telegram card: Approve / Change folder / Fix sender | ✅ |
+| Sender identity — LLM extracts company/person + name in same classification call | ✅ |
+| Dashboard Remetente column — shows 🏢 Amazon / 👤 João Silva | ✅ |
+| Admin commands — `/status`, `/recover`, `/restart`, `/learn` with Telegram menu | ✅ |
+| Alembic migrations — auto-applied on ai-worker startup, schema always up to date | ✅ |
 
 ---
 
@@ -57,16 +64,22 @@ IMAP / Outlook
    ai-worker
    ├─ Learned Rules  (DB-backed, human-confirmed)
    ├─ Rule Classifier  (fast, deterministic)
-   └─ LLM Classifier   (Qwen 2.5 · OpenAI-compatible)
+   └─ LLM Classifier   (Qwen 2.5 · extracts folder + sender identity)
       │
-      ├─ confidence ≥ 0.75 ──▶ Actions
-      │                         ├─▶ move_folder  (IMAP)
-      │                         └─▶ export_pdf   (disk · {year}/{month})
+      ├─ confidence ≥ 0.75 + Learning Mode OFF ──▶ Actions
+      │                                             ├─▶ move_folder  (IMAP)
+      │                                             └─▶ export_pdf   (disk · {year}/{month})
+      │
+      ├─ confidence ≥ 0.75 + Learning Mode ON  ──▶ review-worker
+      │   (only if not matched by learned rule)      └─▶ Telegram review card
+      │                                                   ├─▶ Approve → move
+      │                                                   ├─▶ Change folder → move + save rule?
+      │                                                   └─▶ Fix sender → update identity
       │
       ├─ confidence < 0.75 ──▶ Telegram NeedsReview
       │                         └─▶ You reply → move + learn rule
       │
-      └─▶ Store metadata + telemetry in PostgreSQL
+      └─▶ Store metadata + telemetry + sender identity in PostgreSQL
                         │
                         ▼
                    Dashboard
@@ -83,12 +96,9 @@ IMAP / Outlook
       │
       ▼
   query-worker
-  ├─ parse_query  (LLM extracts structured filters)
+  ├─ parse_query    (LLM extracts structured filters)
   ├─ search_emails  (PostgreSQL · up to 50 results)
-  └─ send_results_email  (SMTP · .eml + PDF attachments)
-      │
-      ▼
-  📧 Results email  +  ✅ Telegram confirmation
+  └─ deliver        (inline Telegram summary  OR  SMTP email with .eml + PDF)
 ```
 
 ### Services
@@ -97,11 +107,12 @@ IMAP / Outlook
 |---|---|
 | `email-worker` | Polls IMAP, parses emails, enqueues jobs |
 | `api-worker` | Polls Microsoft Graph (Outlook), enqueues jobs |
-| `ai-worker` | Classifies emails, executes actions, records telemetry |
-| `telegram-bot` | Thin UI layer — receives user input, pushes jobs, handles NeedsReview callbacks |
-| `query-worker` | Processes search jobs — LLM parse → DB search → send results email |
+| `ai-worker` | Classifies emails, executes actions, runs DB migrations on startup |
+| `telegram-bot` | Thin UI layer — user input, NeedsReview callbacks, admin commands |
+| `review-worker` | Learning Mode — sends review cards, handles Approve / Change / Fix sender |
+| `query-worker` | Natural language search — LLM parse → DB search → deliver results |
 | `dashboard` | Streamlit UI — supervision + account management |
-| `redis` | Job queues (AOF persistent) — `jobs:email` + `jobs:query` |
+| `redis` | Job queues (AOF persistent) — `jobs:email`, `jobs:query`, `jobs:review` |
 | `postgres` | Persistence (external, via `database-network`) |
 
 ### Code Structure
@@ -110,7 +121,7 @@ The codebase is organised as a **modular monolith** — each domain is a self-co
 
 ```text
 app/
-├── core/                   # Shared kernel — config, crypto, database engine
+├── core/                   # Shared kernel — config, crypto, database engine, migrations
 │   └── database/           # Base ORM class, async engine, table init
 ├── accounts/               # Email accounts & API credentials (models + seed)
 ├── messages/               # Email messages, attachments, disk storage
@@ -122,13 +133,23 @@ app/
 │   └── outlook/            # Microsoft Graph client + polling worker
 ├── processing/             # Redis queue interface + AI worker loop
 │   └── actions/            # Pluggable actions: move_folder, export_pdf
+├── review/                 # Learning Mode review domain
+│   ├── queue.py            # REVIEW_QUEUE_KEY + LEARNING_MODE_KEY constants
+│   └── worker.py           # Redis consumer — sends Telegram review cards
 ├── query/                  # Natural language email search domain
+│   ├── queue.py            # QUERY_QUEUE_KEY + result TTL constants
 │   ├── parser.py           # LLM extracts structured filters from free text
 │   ├── repository.py       # Dynamic SQLAlchemy query against emails table
 │   ├── exporter.py         # SMTP email with .eml + PDF attachments
-│   └── worker.py           # Redis consumer — processes search jobs independently
+│   └── worker.py           # Redis consumer — processes search + deliver jobs
 ├── telegram/               # Telegram bot — thin UI layer, pushes jobs to Redis
 └── dashboard/              # Streamlit UI
+
+alembic/                    # Database migration scripts
+├── env.py                  # Async engine setup, all models imported
+└── versions/
+    ├── 001_baseline.py     # No-op — marks existing schema
+    └── 002_add_sender_fields.py  # Adds sender_name + sender_type to emails
 ```
 
 **Dependency rule:** arrows flow inward toward `core/`. No domain imports another domain's internals — only its public `__init__.py` or `contracts.py`.
@@ -260,8 +281,9 @@ Run workers individually:
 ```bash
 python -m app.ingestion.imap.worker      # email-worker (IMAP)
 python -m app.ingestion.outlook.worker   # api-worker (Outlook)
-python -m app.processing.worker          # ai-worker (classification)
-python -m app.telegram.bot               # telegram-bot (callbacks + query dispatch)
+python -m app.processing.worker          # ai-worker (classification + migrations)
+python -m app.review.worker              # review-worker (Learning Mode review cards)
+python -m app.telegram.bot               # telegram-bot (callbacks + admin commands)
 python -m app.query.worker               # query-worker (NL search jobs)
 streamlit run app/dashboard/app.py       # dashboard
 ```
@@ -283,19 +305,22 @@ make shell          # Shell into ai-worker container
 
 ## Roadmap
 
-- [ ] Alembic database migrations
 - [ ] Invoice / document OCR extraction
 - [ ] Supplier detection and matching
 - [ ] REST API (FastAPI) for external integrations
 - [ ] Webhook notifications on classification events
 - [ ] Docker health check endpoints
 - [ ] Audit log viewer in dashboard
-- [x] Redis queue durability on reboot / restart (AOF persistence)
-- [x] Telegram bot — NeedsReview review, learned rules, PDF export actions
 - [ ] Learned rules dashboard page (view, edit, disable rules)
 - [ ] PostgreSQL full-text search (GIN index on subject + body)
+- [x] Alembic database migrations — auto-applied on startup
+- [x] Redis queue durability on reboot / restart (AOF persistence)
+- [x] Telegram bot — NeedsReview review, learned rules, PDF export actions
 - [x] Email search via Telegram ("send me all invoices from amazon.com January 2026")
 - [x] Query worker — independent service, decoupled from Telegram bot via Redis queue
+- [x] Learning Mode — human review loop for LLM-classified emails
+- [x] Sender identity extraction — company/person + name via LLM
+- [x] Admin commands — /status, /recover, /restart, /learn
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 760" font-family="'Segoe UI', Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 920" font-family="'Segoe UI', Arial, sans-serif">
   <defs>
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#0f1117;stop-opacity:1"/>
@@ -20,6 +20,10 @@
       <stop offset="0%" style="stop-color:#3b2200;stop-opacity:1"/>
       <stop offset="100%" style="stop-color:#1f1200;stop-opacity:1"/>
     </linearGradient>
+    <linearGradient id="tealGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0d3340;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#071a20;stop-opacity:1"/>
+    </linearGradient>
     <filter id="glow">
       <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
       <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
@@ -36,10 +40,13 @@
     <marker id="arrowOrange" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
       <path d="M0,0 L0,6 L8,3 z" fill="#f59e0b" opacity="0.8"/>
     </marker>
+    <marker id="arrowTeal" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#22d3ee" opacity="0.8"/>
+    </marker>
   </defs>
 
   <!-- Background -->
-  <rect width="900" height="760" fill="url(#bgGrad)" rx="12"/>
+  <rect width="900" height="920" fill="url(#bgGrad)" rx="12"/>
 
   <!-- Subtle grid -->
   <g opacity="0.04" stroke="#ffffff" stroke-width="0.5">
@@ -52,11 +59,15 @@
     <line x1="0" y1="420" x2="900" y2="420"/>
     <line x1="0" y1="480" x2="900" y2="480"/>
     <line x1="0" y1="540" x2="900" y2="540"/>
-    <line x1="150" y1="0" x2="150" y2="620"/>
-    <line x1="300" y1="0" x2="300" y2="620"/>
-    <line x1="450" y1="0" x2="450" y2="620"/>
-    <line x1="600" y1="0" x2="600" y2="620"/>
-    <line x1="750" y1="0" x2="750" y2="620"/>
+    <line x1="0" y1="600" x2="900" y2="600"/>
+    <line x1="0" y1="660" x2="900" y2="660"/>
+    <line x1="0" y1="720" x2="900" y2="720"/>
+    <line x1="0" y1="780" x2="900" y2="780"/>
+    <line x1="150" y1="0" x2="150" y2="760"/>
+    <line x1="300" y1="0" x2="300" y2="760"/>
+    <line x1="450" y1="0" x2="450" y2="760"/>
+    <line x1="600" y1="0" x2="600" y2="760"/>
+    <line x1="750" y1="0" x2="750" y2="760"/>
   </g>
 
   <!-- Title -->
@@ -122,7 +133,7 @@
   <rect x="698" y="256" width="88" height="48" rx="5" fill="#1a0d2e" stroke="#7c3aed" stroke-width="1"/>
   <text x="742" y="274" text-anchor="middle" fill="#c4b5fd" font-size="10" font-weight="600">LLM (Qwen 2.5)</text>
   <text x="742" y="288" text-anchor="middle" fill="#8892a4" font-size="9">Local · Private</text>
-  <text x="742" y="300" text-anchor="middle" fill="#8892a4" font-size="9">Fallback ≥0.75</text>
+  <text x="742" y="300" text-anchor="middle" fill="#8892a4" font-size="9">+ Sender Identity</text>
 
   <!-- ── Outputs from AI Worker ── -->
 
@@ -132,7 +143,7 @@
   <!-- AI → PostgreSQL (down) -->
   <line x1="695" y1="318" x2="695" y2="370" stroke="#34d399" stroke-width="1.5" opacity="0.7" marker-end="url(#arrowGreen)"/>
 
-  <!-- AI → Telegram (right) -->
+  <!-- AI → Telegram (right, NeedsReview) -->
   <line x1="800" y1="263" x2="840" y2="263" stroke="#f59e0b" stroke-width="1.5" opacity="0.7" marker-end="url(#arrowOrange)" stroke-dasharray="4,2"/>
 
   <!-- ── NeedsReview → Telegram ── -->
@@ -166,8 +177,8 @@
   <text x="695" y="392" text-anchor="middle" fill="#4a9eff" font-size="9" letter-spacing="2">PERSISTENCE</text>
   <text x="695" y="410" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600">🗄 PostgreSQL</text>
   <text x="695" y="428" text-anchor="middle" fill="#8892a4" font-size="10">Emails · Accounts · Attachments</text>
-  <text x="695" y="444" text-anchor="middle" fill="#8892a4" font-size="10">AI Confidence · Token ROI</text>
-  <text x="695" y="460" text-anchor="middle" fill="#8892a4" font-size="10">Telemetry · Audit Log</text>
+  <text x="695" y="444" text-anchor="middle" fill="#8892a4" font-size="10">Sender Identity · AI Telemetry</text>
+  <text x="695" y="460" text-anchor="middle" fill="#8892a4" font-size="10">Alembic Migrations · Audit Log</text>
 
   <!-- PostgreSQL → Dashboard -->
   <line x1="695" y1="470" x2="695" y2="510" stroke="#4a9eff" stroke-width="1.5" opacity="0.6" marker-end="url(#arrow)"/>
@@ -187,8 +198,8 @@
   <text x="639" y="579" text-anchor="middle" fill="#8892a4" font-size="8">Charts · Breakdown</text>
 
   <rect x="690" y="556" width="86" height="30" rx="4" fill="#0d2137" stroke="#4a9eff" stroke-width="0.5"/>
-  <text x="733" y="567" text-anchor="middle" fill="#93c5fd" font-size="9">Audit Log</text>
-  <text x="733" y="579" text-anchor="middle" fill="#8892a4" font-size="8">Last 200 emails</text>
+  <text x="733" y="567" text-anchor="middle" fill="#93c5fd" font-size="9">Sender Identity</text>
+  <text x="733" y="579" text-anchor="middle" fill="#8892a4" font-size="8">🏢 Company · 👤 Person</text>
 
   <rect x="784" y="556" width="104" height="30" rx="4" fill="#0d2137" stroke="#4a9eff" stroke-width="0.5"/>
   <text x="836" y="567" text-anchor="middle" fill="#93c5fd" font-size="9">Account Mgmt</text>
@@ -209,48 +220,95 @@
   <text x="120" y="374" text-anchor="middle" fill="#8892a4" font-size="10">Traefik · HTTPS · TLS</text>
   <text x="120" y="390" text-anchor="middle" fill="#8892a4" font-size="10">GitHub Actions · Portainer</text>
 
-  <!-- ── Query Section separator ── -->
-  <line x1="40" y1="614" x2="860" y2="614" stroke="#34d399" stroke-width="0.5" opacity="0.3" stroke-dasharray="6,4"/>
-  <text x="450" y="626" text-anchor="middle" fill="#34d399" font-size="9" letter-spacing="3" opacity="0.7">NATURAL LANGUAGE QUERY</text>
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- ── LEARNING MODE & REVIEW section ── -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <line x1="40" y1="614" x2="860" y2="614" stroke="#22d3ee" stroke-width="0.5" opacity="0.3" stroke-dasharray="6,4"/>
+  <text x="450" y="626" text-anchor="middle" fill="#22d3ee" font-size="9" letter-spacing="3" opacity="0.8">LEARNING MODE · HUMAN-IN-THE-LOOP REVIEW</text>
+
+  <!-- Learning Mode toggle box -->
+  <rect x="40" y="636" width="140" height="72" rx="8" fill="url(#tealGrad)" stroke="#22d3ee" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="110" y="656" text-anchor="middle" fill="#22d3ee" font-size="14">🎓</text>
+  <text x="110" y="673" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="600">Learning Mode</text>
+  <text x="110" y="687" text-anchor="middle" fill="#8892a4" font-size="9">/learn on · /learn off</text>
+  <text x="110" y="700" text-anchor="middle" fill="#22d3ee" font-size="9">Redis flag toggle</text>
+
+  <!-- Arrow: AI Worker → Review Worker (dashed teal, going down-left) -->
+  <path d="M660,318 Q580,400 580,636" stroke="#22d3ee" stroke-width="1.5" fill="none" opacity="0.5" stroke-dasharray="5,3" marker-end="url(#arrowTeal)"/>
+  <text x="558" y="490" text-anchor="middle" fill="#22d3ee" font-size="8" opacity="0.7" transform="rotate(-90,558,490)">LLM-classified</text>
+
+  <!-- Review Worker box -->
+  <rect x="210" y="636" width="180" height="72" rx="8" fill="url(#purpleGrad)" stroke="#a78bfa" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="300" y="655" text-anchor="middle" fill="#a78bfa" font-size="9" letter-spacing="2">REVIEW WORKER</text>
+  <text x="300" y="671" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700">🔍 Review Card</text>
+  <text x="300" y="686" text-anchor="middle" fill="#c4b5fd" font-size="9">Redis: jobs:review</text>
+  <text x="300" y="699" text-anchor="middle" fill="#8892a4" font-size="9">Sends Telegram inline card</text>
+
+  <!-- Arrow: learning mode → review worker -->
+  <line x1="180" y1="672" x2="208" y2="672" stroke="#22d3ee" stroke-width="1.5" opacity="0.6" marker-end="url(#arrowTeal)"/>
+
+  <!-- Arrow: review worker → telegram review card -->
+  <line x1="390" y1="672" x2="428" y2="672" stroke="#a78bfa" stroke-width="1.5" opacity="0.6" marker-end="url(#arrowTeal)"/>
+
+  <!-- Telegram Review Card -->
+  <rect x="428" y="636" width="420" height="72" rx="8" fill="#0d1f3b" stroke="#22d3ee" stroke-width="1" filter="url(#shadow)"/>
+  <text x="638" y="655" text-anchor="middle" fill="#22d3ee" font-size="9" letter-spacing="2">TELEGRAM REVIEW CARD</text>
+  <text x="638" y="671" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">✈️ Subject · From · AI Decision · Sender Identity</text>
+
+  <!-- Review actions as small pills -->
+  <rect x="436" y="678" width="118" height="22" rx="4" fill="#0d3b2e" stroke="#34d399" stroke-width="0.8"/>
+  <text x="495" y="693" text-anchor="middle" fill="#34d399" font-size="9">✅ Approve → move</text>
+
+  <rect x="562" y="678" width="148" height="22" rx="4" fill="#1a0a00" stroke="#f59e0b" stroke-width="0.8"/>
+  <text x="636" y="693" text-anchor="middle" fill="#f59e0b" font-size="9">📁 Change folder + save rule?</text>
+
+  <rect x="718" y="678" width="122" height="22" rx="4" fill="#180d2e" stroke="#a78bfa" stroke-width="0.8"/>
+  <text x="779" y="693" text-anchor="middle" fill="#c4b5fd" font-size="9">🏢👤 Fix sender identity</text>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- ── Natural Language Query section ── -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <line x1="40" y1="728" x2="860" y2="728" stroke="#34d399" stroke-width="0.5" opacity="0.3" stroke-dasharray="6,4"/>
+  <text x="450" y="740" text-anchor="middle" fill="#34d399" font-size="9" letter-spacing="3" opacity="0.7">NATURAL LANGUAGE QUERY</text>
 
   <!-- Query: Telegram user input -->
-  <rect x="40" y="636" width="148" height="72" rx="8" fill="#0d1f3b" stroke="#4a9eff" stroke-width="1" filter="url(#shadow)"/>
-  <text x="114" y="657" text-anchor="middle" fill="#4a9eff" font-size="16">✈️</text>
-  <text x="114" y="674" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="600">Telegram Bot</text>
-  <text x="114" y="688" text-anchor="middle" fill="#8892a4" font-size="9">"send invoices from</text>
-  <text x="114" y="700" text-anchor="middle" fill="#8892a4" font-size="9">amazon.com Jan 2026"</text>
+  <rect x="40" y="750" width="148" height="72" rx="8" fill="#0d1f3b" stroke="#4a9eff" stroke-width="1" filter="url(#shadow)"/>
+  <text x="114" y="771" text-anchor="middle" fill="#4a9eff" font-size="16">✈️</text>
+  <text x="114" y="788" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="600">Telegram Bot</text>
+  <text x="114" y="802" text-anchor="middle" fill="#8892a4" font-size="9">"send invoices from</text>
+  <text x="114" y="814" text-anchor="middle" fill="#8892a4" font-size="9">amazon.com Jan 2026"</text>
 
   <!-- Arrow: bot → redis query queue -->
-  <line x1="188" y1="672" x2="228" y2="672" stroke="#4a9eff" stroke-width="1.5" opacity="0.6" marker-end="url(#arrow)"/>
+  <line x1="188" y1="786" x2="228" y2="786" stroke="#4a9eff" stroke-width="1.5" opacity="0.6" marker-end="url(#arrow)"/>
 
   <!-- Query: Redis queue -->
-  <rect x="228" y="648" width="118" height="48" rx="8" fill="#1a0a00" stroke="#f59e0b" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="287" y="668" text-anchor="middle" fill="#f59e0b" font-size="14">⚡</text>
-  <text x="287" y="684" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="600">Redis Queue</text>
-  <text x="287" y="695" text-anchor="middle" fill="#8892a4" font-size="8">jobs:query</text>
+  <rect x="228" y="762" width="118" height="48" rx="8" fill="#1a0a00" stroke="#f59e0b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="287" y="782" text-anchor="middle" fill="#f59e0b" font-size="14">⚡</text>
+  <text x="287" y="798" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="600">Redis Queue</text>
+  <text x="287" y="809" text-anchor="middle" fill="#8892a4" font-size="8">jobs:query</text>
 
   <!-- Arrow: redis → query worker -->
-  <line x1="346" y1="672" x2="386" y2="672" stroke="#f59e0b" stroke-width="1.5" opacity="0.6" marker-end="url(#arrowOrange)"/>
+  <line x1="346" y1="786" x2="386" y2="786" stroke="#f59e0b" stroke-width="1.5" opacity="0.6" marker-end="url(#arrowOrange)"/>
 
   <!-- Query: Query Worker -->
-  <rect x="386" y="636" width="200" height="72" rx="8" fill="url(#purpleGrad)" stroke="#a78bfa" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="486" y="655" text-anchor="middle" fill="#a78bfa" font-size="9" letter-spacing="2">QUERY WORKER</text>
-  <text x="486" y="671" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700">🔍 Search Engine</text>
-  <text x="486" y="686" text-anchor="middle" fill="#c4b5fd" font-size="9">LLM parse → DB search</text>
-  <text x="486" y="699" text-anchor="middle" fill="#8892a4" font-size="9">SMTP export · independent</text>
+  <rect x="386" y="750" width="190" height="72" rx="8" fill="url(#purpleGrad)" stroke="#a78bfa" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="481" y="769" text-anchor="middle" fill="#a78bfa" font-size="9" letter-spacing="2">QUERY WORKER</text>
+  <text x="481" y="785" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700">🔍 Search Engine</text>
+  <text x="481" y="800" text-anchor="middle" fill="#c4b5fd" font-size="9">LLM parse → DB search</text>
+  <text x="481" y="813" text-anchor="middle" fill="#8892a4" font-size="9">Deliver inline or by email</text>
 
   <!-- Arrow: query worker → results -->
-  <line x1="586" y1="672" x2="626" y2="672" stroke="#34d399" stroke-width="1.5" opacity="0.7" marker-end="url(#arrowGreen)"/>
+  <line x1="576" y1="786" x2="616" y2="786" stroke="#34d399" stroke-width="1.5" opacity="0.7" marker-end="url(#arrowGreen)"/>
 
   <!-- Query: Results -->
-  <rect x="626" y="636" width="234" height="72" rx="8" fill="url(#greenGrad)" stroke="#34d399" stroke-width="1" filter="url(#shadow)"/>
-  <text x="743" y="655" text-anchor="middle" fill="#34d399" font-size="9" letter-spacing="2">RESULTS</text>
-  <text x="743" y="671" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700">📧 Email + ✅ Telegram</text>
-  <text x="743" y="686" text-anchor="middle" fill="#6ee7b7" font-size="9">.eml + PDF attachments via SMTP</text>
-  <text x="743" y="699" text-anchor="middle" fill="#8892a4" font-size="9">inline summary if SMTP not set</text>
+  <rect x="616" y="750" width="244" height="72" rx="8" fill="url(#greenGrad)" stroke="#34d399" stroke-width="1" filter="url(#shadow)"/>
+  <text x="738" y="769" text-anchor="middle" fill="#34d399" font-size="9" letter-spacing="2">RESULTS</text>
+  <text x="738" y="785" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700">📧 Email  or  ✅ Telegram</text>
+  <text x="738" y="800" text-anchor="middle" fill="#6ee7b7" font-size="9">.eml + PDF attachments via SMTP</text>
+  <text x="738" y="813" text-anchor="middle" fill="#8892a4" font-size="9">or inline summary — user's choice</text>
 
   <!-- ── Footer ── -->
-  <line x1="60" y1="726" x2="840" y2="726" stroke="#4a9eff" stroke-width="0.5" opacity="0.3"/>
-  <text x="450" y="748" text-anchor="middle" fill="#4a6080" font-size="9">Appa8 AI Process Automation Hub · MailFlow Engine v1.4.0 · on-premise · GDPR-friendly</text>
+  <line x1="60" y1="844" x2="840" y2="844" stroke="#4a9eff" stroke-width="0.5" opacity="0.3"/>
+  <text x="450" y="866" text-anchor="middle" fill="#4a6080" font-size="9">Appa8 AI Process Automation Hub · MailFlow Engine v1.5.0 · on-premise · GDPR-friendly</text>
 
 </svg>
