@@ -423,14 +423,14 @@ def page_audit_log(engine):
 
     from datetime import datetime, timezone, timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
-    conditions = ["created_at >= :cutoff"]
+    conditions = ["created_at >= %(cutoff)s"]
     params: dict = {"cutoff": cutoff}
 
     if actor_filter:
-        conditions.append("actor_name ILIKE :actor")
+        conditions.append("actor_name ILIKE %(actor)s")
         params["actor"] = f"%{actor_filter}%"
     if action_filter != "(all)":
-        conditions.append("action = :action")
+        conditions.append("action = %(action)s")
         params["action"] = action_filter
 
     where = " AND ".join(conditions)
