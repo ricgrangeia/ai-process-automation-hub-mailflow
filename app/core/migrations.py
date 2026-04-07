@@ -16,15 +16,18 @@ def run_migrations() -> None:
         from alembic.config import Config
         from alembic import command
 
-        # Locate alembic.ini relative to this file: project_root/alembic.ini
+        # Build the path to the alembic/ directory:
+        # this file lives at  <project_root>/app/core/migrations.py
+        # alembic/            lives at  <project_root>/alembic/
         project_root = os.path.dirname(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         )
-        ini_path = os.path.join(project_root, "alembic.ini")
+        alembic_dir = os.path.join(project_root, "alembic")
 
-        cfg = Config(ini_path)
-        # Ensure DATABASE_URL from environment is picked up (env.py reads it too,
-        # but setting it here makes the Config object consistent).
+        # Configure programmatically — no reliance on alembic.ini being
+        # discoverable at runtime inside the container.
+        cfg = Config()
+        cfg.set_main_option("script_location", alembic_dir)
         cfg.set_main_option("sqlalchemy.url", os.environ.get("DATABASE_URL", ""))
 
         logger.info("🗄️  Running database migrations (alembic upgrade head)...")
