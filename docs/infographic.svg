@@ -240,7 +240,7 @@
   <text x="120" y="340" text-anchor="middle" fill="#f59e0b" font-size="9" letter-spacing="2">DEPLOYMENT</text>
   <text x="120" y="358" text-anchor="middle" fill="#fcd34d" font-size="11">🐳 Docker Compose</text>
   <text x="120" y="374" text-anchor="middle" fill="#8892a4" font-size="10">Traefik · HTTPS · TLS</text>
-  <text x="120" y="390" text-anchor="middle" fill="#8892a4" font-size="10">GitHub Actions · Portainer</text>
+  <text x="120" y="390" text-anchor="middle" fill="#34d399" font-size="10">✅ Tests → Portainer deploy</text>
 
   <!-- ═══════════════════════════════════════════════════════════ -->
   <!-- ── LEARNING MODE & REVIEW section ── -->
@@ -331,6 +331,6 @@
 
   <!-- ── Footer ── -->
   <line x1="60" y1="844" x2="840" y2="844" stroke="#4a9eff" stroke-width="0.5" opacity="0.3"/>
-  <text x="450" y="866" text-anchor="middle" fill="#4a6080" font-size="9">Appa8 AI Process Automation Hub · MailFlow Engine v1.8.0 · on-premise · GDPR-friendly</text>
+  <text x="450" y="866" text-anchor="middle" fill="#4a6080" font-size="9">Appa8 AI Process Automation Hub · MailFlow Engine v1.9.0 · on-premise · GDPR-friendly</text>
 
 </svg>

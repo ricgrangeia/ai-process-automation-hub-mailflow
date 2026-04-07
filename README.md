@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 1.8.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 1.9.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -52,6 +52,8 @@ for supervision and account management.
 | Auto-learn — high-confidence LLM decisions auto-saved as `ai_auto` learned rules | ✅ |
 | Dashboard operation mode selector — live switch without restart | ✅ |
 | `/status` shows current operation mode | ✅ |
+| Unit test suite — 62+ tests, no external services required | ✅ |
+| CI pipeline — tests gate every push; deploy to Portainer only if tests pass | ✅ |
 
 ---
 
@@ -165,6 +167,16 @@ alembic/                    # Database migration scripts
     ├── 002_add_sender_fields.py     # Adds sender_name + sender_type to emails
     ├── 003_add_audit_logs.py        # Creates audit_logs table
     └── 004_add_learned_rules_source.py  # Adds source column (human | ai_auto)
+
+tests/
+├── conftest.py             # Shared fixtures: FakeEmail, FakeSettings
+└── unit/
+    ├── test_crypto.py              # Encrypt/decrypt round-trips and error cases
+    ├── test_rule_classifier.py     # Hardcoded + learned rule matching
+    ├── test_hybrid_classifier.py   # Orchestration logic and threshold boundary
+    ├── test_llm_classifier.py      # JSON parsing, normalisation, all error paths
+    ├── test_operation_mode.py      # Mode get/set with fakeredis
+    └── test_auto_save_rule.py      # Generic domain skip, human rule guard, new rule fields
 ```
 
 **Dependency rule:** arrows flow inward toward `core/`. No domain imports another domain's internals — only its public `__init__.py` or `contracts.py`.
@@ -304,6 +316,15 @@ After login, two pages are available from the sidebar:
 
 ## Development
 
+**Run tests**
+
+```bash
+pip install -r requirements-dev.txt
+pytest                  # all tests
+pytest tests/unit/      # unit tests only
+pytest -v               # verbose output
+```
+
 Run workers individually:
 
 ```bash
@@ -351,6 +372,8 @@ make shell          # Shell into ai-worker container
 - [x] Learned rules dashboard page — view, enable/disable, edit, delete, add manually
 - [x] Operation Mode system — hybrid / rules_only / llm_only / auto_learn; switchable from dashboard or Redis
 - [x] Auto-learn — high-confidence LLM decisions auto-saved as learned rules (source: ai_auto)
+- [x] Unit test suite — crypto, classifiers, operation mode, auto-save logic; no external services needed
+- [x] CI pipeline — tests gate every push; Portainer deploy only fires on master after green tests
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

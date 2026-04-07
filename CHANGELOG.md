@@ -142,6 +142,31 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [1.9.0] — 2026-04-07
+
+### Added
+
+- **Unit test suite** (`tests/unit/`) — 62+ tests covering the critical classification pipeline, no external services required:
+  - `test_crypto.py` — encrypt/decrypt round-trip, wrong key, tampered token, unicode, empty string
+  - `test_rule_classifier.py` — all 4 hardcoded rules, all 4 learned match fields (`sender_domain`, `sender_email`, `subject_contains`, `body_contains`), case-insensitivity, DB mocked with `unittest.mock`
+  - `test_hybrid_classifier.py` — rule-first priority, threshold boundary (0.74 / 0.75 / 0.76), custom threshold, rule always beats high-confidence LLM
+  - `test_llm_classifier.py` — happy path, JSON-in-prose extraction, confidence clamping, sender field normalisation, all error paths (HTTP 500, malformed JSON, empty choices, network error)
+  - `test_operation_mode.py` — all 4 modes, invalid mode error, garbage Redis value fallback, using `fakeredis`
+  - `test_auto_save_rule.py` — every generic domain skipped (parametrized), human rule never overwritten, ai_auto hit_count increment, new rule fields validated
+- `pytest.ini` — `asyncio_mode = auto`, `testpaths = tests`
+- `requirements-dev.txt` — test-only deps (`pytest==8.1.1`, `pytest-asyncio==0.23.6`, `fakeredis==2.21.3`), not installed in Docker images
+- `tests/conftest.py` — shared `FakeEmail` and `FakeSettings` fixtures
+
+### Changed
+
+- **GitHub Actions CI** (`.github/workflows/trigger-portainer.yml`) — restructured from a single deploy-only job into a two-job pipeline:
+  - `test` job — runs `pytest` on every push to any branch and on every PR to `master`
+  - `deploy` job — triggers Portainer webhook only when `test` passes AND the push is to `master`
+  - Pip dependency caching on `requirements.txt` + `requirements-dev.txt` for faster CI runs
+  - Broken code can no longer reach production — Portainer is never called if any test fails
+
+---
+
 ## [1.8.0] — 2026-04-07
 
 ### Added
