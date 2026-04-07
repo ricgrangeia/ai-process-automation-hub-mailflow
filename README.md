@@ -393,7 +393,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 ## Author
 
-Ricardo Grangeia — Senior Software Engineer — Portugal
+Ricardo Grangeia — Software Engineer — Portugal
 <https://ricardo.grangeia.pt>
 
 ---
