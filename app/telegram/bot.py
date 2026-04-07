@@ -185,15 +185,14 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_icon = "✅" if move_success else "⚠️"
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📁 Move only",          callback_data=f"learn_move:{email_id}:{folder}")],
-        [InlineKeyboardButton("📄 Export PDF only",    callback_data=f"learn_ask_path:{email_id}:{folder}")],
-        [InlineKeyboardButton("📁 + 📄 Move & Export", callback_data=f"learn_ask_path:{email_id}:{folder}:with_move")],
-        [InlineKeyboardButton("Just this once",        callback_data=f"skip_learn:{email_id}")],
+        [InlineKeyboardButton("✅ Yes — always move to this folder", callback_data=f"learn_move:{email_id}:{folder}")],
+        [InlineKeyboardButton("✅ Yes — also export PDF",            callback_data=f"learn_ask_path:{email_id}:{folder}:with_move")],
+        [InlineKeyboardButton("🚫 No — just this once",              callback_data=f"skip_learn:{email_id}")],
     ])
 
     await query.edit_message_text(
         f"{status_icon} Moved to *{folder}*.\n\n"
-        f"Save this as a rule for future emails from this sender?",
+        f"Remember this for future emails from the same sender?",
         parse_mode="Markdown",
         reply_markup=keyboard,
     )
