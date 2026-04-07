@@ -58,11 +58,11 @@ async def _send_review_card(bot_token: str, chat_id: str, email, job: dict) -> N
     subject = (email.subject or "(no subject)")[:80]
 
     text = (
-        f"📋 *Learning Mode Review*\n\n"
-        f"*Subject:* {subject}\n"
-        f"*From:* `{email.from_address or '?'}`\n"
-        f"*Sender:* {sender_label}\n\n"
-        f"*AI Decision:* {folder} ({confidence}% · {source})\n\n"
+        f"📋 Learning Mode Review\n\n"
+        f"Subject: {subject}\n"
+        f"From: {email.from_address or '?'}\n"
+        f"Sender: {sender_label}\n\n"
+        f"AI Decision: {folder} ({confidence}% · {source})\n\n"
         f"What should we do?"
     )
 
@@ -82,7 +82,6 @@ async def _send_review_card(bot_token: str, chat_id: str, email, job: dict) -> N
             await client.post(url, json={
                 "chat_id": chat_id,
                 "text": text,
-                "parse_mode": "Markdown",
                 "reply_markup": {"inline_keyboard": keyboard},
             })
         logger.info(f"Sent review card for email {email.id}")

@@ -15,8 +15,7 @@ async def send_worker_started(bot_token: str, chat_id: str) -> None:
     """Sends a startup notification when the AI worker comes online."""
     payload = {
         "chat_id": chat_id,
-        "text": "🚀 *AI Worker is active* — listening for jobs.",
-        "parse_mode": "Markdown",
+        "text": "🚀 AI Worker is active — listening for jobs.",
     }
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
@@ -53,18 +52,18 @@ async def send_review_request(
 
     if source == "rule_conflict" and rule_folder and llm_folder:
         text = (
-            f"⚠️ *Rule Conflict* — human input needed\n\n"
-            f"*From:* `{sender}`\n"
-            f"*Subject:* {subject_display}\n\n"
-            f"📚 *Learned rule says:* {rule_folder}\n"
-            f"🧠 *AI says:* {llm_folder} ({confidence_pct}%)\n\n"
+            f"⚠️ Rule Conflict — human input needed\n\n"
+            f"From: {sender}\n"
+            f"Subject: {subject_display}\n\n"
+            f"📚 Learned rule says: {rule_folder}\n"
+            f"🧠 AI says: {llm_folder} ({confidence_pct}%)\n\n"
             f"They disagree. Which is correct?"
         )
     else:
         text = (
-            f"🤔 *NeedsReview* — AI confidence: {confidence_pct}%\n\n"
-            f"*From:* `{sender}`\n"
-            f"*Subject:* {subject_display}\n\n"
+            f"🤔 NeedsReview — AI confidence: {confidence_pct}%\n\n"
+            f"From: {sender}\n"
+            f"Subject: {subject_display}\n\n"
             f"Please classify this email:"
         )
 
@@ -79,7 +78,6 @@ async def send_review_request(
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown",
         "reply_markup": {"inline_keyboard": keyboard},
     }
 

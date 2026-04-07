@@ -360,7 +360,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tenant_id=getattr(email_row, "tenant_id", None) if email_row else None,
             details={"sender_name": text},
         )
-        await update.message.reply_text(f"✅ Sender name saved: *{text}*", parse_mode="Markdown")
+        await update.message.reply_text(f"✅ Sender name saved: {text}")
         return
 
     # Treat as email search query — delegate to query-worker via Redis
