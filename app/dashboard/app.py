@@ -258,11 +258,22 @@ def page_email_accounts(engine, settings):
                     st.write("")  # vertical align
                     toggle_label = "Deactivate" if row["active"] else "Activate"
                     if st.button(toggle_label, key=f"toggle_{row['id']}"):
+                        new_val = not row["active"]
                         with engine.begin() as conn:
                             conn.execute(
                                 text("UPDATE email_accounts SET active = :val WHERE id = :id"),
-                                {"val": not row["active"], "id": int(row["id"])},
+                                {"val": new_val, "id": int(row["id"])},
                             )
+                        from app.core.audit import log_audit_sync
+                        log_audit_sync(
+                            engine,
+                            actor_type="dashboard",
+                            actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                            action="account.toggled",
+                            entity_type="account",
+                            entity_id=int(row["id"]),
+                            details={"email": row["email"], "active": new_val},
+                        )
                         st.rerun()
 
                 new_pw_key = f"new_pw_{row['id']}"
@@ -278,6 +289,16 @@ def page_email_accounts(engine, settings):
                                     text("UPDATE email_accounts SET password_encrypted = :pw WHERE id = :id"),
                                     {"pw": encrypted_pw, "id": int(row["id"])},
                                 )
+                            from app.core.audit import log_audit_sync
+                            log_audit_sync(
+                                engine,
+                                actor_type="dashboard",
+                                actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                                action="account.password_changed",
+                                entity_type="account",
+                                entity_id=int(row["id"]),
+                                details={"email": row["email"]},
+                            )
                             st.success("Password updated and encrypted.")
 
     st.divider()
@@ -323,6 +344,15 @@ def page_email_accounts(engine, settings):
                                 "active": active,
                             },
                         )
+                    from app.core.audit import log_audit_sync
+                    log_audit_sync(
+                        engine,
+                        actor_type="dashboard",
+                        actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                        action="account.added",
+                        entity_type="account",
+                        details={"email": email, "provider": "imap", "host": imap_host},
+                    )
                     st.success(f"IMAP account **{email}** added.")
                     st.rerun()
                 except Exception as e:
@@ -357,10 +387,106 @@ def page_email_accounts(engine, settings):
                                 "active": o_active,
                             },
                         )
+                    from app.core.audit import log_audit_sync
+                    log_audit_sync(
+                        engine,
+                        actor_type="dashboard",
+                        actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                        action="account.added",
+                        entity_type="account",
+                        details={"email": o_email, "provider": "outlook"},
+                    )
                     st.success(f"Outlook account **{o_email}** added.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Page: Audit Log
+# ---------------------------------------------------------------------------
+
+def page_audit_log(engine):
+    st.title("📋 Audit Log")
+
+    # Filters
+    col_actor, col_action, col_days = st.columns(3)
+    actor_filter = col_actor.text_input("Actor contains", placeholder="@username, alembic, ai-worker…")
+    action_filter = col_action.selectbox(
+        "Action",
+        ["(all)", "email.classified", "email.reclassified", "email.approved",
+         "email.sender_corrected", "rule.created", "system.restart",
+         "system.recover", "system.learning_mode", "query.searched",
+         "db.migrated", "account.added", "account.toggled", "account.password_changed"],
+    )
+    days = col_days.number_input("Last N days", min_value=1, max_value=365, value=7)
+
+    conditions = ["created_at >= NOW() - INTERVAL ':days days'"]
+    params: dict = {"days": int(days)}
+
+    if actor_filter:
+        conditions.append("actor_name ILIKE :actor")
+        params["actor"] = f"%{actor_filter}%"
+    if action_filter != "(all)":
+        conditions.append("action = :action")
+        params["action"] = action_filter
+
+    where = " AND ".join(conditions)
+    query = f"""
+        SELECT
+            created_at   AS "Time",
+            actor_type   AS "Type",
+            actor_name   AS "Actor",
+            action       AS "Action",
+            entity_type  AS "Entity",
+            entity_id    AS "ID",
+            details      AS "Details",
+            tenant_id    AS "Tenant"
+        FROM audit_logs
+        WHERE {where}
+        ORDER BY created_at DESC
+        LIMIT 500
+    """
+
+    try:
+        df = pd.read_sql(query, engine, params=params)
+
+        if df.empty:
+            st.info("No audit events found for the selected filters.")
+            return
+
+        st.metric("Events shown", len(df))
+
+        # Colour-code the Action column using a map for readability
+        action_icons = {
+            "email.classified": "🤖",
+            "email.reclassified": "✏️",
+            "email.approved": "✅",
+            "email.sender_corrected": "🏷️",
+            "rule.created": "📚",
+            "system.restart": "🔄",
+            "system.recover": "♻️",
+            "system.learning_mode": "🎓",
+            "query.searched": "🔍",
+            "db.migrated": "🗄️",
+            "account.added": "➕",
+            "account.toggled": "🔁",
+            "account.password_changed": "🔑",
+        }
+        df["Action"] = df["Action"].apply(lambda a: f"{action_icons.get(a, '')} {a}")
+
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Time": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm:ss"),
+                "Details": st.column_config.TextColumn(width="large"),
+            },
+        )
+    except Exception as e:
+        st.error(f"❌ Could not load audit log: {e}")
+        st.info("Run the latest migrations and restart ai-worker to create the audit_logs table.")
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +510,7 @@ if login_screen():
     st.sidebar.info(f"**Model:** {settings.llm_model}")
     st.sidebar.info(f"**Inbox:** {settings.inbox_folder}")
 
-    page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts"])
+    page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts", "📋 Audit Log"])
 
     if st.sidebar.button("Logout"):
         st.session_state["authenticated"] = False
@@ -394,3 +520,5 @@ if login_screen():
         page_dashboard(engine, settings)
     elif page == "✉️ Email Accounts":
         page_email_accounts(engine, settings)
+    elif page == "📋 Audit Log":
+        page_audit_log(engine)

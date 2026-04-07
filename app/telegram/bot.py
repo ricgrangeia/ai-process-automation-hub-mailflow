@@ -39,6 +39,7 @@ from app.ingestion.imap.client import connect_imap, move_message
 from app.processing.queue import QUEUE_KEY as EMAIL_QUEUE_KEY
 from app.query.queue import QUERY_QUEUE_KEY, RESULT_KEY_PREFIX
 from app.review.queue import REVIEW_QUEUE_KEY, LEARNING_MODE_KEY
+from app.core.audit import log_audit, _telegram_actor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -169,6 +170,17 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await session.commit()
 
+    await log_audit(
+        session_factory,
+        actor_type="telegram",
+        actor_name=_telegram_actor(query.from_user),
+        action="email.reclassified",
+        entity_type="email",
+        entity_id=email_id,
+        tenant_id=getattr(email, "tenant_id", None),
+        details={"folder": folder, "move_success": move_success},
+    )
+
     status_icon = "✅" if move_success else "⚠️"
 
     keyboard = InlineKeyboardMarkup([
@@ -209,6 +221,16 @@ async def handle_learn_move(update: Update, context: ContextTypes.DEFAULT_TYPE):
     domain = await _save_rule(session_factory, email, folder, actions)
 
     if domain:
+        await log_audit(
+            session_factory,
+            actor_type="telegram",
+            actor_name=_telegram_actor(query.from_user),
+            action="rule.created",
+            entity_type="rule",
+            entity_id=None,
+            tenant_id=getattr(email, "tenant_id", None),
+            details={"domain": domain, "folder": folder, "actions": actions},
+        )
         await query.edit_message_text(
             f"📚 Rule saved — emails from *{domain}* will be moved to *{folder}*.",
             parse_mode="Markdown",
@@ -318,12 +340,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         email_id = _pending_sender_name.pop(chat_id)
         session_factory, _ = get_session_factory()
         async with session_factory() as session:
-            await session.execute(
-                update(EmailMessage)
-                .where(EmailMessage.id == email_id)
-                .values(sender_name=text)
-            )
-            await session.commit()
+            email_row = (await session.execute(
+                select(EmailMessage).where(EmailMessage.id == email_id)
+            )).scalar_one_or_none()
+            if email_row:
+                await session.execute(
+                    update(EmailMessage)
+                    .where(EmailMessage.id == email_id)
+                    .values(sender_name=text)
+                )
+                await session.commit()
+        await log_audit(
+            session_factory,
+            actor_type="telegram",
+            actor_name=_telegram_actor(update.effective_user),
+            action="email.sender_corrected",
+            entity_type="email",
+            entity_id=email_id,
+            tenant_id=getattr(email_row, "tenant_id", None) if email_row else None,
+            details={"sender_name": text},
+        )
         await update.message.reply_text(f"✅ Sender name saved: *{text}*", parse_mode="Markdown")
         return
 
@@ -333,7 +369,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _enqueue_query(update: Update, query_text: str):
     """Push a query job to Redis for the query-worker to process."""
-    _, settings = get_session_factory()
+    session_factory, settings = get_session_factory()
     r = aioredis.from_url(settings.redis_url, decode_responses=True)
     job = json.dumps({
         "type": "query",
@@ -343,6 +379,15 @@ async def _enqueue_query(update: Update, query_text: str):
     })
     await r.lpush(QUERY_QUEUE_KEY, job)
     await r.aclose()
+    await log_audit(
+        session_factory,
+        actor_type="telegram",
+        actor_name=_telegram_actor(update.effective_user),
+        action="query.searched",
+        entity_type="query",
+        details={"query_text": query_text},
+        tenant_id=1,
+    )
     await update.message.reply_text("🔍 On it… I'll send the results shortly.")
 
 
@@ -434,6 +479,16 @@ async def handle_rv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await session.commit()
 
+    await log_audit(
+        session_factory,
+        actor_type="telegram",
+        actor_name=_telegram_actor(query.from_user),
+        action="email.approved",
+        entity_type="email",
+        entity_id=email_id,
+        tenant_id=getattr(email, "tenant_id", None),
+        details={"folder": folder},
+    )
     await query.edit_message_text(f"✅ Approved → *{folder}*. No rule saved.", parse_mode="Markdown")
 
 
@@ -483,6 +538,18 @@ async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         await session.commit()
 
+    session_factory2, _ = get_session_factory()
+    await log_audit(
+        session_factory2,
+        actor_type="telegram",
+        actor_name=_telegram_actor(query.from_user),
+        action="email.reclassified",
+        entity_type="email",
+        entity_id=email_id,
+        tenant_id=getattr(email, "tenant_id", None),
+        details={"folder": folder, "via": "review_card"},
+    )
+
     keyboard = [
         [{"text": "💾 Save as rule", "callback_data": f"rv_save_rule:{email_id}:{folder}"}],
         [{"text": "Skip — just this once", "callback_data": f"rv_skip_rule:{email_id}"}],
@@ -510,6 +577,16 @@ async def handle_rv_save_rule(update: Update, context: ContextTypes.DEFAULT_TYPE
     domain = await _save_rule(session_factory, email, folder, actions)
 
     if domain:
+        await log_audit(
+            session_factory,
+            actor_type="telegram",
+            actor_name=_telegram_actor(query.from_user),
+            action="rule.created",
+            entity_type="rule",
+            entity_id=None,
+            tenant_id=getattr(email, "tenant_id", None),
+            details={"domain": domain, "folder": folder, "via": "review_card"},
+        )
         await query.edit_message_text(
             f"📚 Rule saved — *{domain}* → *{folder}*.", parse_mode="Markdown"
         )
@@ -613,6 +690,14 @@ async def handle_recover(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if ids:
             msg = f"♻️ Reset {len(ids)} stuck email(s) to *new*: {', '.join(ids)}\n\nAI worker will reprocess them shortly."
+            await log_audit(
+                session_factory,
+                actor_type="telegram",
+                actor_name=_telegram_actor(update.effective_user),
+                action="system.recover",
+                entity_type="system",
+                details={"reset_ids": ids},
+            )
         else:
             msg = "✅ No emails stuck in pending\\_review."
     except Exception as e:
@@ -629,6 +714,15 @@ async def handle_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if arg == "on":
         await r.set(LEARNING_MODE_KEY, "1")
         await r.aclose()
+        session_factory, _ = get_session_factory()
+        await log_audit(
+            session_factory,
+            actor_type="telegram",
+            actor_name=_telegram_actor(update.effective_user),
+            action="system.learning_mode",
+            entity_type="system",
+            details={"state": "on"},
+        )
         await update.message.reply_text(
             "🎓 *Learning Mode ON*\n\n"
             "Every new email (except learned rule matches) will be sent for your review.\n"
@@ -639,6 +733,15 @@ async def handle_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif arg == "off":
         await r.delete(LEARNING_MODE_KEY)
         await r.aclose()
+        session_factory, _ = get_session_factory()
+        await log_audit(
+            session_factory,
+            actor_type="telegram",
+            actor_name=_telegram_actor(update.effective_user),
+            action="system.learning_mode",
+            entity_type="system",
+            details={"state": "off"},
+        )
         await update.message.reply_text("✅ *Learning Mode OFF* — running autonomously.", parse_mode="Markdown")
     else:
         is_on = await r.exists(LEARNING_MODE_KEY)
@@ -659,6 +762,16 @@ async def handle_restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await r.lpush(QUERY_QUEUE_KEY, restart_job)
     await r.lpush(REVIEW_QUEUE_KEY, restart_job)
     await r.aclose()
+
+    session_factory, _ = get_session_factory()
+    await log_audit(
+        session_factory,
+        actor_type="telegram",
+        actor_name=_telegram_actor(update.effective_user),
+        action="system.restart",
+        entity_type="system",
+        details={"targets": ["ai-worker", "query-worker", "review-worker"]},
+    )
 
     await update.message.reply_text(
         "🔄 Restart signal sent to *ai-worker*, *query-worker* and *review-worker*.\n"

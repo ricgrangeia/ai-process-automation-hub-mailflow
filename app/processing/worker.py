@@ -28,6 +28,7 @@ from app.processing.actions.base import get_action
 from app.telegram.notifications import send_review_request, send_worker_started
 from app.review.queue import REVIEW_QUEUE_KEY, LEARNING_MODE_KEY
 from app.core.migrations import run_migrations
+from app.core.audit import log_audit
 
 
 # ------------------------------------------------------------------------------
@@ -293,6 +294,23 @@ async def ai_worker_loop():
 
                 if result.rowcount > 0:
                     logger.info(f"✅ DB Updated: ID {email_id} -> {folder} ({source})")
+                    await log_audit(
+                        session_factory,
+                        actor_type="system",
+                        actor_name="ai-worker",
+                        action="email.classified",
+                        entity_type="email",
+                        entity_id=email_id,
+                        tenant_id=email.tenant_id,
+                        details={
+                            "folder": folder,
+                            "source": source,
+                            "confidence": round(float(confidence), 4),
+                            "status": new_status,
+                            "sender_type": sender_type,
+                            "sender_name": sender_name,
+                        },
+                    )
                 else:
                     logger.error(f"❌ DB Update failed: No row with ID {email_id} was affected.")
 

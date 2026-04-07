@@ -142,6 +142,34 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [1.6.0] — 2026-04-07
+
+### Added
+
+- **Audit log system** — every significant action is recorded in `audit_logs` with actor, timestamp, and context:
+  - `app/core/audit.py` — `log_audit()` (async, for workers/bot) and `log_audit_sync()` (sync, for dashboard/migrations)
+  - `_telegram_actor()` helper formats Telegram user as `Full Name (@username)` or `id:12345`
+  - Alembic migration `003_add_audit_logs.py` — creates `audit_logs` table with indexes on `created_at`, `action`, `actor_name`
+- **Audited actions:**
+  - `email.classified` — ai-worker classified and moved an email (source, folder, confidence, sender identity)
+  - `email.reclassified` — Telegram user changed the folder via NeedsReview or Learning Mode review card
+  - `email.approved` — Telegram user approved the AI decision in Learning Mode
+  - `email.sender_corrected` — Telegram user fixed sender name via review card
+  - `rule.created` — Telegram user saved a new learned rule (domain, folder, actions)
+  - `query.searched` — Telegram user ran a natural language email search (query text recorded)
+  - `system.restart` — Telegram user sent `/restart` (targets logged)
+  - `system.recover` — Telegram user sent `/recover` (reset email IDs logged)
+  - `system.learning_mode` — Telegram user toggled `/learn on` or `/learn off`
+  - `account.added` — Dashboard user added an IMAP or Outlook account
+  - `account.toggled` — Dashboard user activated or deactivated an account
+  - `account.password_changed` — Dashboard user reset an account password
+  - `db.migrated` — Alembic applied migrations at startup (from/to revision recorded)
+- **Dashboard — 📋 Audit Log page** — filterable by actor name, action type, and date range (last N days);
+  displays up to 500 events with colour-coded action icons; gracefully shows setup hint if table doesn't exist yet
+- Audit log write is **silently skipped** if `audit_logs` table doesn't exist yet (safe on first boot before migration 003)
+
+---
+
 ## [1.5.0] — 2026-04-07
 
 ### Added

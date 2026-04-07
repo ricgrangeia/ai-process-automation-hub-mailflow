@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 1.5.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 1.6.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -45,6 +45,8 @@ for supervision and account management.
 | Dashboard Remetente column — shows 🏢 Amazon / 👤 João Silva | ✅ |
 | Admin commands — `/status`, `/recover`, `/restart`, `/learn` with Telegram menu | ✅ |
 | Alembic migrations — auto-applied on ai-worker startup, schema always up to date | ✅ |
+| Audit log — every action recorded with actor, timestamp, details | ✅ |
+| Dashboard Audit Log page — filterable by actor, action type, date range | ✅ |
 
 ---
 
@@ -121,7 +123,7 @@ The codebase is organised as a **modular monolith** — each domain is a self-co
 
 ```text
 app/
-├── core/                   # Shared kernel — config, crypto, database engine, migrations
+├── core/                   # Shared kernel — config, crypto, database engine, migrations, audit
 │   └── database/           # Base ORM class, async engine, table init
 ├── accounts/               # Email accounts & API credentials (models + seed)
 ├── messages/               # Email messages, attachments, disk storage
@@ -148,8 +150,9 @@ app/
 alembic/                    # Database migration scripts
 ├── env.py                  # Async engine setup, all models imported
 └── versions/
-    ├── 001_baseline.py     # No-op — marks existing schema
-    └── 002_add_sender_fields.py  # Adds sender_name + sender_type to emails
+    ├── 001_baseline.py              # No-op — marks existing schema
+    ├── 002_add_sender_fields.py     # Adds sender_name + sender_type to emails
+    └── 003_add_audit_logs.py        # Creates audit_logs table
 ```
 
 **Dependency rule:** arrows flow inward toward `core/`. No domain imports another domain's internals — only its public `__init__.py` or `contracts.py`.
@@ -310,7 +313,6 @@ make shell          # Shell into ai-worker container
 - [ ] REST API (FastAPI) for external integrations
 - [ ] Webhook notifications on classification events
 - [ ] Docker health check endpoints
-- [ ] Audit log viewer in dashboard
 - [ ] Learned rules dashboard page (view, edit, disable rules)
 - [ ] PostgreSQL full-text search (GIN index on subject + body)
 - [x] Alembic database migrations — auto-applied on startup
@@ -321,6 +323,7 @@ make shell          # Shell into ai-worker container
 - [x] Learning Mode — human review loop for LLM-classified emails
 - [x] Sender identity extraction — company/person + name via LLM
 - [x] Admin commands — /status, /recover, /restart, /learn
+- [x] Audit log — full action trail with actor, timestamp, details; dashboard page with filters
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
