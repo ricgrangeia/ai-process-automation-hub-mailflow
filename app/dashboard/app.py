@@ -191,7 +191,8 @@ def page_dashboard(engine, settings):
         c1, c2, c3 = st.columns(3)
         c1.metric("Total de E-mails", len(df))
         c2.metric("Confiança Média", f"{df['Confiança'].mean()*100:.1f}%")
-        c3.metric("Tempo Médio vLLM", f"{df['Tempo(s)'].mean():.2f}s")
+        avg_time = df['Tempo(s)'].dropna().mean()
+        c3.metric("Tempo Médio vLLM", f"{avg_time:.2f}s" if pd.notna(avg_time) else "—")
 
         st.divider()
 
@@ -210,12 +211,16 @@ def page_dashboard(engine, settings):
         st.subheader("📋 Registos Recentes")
         df["Assunto"] = df["Assunto"].apply(_decode_mime_header)
         df["Confiança"] = (df["Confiança"] * 100).round(0).astype(int)
+        df["Tempo(s)"] = df["Tempo(s)"].apply(
+            lambda v: round(float(v), 2) if pd.notna(v) else None
+        )
         st.dataframe(
             df,
             use_container_width=True,
             hide_index=True,
             column_config={
                 "Confiança": st.column_config.NumberColumn(format="%d%%"),
+                "Tempo(s)": st.column_config.NumberColumn(format="%.2f s"),
             },
         )
 
