@@ -48,7 +48,7 @@ Body:
                     f"{self.settings.llm_base_url}/chat/completions",
                     json=payload,
                     headers={
-                        "x-api-key": self.settings.llm_api_key
+                        "Authorization": f"Bearer {self.settings.llm_api_key}"
                     }
                 )
 
