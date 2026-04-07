@@ -2,6 +2,11 @@
 Tests for app/classification/hybrid_classifier.py
 
 All external classifiers are mocked — only the orchestration logic is tested.
+
+v2.0 behaviour: rules are hints, LLM always validates when a rule matches.
+  - Rule + LLM agree  → source="rule_confirmed", confidence ≥ 0.95, folder moved
+  - Rule + LLM differ → source="rule_conflict",  folder="NeedsReview"
+  - No rule           → pure LLM, threshold applies as before
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock
@@ -40,15 +45,83 @@ def _make_clf(rule_result, llm_result, threshold=0.75):
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Rule + LLM agree → rule_confirmed
 # ---------------------------------------------------------------------------
 
-async def test_rule_match_returns_immediately():
-    clf, rule, llm = _make_clf(_rule_hit("Invoices"), _llm_hit())
+async def test_rule_confirmed_when_llm_agrees():
+    """Rule matches + LLM returns same folder → rule_confirmed, email moved."""
+    clf, _, llm = _make_clf(_rule_hit("Invoices"), _llm_hit("Invoices", 0.85))
     result = await clf.classify(MagicMock())
     assert result.folder == "Invoices"
-    llm.classify.assert_not_called()
+    assert result.source == "rule_confirmed"
+    llm.classify.assert_called_once()
 
+
+async def test_rule_confirmed_confidence_boosted():
+    """Confidence is boosted to at least 0.95 on agreement."""
+    clf, _, _ = _make_clf(_rule_hit("Invoices"), _llm_hit("Invoices", 0.80))
+    result = await clf.classify(MagicMock())
+    assert result.confidence >= 0.95
+
+
+async def test_rule_confirmed_high_llm_confidence_kept():
+    """If LLM confidence is already above 0.95, it is preserved."""
+    clf, _, _ = _make_clf(_rule_hit("Invoices"), _llm_hit("Invoices", 0.98))
+    result = await clf.classify(MagicMock())
+    assert result.confidence == 0.98
+
+
+async def test_rule_confirmed_rule_folder_set():
+    clf, _, _ = _make_clf(_rule_hit("Invoices"), _llm_hit("Invoices", 0.9))
+    result = await clf.classify(MagicMock())
+    assert result.rule_folder == "Invoices"
+
+
+async def test_llm_always_called_when_rule_matches():
+    """LLM is always invoked for validation — never bypassed by a rule."""
+    clf, _, llm = _make_clf(_rule_hit("Invoices"), _llm_hit("Invoices", 0.9))
+    await clf.classify(MagicMock())
+    llm.classify.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Rule + LLM disagree → rule_conflict → NeedsReview
+# ---------------------------------------------------------------------------
+
+async def test_rule_conflict_when_llm_disagrees():
+    """Rule says Invoices, LLM says Marketing → NeedsReview."""
+    clf, _, _ = _make_clf(_rule_hit("Invoices"), _llm_hit("Marketing", 0.88))
+    result = await clf.classify(MagicMock())
+    assert result.folder == "NeedsReview"
+    assert result.source == "rule_conflict"
+
+
+async def test_rule_conflict_stores_both_folders():
+    clf, _, _ = _make_clf(_rule_hit("Invoices"), _llm_hit("Marketing", 0.88))
+    result = await clf.classify(MagicMock())
+    assert result.rule_folder == "Invoices"
+    assert result.llm_folder == "Marketing"
+
+
+async def test_rule_conflict_preserves_llm_confidence():
+    clf, _, _ = _make_clf(_rule_hit("Invoices"), _llm_hit("Spam", 0.82))
+    result = await clf.classify(MagicMock())
+    assert result.confidence == 0.82
+
+
+async def test_rule_conflict_preserves_sender_identity():
+    llm = _llm_hit("Marketing", 0.88)
+    llm.sender_type = "company"
+    llm.sender_name = "Amazon"
+    clf, _, _ = _make_clf(_rule_hit("Invoices"), llm)
+    result = await clf.classify(MagicMock())
+    assert result.sender_type == "company"
+    assert result.sender_name == "Amazon"
+
+
+# ---------------------------------------------------------------------------
+# No rule → pure LLM (unchanged from v1)
+# ---------------------------------------------------------------------------
 
 async def test_no_rule_falls_through_to_llm():
     clf, _, llm = _make_clf(None, _llm_hit("Work", 0.9))
@@ -80,14 +153,6 @@ async def test_llm_zero_confidence_becomes_needs_review():
     clf, _, _ = _make_clf(None, _llm_hit("Work", 0.0))
     result = await clf.classify(MagicMock())
     assert result.folder == "NeedsReview"
-
-
-async def test_rule_takes_priority_over_high_confidence_llm():
-    """Even a 1.0-confidence LLM result is ignored when a rule fires."""
-    clf, _, llm = _make_clf(_rule_hit("Invoices"), _llm_hit("Work", 1.0))
-    result = await clf.classify(MagicMock())
-    assert result.folder == "Invoices"
-    llm.classify.assert_not_called()
 
 
 async def test_custom_threshold_respected():
