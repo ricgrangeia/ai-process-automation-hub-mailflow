@@ -480,7 +480,7 @@ def main():
             ("status",  "📊 System status — DB counts + queue depths"),
             ("recover", "♻️ Reset stuck pending_review emails to new"),
             ("restart", "🔄 Restart ai-worker and query-worker"),
-            ("search",  "🔍 Search emails — /search invoices from amazon.com"),
+            ("search",  "🔍 Search emails by folder, sender, date or keyword"),
         ])
 
     app = (
