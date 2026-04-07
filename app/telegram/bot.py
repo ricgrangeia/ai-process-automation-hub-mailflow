@@ -40,6 +40,7 @@ from app.processing.queue import QUEUE_KEY as EMAIL_QUEUE_KEY
 from app.query.queue import QUERY_QUEUE_KEY, RESULT_KEY_PREFIX
 from app.review.queue import REVIEW_QUEUE_KEY, LEARNING_MODE_KEY
 from app.core.audit import log_audit, _telegram_actor
+from app.core.operation_mode import get_mode, MODES
 
 logging.basicConfig(
     level=logging.INFO,
@@ -659,15 +660,19 @@ async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         email_q = await r.llen(EMAIL_QUEUE_KEY)
         query_q = await r.llen(QUERY_QUEUE_KEY)
+        op_mode = await get_mode(r)
         await r.aclose()
 
         db_lines = "\n".join(f"  {row[0]}: {row[1]}" for row in counts) or "  (no emails)"
+        mode_label = MODES.get(op_mode, op_mode)
         msg = (
             f"📊 *System Status*\n\n"
             f"*DB — Emails by status:*\n{db_lines}\n\n"
             f"*Redis queues:*\n"
             f"  email jobs pending: {email_q}\n"
-            f"  query jobs pending: {query_q}"
+            f"  query jobs pending: {query_q}\n\n"
+            f"*Operation Mode:*\n"
+            f"  {mode_label}"
         )
     except Exception as e:
         msg = f"⚠️ Status check failed: {e}"

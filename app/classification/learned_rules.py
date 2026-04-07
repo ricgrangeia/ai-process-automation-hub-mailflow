@@ -37,4 +37,5 @@ class LearnedRule(Base):
     created_from_email_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     hit_count: Mapped[int] = mapped_column(Integer, default=0)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    source: Mapped[str] = mapped_column(String(16), default="human")  # "human" | "ai_auto"
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

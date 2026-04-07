@@ -28,6 +28,7 @@ if _project_root not in sys.path:
 try:
     from app.core.config import get_settings
     from app.core.crypto import encrypt_secret, decrypt_secret
+    from app.core.operation_mode import MODES, OPERATION_MODE_KEY
 except ImportError:
     st.error("❌ Erro: Módulo 'app.core.config' não encontrado. Corre da raiz do projeto.")
     st.stop()
@@ -772,6 +773,53 @@ if login_screen():
     st.sidebar.title("🤖 AI Admin")
     st.sidebar.info(f"**Model:** {settings.llm_model}")
     st.sidebar.info(f"**Inbox:** {settings.inbox_folder}")
+
+    # Operation Mode selector
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**⚙️ Operation Mode**")
+    try:
+        import redis as _redis_sync
+        _r = _redis_sync.from_url(settings.redis_url, decode_responses=True)
+        _current_mode = _r.get(OPERATION_MODE_KEY) or "hybrid"
+        _r.close()
+    except Exception:
+        _current_mode = "hybrid"
+
+    _mode_keys = list(MODES.keys())
+    _mode_labels = [f"{MODES[m]}" for m in _mode_keys]
+    _current_idx = _mode_keys.index(_current_mode) if _current_mode in _mode_keys else 0
+
+    _selected_label = st.sidebar.selectbox(
+        "Mode",
+        options=_mode_labels,
+        index=_current_idx,
+        label_visibility="collapsed",
+    )
+    _selected_mode = _mode_keys[_mode_labels.index(_selected_label)]
+
+    if _selected_mode != _current_mode:
+        try:
+            import redis as _redis_sync2
+            _r2 = _redis_sync2.from_url(settings.redis_url, decode_responses=True)
+            _r2.set(OPERATION_MODE_KEY, _selected_mode)
+            _r2.close()
+            from app.core.audit import log_audit_sync
+            from sqlalchemy import create_engine as _ce
+            _sync_eng = _ce((os.environ.get("DATABASE_URL") or settings.database_url).replace("+asyncpg", ""))
+            log_audit_sync(
+                _sync_eng,
+                actor_type="dashboard",
+                actor_name="admin",
+                action="mode.changed",
+                entity_type="system",
+                details={"from": _current_mode, "to": _selected_mode},
+            )
+            st.sidebar.success(f"Mode → {_selected_mode}")
+            st.rerun()
+        except Exception as _e:
+            st.sidebar.error(f"Failed to set mode: {_e}")
+
+    st.sidebar.markdown("---")
 
     page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts", "📚 Learned Rules", "📋 Audit Log"])
 

@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 1.7.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 1.8.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -48,6 +48,10 @@ for supervision and account management.
 | Audit log — every action recorded with actor, timestamp, details | ✅ |
 | Dashboard Audit Log page — filterable by actor, action type, date range | ✅ |
 | Dashboard Learned Rules page — view, enable/disable, edit, delete, add manually | ✅ |
+| Operation Mode system — hybrid / rules_only / llm_only / auto_learn | ✅ |
+| Auto-learn — high-confidence LLM decisions auto-saved as `ai_auto` learned rules | ✅ |
+| Dashboard operation mode selector — live switch without restart | ✅ |
+| `/status` shows current operation mode | ✅ |
 
 ---
 
@@ -64,25 +68,31 @@ IMAP / Outlook
   Redis  mailai:jobs:email
       │
       ▼
-   ai-worker
-   ├─ Learned Rules  (DB-backed, human-confirmed)
-   ├─ Rule Classifier  (fast, deterministic)
-   └─ LLM Classifier   (Qwen 2.5 · extracts folder + sender identity)
+   ai-worker  [Operation Mode — reads from Redis per job]
+   │
+   ├─ hybrid (default)  Rules first → LLM fallback
+   ├─ rules_only        Only learned rules · unmatched → NeedsReview · zero LLM cost
+   ├─ llm_only          Always LLM · skips rules · model quality audit
+   └─ auto_learn        Hybrid + auto-save rules when confidence ≥ 0.90
       │
-      ├─ confidence ≥ 0.75 + Learning Mode OFF ──▶ Actions
-      │                                             ├─▶ move_folder  (IMAP)
-      │                                             └─▶ export_pdf   (disk · {year}/{month})
-      │
-      ├─ confidence ≥ 0.75 + Learning Mode ON  ──▶ review-worker
-      │   (only if not matched by learned rule)      └─▶ Telegram review card
-      │                                                   ├─▶ Approve → move
-      │                                                   ├─▶ Change folder → move + save rule?
-      │                                                   └─▶ Fix sender → update identity
-      │
-      ├─ confidence < 0.75 ──▶ Telegram NeedsReview
-      │                         └─▶ You reply → move + learn rule
-      │
-      └─▶ Store metadata + telemetry + sender identity in PostgreSQL
+      ├─ Learned Rules  (DB-backed · source: human | ai_auto)
+      ├─ Rule Classifier  (fast, deterministic)
+      └─ LLM Classifier   (Qwen 2.5 · extracts folder + sender identity)
+         │
+         ├─ confidence ≥ 0.75 + Learning Mode OFF ──▶ Actions
+         │                                             ├─▶ move_folder  (IMAP)
+         │                                             └─▶ export_pdf   (disk · {year}/{month})
+         │
+         ├─ confidence ≥ 0.75 + Learning Mode ON  ──▶ review-worker
+         │   (only if not matched by learned rule)      └─▶ Telegram review card
+         │                                                   ├─▶ Approve → move
+         │                                                   ├─▶ Change folder → move + save rule?
+         │                                                   └─▶ Fix sender → update identity
+         │
+         ├─ confidence < 0.75 ──▶ Telegram NeedsReview
+         │                         └─▶ You reply → move + learn rule
+         │
+         └─▶ Store metadata + telemetry + sender identity in PostgreSQL
                         │
                         ▼
                    Dashboard
@@ -153,7 +163,8 @@ alembic/                    # Database migration scripts
 └── versions/
     ├── 001_baseline.py              # No-op — marks existing schema
     ├── 002_add_sender_fields.py     # Adds sender_name + sender_type to emails
-    └── 003_add_audit_logs.py        # Creates audit_logs table
+    ├── 003_add_audit_logs.py        # Creates audit_logs table
+    └── 004_add_learned_rules_source.py  # Adds source column (human | ai_auto)
 ```
 
 **Dependency rule:** arrows flow inward toward `core/`. No domain imports another domain's internals — only its public `__init__.py` or `contracts.py`.
@@ -338,6 +349,8 @@ make shell          # Shell into ai-worker container
 - [x] Admin commands — /status, /recover, /restart, /learn
 - [x] Audit log — full action trail with actor, timestamp, details; dashboard page with filters
 - [x] Learned rules dashboard page — view, enable/disable, edit, delete, add manually
+- [x] Operation Mode system — hybrid / rules_only / llm_only / auto_learn; switchable from dashboard or Redis
+- [x] Auto-learn — high-confidence LLM decisions auto-saved as learned rules (source: ai_auto)
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

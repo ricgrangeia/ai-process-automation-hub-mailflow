@@ -29,6 +29,10 @@ from app.telegram.notifications import send_review_request, send_worker_started
 from app.review.queue import REVIEW_QUEUE_KEY, LEARNING_MODE_KEY
 from app.core.migrations import run_migrations
 from app.core.audit import log_audit
+from app.core.operation_mode import (
+    get_mode, OPERATION_MODE_KEY, MODES,
+    AUTO_LEARN_CONFIDENCE_THRESHOLD, GENERIC_DOMAINS,
+)
 
 
 # ------------------------------------------------------------------------------
@@ -136,6 +140,61 @@ async def run_actions(email, account, settings, session_factory, folder: str) ->
 # Main AI Worker Loop
 # ------------------------------------------------------------------------------
 
+async def _auto_save_rule(session_factory, email, folder: str, confidence: float) -> None:
+    """
+    Auto-save a high-confidence LLM decision as an ai_auto learned rule.
+    Skips generic domains, never overwrites human rules.
+    """
+    from sqlalchemy import select, insert
+    from app.classification.learned_rules import LearnedRule
+
+    domain = None
+    if email.from_address and "@" in email.from_address:
+        domain = email.from_address.split("@")[-1].lower()
+
+    if not domain or domain in GENERIC_DOMAINS:
+        logger.debug(f"Auto-learn: skipping generic/missing domain for email {email.id}")
+        return
+
+    try:
+        async with session_factory() as session:
+            # Check if a human rule already exists for this domain+folder combo
+            existing = await session.execute(
+                select(LearnedRule).where(
+                    LearnedRule.active == True,
+                    LearnedRule.tenant_id == email.tenant_id,
+                    LearnedRule.match_field == "sender_domain",
+                    LearnedRule.match_value == domain,
+                )
+            )
+            existing_rule = existing.scalar_one_or_none()
+
+            if existing_rule:
+                if existing_rule.source == "human":
+                    logger.debug(f"Auto-learn: human rule already exists for {domain}, skipping.")
+                    return
+                # ai_auto rule exists — update its hit_count but don't duplicate
+                existing_rule.hit_count += 1
+                await session.commit()
+                return
+
+            # Insert new ai_auto rule
+            new_rule = LearnedRule(
+                tenant_id=email.tenant_id,
+                match_field="sender_domain",
+                match_value=domain,
+                actions=[{"type": "move_folder", "folder": folder}],
+                created_from_email_id=email.id,
+                source="ai_auto",
+            )
+            session.add(new_rule)
+            await session.commit()
+            logger.info(f"🤖 Auto-saved rule: sender_domain={domain} → {folder} (confidence={confidence:.2f})")
+
+    except Exception as e:
+        logger.warning(f"Auto-learn rule save failed: {e}")
+
+
 async def ai_worker_loop():
     settings = get_settings()
 
@@ -192,8 +251,32 @@ async def ai_worker_loop():
                 )
                 account = acc_result.scalar_one()
 
-            # 3️⃣ Classify
-            classification = await classifier.classify(email)
+            # 3️⃣ Classify (mode-aware)
+            op_mode = await get_mode(r)
+
+            if op_mode == "rules_only":
+                classification = await rule.classify(email)
+                if not classification:
+                    from app.classification.contracts import ClassificationResult
+                    classification = ClassificationResult("NeedsReview", 0.0)
+                    classification.source = "rules_only_nomatch"
+                else:
+                    classification.source = "rule"
+            elif op_mode == "llm_only":
+                classification = await llm.classify(email)
+                if classification.confidence < 0.75:
+                    from app.classification.contracts import ClassificationResult
+                    low = ClassificationResult("NeedsReview", classification.confidence)
+                    low.source = getattr(classification, 'source', 'llm')
+                    low.sender_type = getattr(classification, 'sender_type', None)
+                    low.sender_name = getattr(classification, 'sender_name', None)
+                    low.prompt_tokens = getattr(classification, 'prompt_tokens', 0)
+                    low.completion_tokens = getattr(classification, 'completion_tokens', 0)
+                    low.total_tokens = getattr(classification, 'total_tokens', 0)
+                    classification = low
+            else:  # hybrid or auto_learn
+                classification = await classifier.classify(email)
+
             folder = classification.folder
             confidence = classification.confidence
             source = getattr(classification, 'source', 'llm')
@@ -307,10 +390,19 @@ async def ai_worker_loop():
                             "source": source,
                             "confidence": round(float(confidence), 4),
                             "status": new_status,
+                            "op_mode": op_mode,
                             "sender_type": sender_type,
                             "sender_name": sender_name,
                         },
                     )
+                    # 7️⃣ Auto-learn: save high-confidence LLM decisions as rules
+                    if (
+                        op_mode == "auto_learn"
+                        and new_status == "moved"
+                        and source != "rule"
+                        and confidence >= AUTO_LEARN_CONFIDENCE_THRESHOLD
+                    ):
+                        await _auto_save_rule(session_factory, email, folder, confidence)
                 else:
                     logger.error(f"❌ DB Update failed: No row with ID {email_id} was affected.")
 

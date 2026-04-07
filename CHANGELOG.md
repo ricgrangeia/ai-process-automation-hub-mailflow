@@ -142,6 +142,28 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [1.8.0] — 2026-04-07
+
+### Added
+
+- **Operation Mode system** — four runtime modes, switchable without restarting any service:
+  - `hybrid` (default) — rules first, LLM fallback, same behaviour as before
+  - `rules_only` — only learned rules fire; unmatched emails go to NeedsReview; zero LLM cost
+  - `llm_only` — always calls LLM, skips rule lookup; useful for auditing model quality
+  - `auto_learn` — hybrid + high-confidence LLM decisions (≥ 0.90) auto-saved as `ai_auto` learned rules
+- **Auto-learn rule saving** (`_auto_save_rule`) — in `auto_learn` mode, high-confidence decisions are saved as `sender_domain` learned rules; skips generic domains (gmail.com, outlook.com, etc.); never overwrites human rules; increments hit count if the rule already exists
+- **`source` field on `learned_rules`** — distinguishes `"human"` (Telegram/dashboard) from `"ai_auto"` (auto-saved); Alembic migration `004_add_learned_rules_source.py`
+- **Dashboard — operation mode selector** — sidebar dropdown shows current mode with emoji labels; writes to Redis on change; audits as `mode.changed` with from/to fields
+- **Telegram `/status`** — now includes current Operation Mode below the queue depths
+- **`mode.changed`** audit event — recorded when dashboard changes the operation mode
+
+### Changed
+
+- `processing/worker.py`: classification is now mode-aware — reads `op_mode` from Redis once per job; `rules_only` skips LLM entirely; `llm_only` bypasses rule lookup; `hybrid`/`auto_learn` use the existing `HybridClassifier`; `op_mode` recorded in `email.classified` audit event
+- `app/core/operation_mode.py`: `OPERATION_MODE_KEY`, `MODES`, `AUTO_LEARN_CONFIDENCE_THRESHOLD = 0.90`, `GENERIC_DOMAINS` set
+
+---
+
 ## [1.7.0] — 2026-04-07
 
 ### Added
