@@ -6,6 +6,7 @@ RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY alembic ./alembic
 
 ENV PYTHONUNBUFFERED=1
 CMD ["python", "-m", "app.ingestion.imap.worker"]
