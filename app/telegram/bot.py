@@ -666,18 +666,18 @@ async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db_lines = "\n".join(f"  {row[0]}: {row[1]}" for row in counts) or "  (no emails)"
         mode_label = MODES.get(op_mode, op_mode)
         msg = (
-            f"📊 *System Status*\n\n"
-            f"*DB — Emails by status:*\n{db_lines}\n\n"
-            f"*Redis queues:*\n"
+            f"📊 System Status\n\n"
+            f"DB — Emails by status:\n{db_lines}\n\n"
+            f"Redis queues:\n"
             f"  email jobs pending: {email_q}\n"
             f"  query jobs pending: {query_q}\n\n"
-            f"*Operation Mode:*\n"
+            f"Operation Mode:\n"
             f"  {mode_label}"
         )
     except Exception as e:
         msg = f"⚠️ Status check failed: {e}"
 
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await update.message.reply_text(msg)
 
 
 async def handle_recover(update: Update, context: ContextTypes.DEFAULT_TYPE):
