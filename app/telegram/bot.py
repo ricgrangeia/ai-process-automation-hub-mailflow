@@ -680,20 +680,33 @@ async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_recover(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    session_factory, _ = get_session_factory()
+    session_factory, settings = get_session_factory()
+    r = aioredis.from_url(settings.redis_url, decode_responses=True)
 
     try:
         async with session_factory() as session:
             from sqlalchemy import text
             result = await session.execute(text(
                 "UPDATE emails SET status='new', processed_at=NULL "
-                "WHERE status='pending_review' RETURNING id"
+                "WHERE status='pending_review' RETURNING id, tenant_id"
             ))
-            ids = [str(row[0]) for row in result.all()]
+            rows = result.all()
             await session.commit()
 
+        ids = [str(row[0]) for row in rows]
+
         if ids:
-            msg = f"♻️ Reset {len(ids)} stuck email(s) to *new*: {', '.join(ids)}\n\nAI worker will reprocess them shortly."
+            # Re-enqueue immediately so ai-worker picks them up without waiting
+            for email_id, tenant_id in rows:
+                payload = json.dumps({
+                    "tenant_id": tenant_id,
+                    "email_id": email_id,
+                    "type": "process_email",
+                    "retries": 0,
+                })
+                await r.lpush(EMAIL_QUEUE_KEY, payload)
+
+            msg = f"♻️ Reset and re-queued {len(ids)} email(s): {', '.join(ids)}\n\nAI worker will reprocess them now."
             await log_audit(
                 session_factory,
                 actor_type="telegram",
@@ -703,11 +716,13 @@ async def handle_recover(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 details={"reset_ids": ids},
             )
         else:
-            msg = "✅ No emails stuck in pending\\_review."
+            msg = "✅ No emails stuck in pending_review."
     except Exception as e:
         msg = f"⚠️ Recovery failed: {e}"
+    finally:
+        await r.aclose()
 
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await update.message.reply_text(msg)
 
 
 async def handle_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
