@@ -421,8 +421,10 @@ def page_audit_log(engine):
     )
     days = col_days.number_input("Last N days", min_value=1, max_value=365, value=7)
 
-    conditions = ["created_at >= NOW() - INTERVAL ':days days'"]
-    params: dict = {"days": int(days)}
+    from datetime import datetime, timezone, timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=int(days))
+    conditions = ["created_at >= :cutoff"]
+    params: dict = {"cutoff": cutoff}
 
     if actor_filter:
         conditions.append("actor_name ILIKE :actor")
