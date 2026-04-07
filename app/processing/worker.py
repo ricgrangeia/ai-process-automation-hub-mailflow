@@ -136,9 +136,6 @@ async def run_actions(email, account, settings, session_factory, folder: str) ->
 # ------------------------------------------------------------------------------
 
 async def ai_worker_loop():
-    # Apply any pending DB migrations before anything else touches the schema.
-    run_migrations()
-
     settings = get_settings()
 
     engine = make_engine(settings.database_url)
@@ -322,6 +319,10 @@ async def ai_worker_loop():
 
 
 def main():
+    # Run migrations synchronously before the event loop starts.
+    # asyncio.run() cannot be called from within a running loop, so this
+    # must happen here rather than inside ai_worker_loop().
+    run_migrations()
     try:
         asyncio.run(ai_worker_loop())
     except KeyboardInterrupt:
