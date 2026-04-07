@@ -36,6 +36,7 @@ from app.accounts.models import EmailAccount
 from app.messages.models import EmailMessage
 from app.classification.learned_rules import LearnedRule
 from app.ingestion.imap.client import connect_imap, move_message
+from app.processing.queue import QUEUE_KEY as EMAIL_QUEUE_KEY
 from app.query.queue import QUERY_QUEUE_KEY, RESULT_KEY_PREFIX
 
 logging.basicConfig(
@@ -380,6 +381,80 @@ async def _push_delivery_job(query, result_id: str, method: str):
 
 
 # ------------------------------------------------------------------------------
+# Admin commands: /status, /recover, /restart
+# ------------------------------------------------------------------------------
+
+async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    session_factory, settings = get_session_factory()
+    r = aioredis.from_url(settings.redis_url, decode_responses=True)
+
+    try:
+        async with session_factory() as session:
+            from sqlalchemy import text
+            rows = await session.execute(text(
+                "SELECT status, COUNT(*) as n FROM emails GROUP BY status ORDER BY status"
+            ))
+            counts = rows.all()
+
+        email_q = await r.llen(EMAIL_QUEUE_KEY)
+        query_q = await r.llen(QUERY_QUEUE_KEY)
+        await r.aclose()
+
+        db_lines = "\n".join(f"  {row[0]}: {row[1]}" for row in counts) or "  (no emails)"
+        msg = (
+            f"📊 *System Status*\n\n"
+            f"*DB — Emails by status:*\n{db_lines}\n\n"
+            f"*Redis queues:*\n"
+            f"  email jobs pending: {email_q}\n"
+            f"  query jobs pending: {query_q}"
+        )
+    except Exception as e:
+        msg = f"⚠️ Status check failed: {e}"
+
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+async def handle_recover(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    session_factory, _ = get_session_factory()
+
+    try:
+        async with session_factory() as session:
+            from sqlalchemy import text
+            result = await session.execute(text(
+                "UPDATE emails SET status='new', processed_at=NULL "
+                "WHERE status='pending_review' RETURNING id"
+            ))
+            ids = [str(row[0]) for row in result.all()]
+            await session.commit()
+
+        if ids:
+            msg = f"♻️ Reset {len(ids)} stuck email(s) to *new*: {', '.join(ids)}\n\nAI worker will reprocess them shortly."
+        else:
+            msg = "✅ No emails stuck in pending\\_review."
+    except Exception as e:
+        msg = f"⚠️ Recovery failed: {e}"
+
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+async def handle_restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _, settings = get_session_factory()
+    r = aioredis.from_url(settings.redis_url, decode_responses=True)
+
+    restart_job = json.dumps({"type": "restart"})
+    await r.lpush(EMAIL_QUEUE_KEY, restart_job)
+    await r.lpush(QUERY_QUEUE_KEY, restart_job)
+    await r.aclose()
+
+    await update.message.reply_text(
+        "🔄 Restart signal sent to *ai-worker* and *query-worker*.\n"
+        "Docker will restart them automatically.\n\n"
+        "You'll receive a startup notification when ai-worker is back online.",
+        parse_mode="Markdown",
+    )
+
+
+# ------------------------------------------------------------------------------
 # Handler: skip_learn:{email_id}
 # ------------------------------------------------------------------------------
 
@@ -400,13 +475,25 @@ def main():
         logger.error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set.")
         return
 
+    async def post_init(application):
+        await application.bot.set_my_commands([
+            ("status",  "📊 System status — DB counts + queue depths"),
+            ("recover", "♻️ Reset stuck pending_review emails to new"),
+            ("restart", "🔄 Restart ai-worker and query-worker"),
+            ("search",  "🔍 Search emails — /search invoices from amazon.com"),
+        ])
+
     app = (
         Application.builder()
         .token(settings.telegram_bot_token)
+        .post_init(post_init)
         .build()
     )
 
-    app.add_handler(CommandHandler("search", handle_search_command))
+    app.add_handler(CommandHandler("status",  handle_status))
+    app.add_handler(CommandHandler("recover", handle_recover))
+    app.add_handler(CommandHandler("restart", handle_restart))
+    app.add_handler(CommandHandler("search",  handle_search_command))
     app.add_handler(CallbackQueryHandler(handle_classify,       pattern=r"^classify:"))
     app.add_handler(CallbackQueryHandler(handle_learn_move,     pattern=r"^learn_move:"))
     app.add_handler(CallbackQueryHandler(handle_learn_ask_path, pattern=r"^learn_ask_path:"))

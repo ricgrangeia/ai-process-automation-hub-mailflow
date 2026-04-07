@@ -244,7 +244,10 @@ async def run():
             job = json.loads(raw)
             job_type = job.get("type")
 
-            if job_type == "query":
+            if job_type == "restart":
+                logger.info("🔄 Restart signal received — exiting for Docker to restart.")
+                import sys; sys.exit(0)
+            elif job_type == "query":
                 await _handle_search(job, settings, session_factory, r)
             elif job_type == "query_deliver":
                 await _handle_deliver(job, settings, r)

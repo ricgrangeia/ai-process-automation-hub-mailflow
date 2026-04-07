@@ -162,6 +162,11 @@ async def ai_worker_loop():
 
             _, job_data = result
             job = json.loads(job_data)
+
+            if job.get("type") == "restart":
+                logger.info("🔄 Restart signal received — exiting for Docker to restart.")
+                import sys; sys.exit(0)
+
             email_id = job["email_id"]
             retries = job.get("retries", 0)
 
