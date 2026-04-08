@@ -74,6 +74,9 @@ async def _send_review_card(bot_token: str, chat_id: str, email, job: dict, fold
             {"text": "📁 Change folder", "callback_data": f"rv_folder:{email.id}:{folder}"},
             {"text": "👤 Fix sender",    "callback_data": f"rv_sender:{email.id}"},
         ],
+        [
+            {"text": "➕ New folder", "callback_data": f"folder_new_request:{email.id}"},
+        ],
     ]
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"

@@ -135,6 +135,33 @@ async def _save_rule(session_factory, email, folder: str, actions: list) -> str 
 
 
 # ------------------------------------------------------------------------------
+# Invoice QR extraction helper (shared across classify / rv_approve / rv_set_folder)
+# ------------------------------------------------------------------------------
+
+async def _try_invoice_qr_bot(email, folder: str, email_id: int, settings, session_factory) -> None:
+    """Fire-and-forget: extract invoice QR from PDF attachments when folder matches."""
+    if not ("invoice" in folder.lower() or "fatura" in folder.lower()):
+        return
+    if not (email and email.raw_path and settings.tool_server_url):
+        return
+    try:
+        from app.invoices.extractor import extract_qr_from_pdf, persist_invoice
+        from pathlib import Path as _Path
+        att_dir = _Path(email.raw_path).parent / "attachments"
+        pdfs = list(att_dir.glob("*.pdf")) if att_dir.exists() else []
+        for pdf in pdfs:
+            results = await extract_qr_from_pdf(
+                str(pdf), settings.tool_server_url, settings.tool_server_api_key
+            )
+            for invoice_data in results:
+                await persist_invoice(session_factory, email_id, invoice_data)
+            if results:
+                break
+    except Exception as _e:
+        logger.warning(f"Invoice QR extraction failed for email {email_id}: {_e}")
+
+
+# ------------------------------------------------------------------------------
 # Handler: classify:{email_id}:{folder}
 # ------------------------------------------------------------------------------
 
@@ -187,23 +214,8 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     # Invoice QR extraction — fire and forget
-    if move_success and ("invoice" in folder.lower() or "fatura" in folder.lower()):
-        try:
-            from app.invoices.extractor import extract_qr_from_pdf, persist_invoice
-            from pathlib import Path as _Path
-            if email.raw_path:
-                att_dir = _Path(email.raw_path).parent / "attachments"
-                pdfs = list(att_dir.glob("*.pdf")) if att_dir.exists() else []
-                for pdf in pdfs:
-                    results = await extract_qr_from_pdf(
-                        str(pdf), settings.tool_server_url, settings.tool_server_api_key
-                    )
-                    for invoice_data in results:
-                        await persist_invoice(session_factory, email_id, invoice_data)
-                    if results:
-                        break
-        except Exception as _e:
-            logger.warning(f"Invoice QR extraction failed for email {email_id}: {_e}")
+    if move_success:
+        await _try_invoice_qr_bot(email, folder, email_id, settings, session_factory)
 
     status_icon = "✅" if move_success else "⚠️"
 
@@ -606,6 +618,7 @@ async def handle_rv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tenant_id=getattr(email, "tenant_id", None),
         details={"folder": folder},
     )
+    await _try_invoice_qr_bot(email, folder, email_id, settings, session_factory)
     await query.edit_message_text(f"✅ Approved → *{folder}*. No rule saved.", parse_mode="Markdown")
 
 
@@ -660,7 +673,7 @@ async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         await session.commit()
 
-    session_factory2, _ = get_session_factory()
+    session_factory2, settings2 = get_session_factory()
     await log_audit(
         session_factory2,
         actor_type="telegram",
@@ -671,6 +684,7 @@ async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYP
         tenant_id=getattr(email, "tenant_id", None),
         details={"folder": folder, "via": "review_card"},
     )
+    await _try_invoice_qr_bot(email, folder, email_id, settings2, session_factory2)
 
     keyboard = [
         [{"text": "💾 Save as rule", "callback_data": f"rv_save_rule:{email_id}:{folder}"}],
