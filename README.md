@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 2.1.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 2.1.1 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 

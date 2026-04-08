@@ -9,7 +9,6 @@ AI Worker - Multi-Tenant Email Processor
 import asyncio
 import json
 import logging
-import time
 from datetime import datetime, timezone, timedelta
 
 import redis.asyncio as redis
@@ -233,7 +232,6 @@ async def ai_worker_loop():
             email_id = job["email_id"]
             retries = job.get("retries", 0)
 
-            start_time = time.time()
             logger.info(f"📥 Processing job for Email ID: {email_id} (attempt {retries + 1}/{MAX_RETRIES})")
 
             # 2️⃣ Load metadata + active folder list
@@ -378,8 +376,8 @@ async def ai_worker_loop():
             action_success = await run_actions(email, account, settings, session_factory, folder)
 
             # 6️⃣ Persist result
-            processing_time = time.time() - start_time
             new_status = "moved" if action_success else "failed_move"
+            llm_time = getattr(classification, 'llm_time_seconds', None)
 
             async with session_factory() as update_session:
                 stmt = (
@@ -390,7 +388,7 @@ async def ai_worker_loop():
                         classification_label=str(folder),
                         ai_confidence=float(confidence),
                         ai_source=str(source),
-                        processing_time_seconds=float(processing_time),
+                        processing_time_seconds=float(llm_time) if llm_time else None,
                         processed_at=datetime.now(timezone.utc),
                         prompt_tokens=getattr(classification, 'prompt_tokens', 0),
                         completion_tokens=getattr(classification, 'completion_tokens', 0),

@@ -142,6 +142,30 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [2.1.1] — 2026-04-08
+
+### Fixed
+
+- **Dashboard Tempo(s) column showing "None"** — the apply lambda returned Python `None` for null values,
+  which Streamlit renders as the text "None"; changed to return `"1.23s"` for valid values and `"—"` for
+  nulls; removed `NumberColumn` format config for that column (now a plain text column)
+- **Tempo(s) metric using wrong column state** — the KPI metric was reading `df['Tempo(s)']` after it had
+  already been converted to strings by the apply; now reads the raw numeric column via `pd.to_numeric`
+  before the apply runs
+- **Tempo(s) measured total job time instead of model inference time** — `processing_time_seconds` was set to
+  `time.time() - start_time` which included DB queries, IMAP move, and everything else; now measures only
+  the HTTP roundtrip to the LLM (from sending the request to receiving the response):
+  - `ClassificationResult.llm_time_seconds` field added (float, seconds, default 0.0)
+  - `LLMClassifier.classify()` wraps the `httpx.post()` call with `time.perf_counter()` and stores the
+    delta in `result.llm_time_seconds`
+  - `HybridClassifier.classify()` propagates `llm_time_seconds` through the conflict and
+    low-confidence result paths
+  - `processing/worker.py` stores `classification.llm_time_seconds` as `processing_time_seconds`;
+    `None` when no LLM ran (rules_only mode, human-reclassified emails); removed unused `start_time`
+    and `time` import
+
+---
+
 ## [2.1.0] — 2026-04-08
 
 ### Added
@@ -194,7 +218,8 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ### Changed (Breaking — classification behaviour)
 
-- **Rules are no longer hard overrides.** The LLM now always runs, using the matched rule as a hint for validation. This enables the system to catch exceptions — same sender domain, different email type (e.g. Amazon invoice vs Amazon newsletter).
+- **Rules are no longer hard overrides.** The LLM now always runs, using the matched rule as a hint for
+  validation — catches exceptions like same sender domain but different email type (invoice vs newsletter).
 - **New classification sources:**
   - `rule_confirmed` — rule matched AND LLM agreed; confidence boosted to ≥ 0.95; email moved automatically
   - `rule_conflict` — rule and LLM disagree; email routed to Telegram for human decision
@@ -204,22 +229,31 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
   - Agreement → `source="rule_confirmed"`, confidence boosted
   - Disagreement → `ClassificationResult("NeedsReview")` with `rule_folder` and `llm_folder` set
   - No rule → pure LLM unchanged
-- **`llm_classifier.py`** — new `rule_hint` parameter; when provided, injects a validation context block into the user prompt explaining what the rule expects and asking the model to agree or flag a conflict
-- **`classification/contracts.py`** — `ClassificationResult` now has typed defaults for all attributes (`source`, `sender_type`, `sender_name`, token counts, `rule_folder`, `llm_folder`) — no more implicit dynamic attribute setting
+- **`llm_classifier.py`** — new `rule_hint` parameter; when provided, injects a validation context block
+  into the user prompt explaining what the rule expects and asking the model to agree or flag a conflict
+- **`classification/contracts.py`** — `ClassificationResult` now has typed defaults for all attributes
+  (`source`, `sender_type`, `sender_name`, token counts, `rule_folder`, `llm_folder`) — no more implicit
+  dynamic attribute setting
 - **`rule_classifier.py`** — hardcoded and learned rule results now explicitly set `source="rule"`
-- **`telegram/notifications.py`** — `send_review_request` now accepts `source`, `rule_folder`, `llm_folder`; when `source="rule_conflict"` shows a distinct conflict card:
-  ```
+- **`telegram/notifications.py`** — `send_review_request` now accepts `source`, `rule_folder`,
+  `llm_folder`; when `source="rule_conflict"` shows a distinct conflict card:
+
+  ```text
   ⚠️ Rule Conflict — human input needed
   📚 Learned rule says: Invoices
   🧠 AI says: Marketing (82%)
   Which is correct?
   ```
-- **`processing/worker.py`** — passes `source`, `rule_folder`, `llm_folder` from classification result to `send_review_request`
+
+- **`processing/worker.py`** — passes `source`, `rule_folder`, `llm_folder` from classification result
+  to `send_review_request`
 - `rules_only` operation mode is unchanged — still hard override, LLM never runs
 
 ### Fixed
 
-- `telegram/bot.py` — `update(EmailMessage)` crashed with `TypeError: 'Update' object is not callable` because the SQLAlchemy `update` import was shadowed by the Telegram `Update` handler parameter in all async handlers; fixed by aliasing import to `sa_update`
+- `telegram/bot.py` — `update(EmailMessage)` crashed with `TypeError: 'Update' object is not callable`;
+  the SQLAlchemy `update` import was shadowed by the Telegram `Update` handler parameter; fixed by
+  aliasing to `sa_update`
 
 ---
 
@@ -257,7 +291,9 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
   - `rules_only` — only learned rules fire; unmatched emails go to NeedsReview; zero LLM cost
   - `llm_only` — always calls LLM, skips rule lookup; useful for auditing model quality
   - `auto_learn` — hybrid + high-confidence LLM decisions (≥ 0.90) auto-saved as `ai_auto` learned rules
-- **Auto-learn rule saving** (`_auto_save_rule`) — in `auto_learn` mode, high-confidence decisions are saved as `sender_domain` learned rules; skips generic domains (gmail.com, outlook.com, etc.); never overwrites human rules; increments hit count if the rule already exists
+- **Auto-learn rule saving** (`_auto_save_rule`) — in `auto_learn` mode, high-confidence decisions are
+  saved as `sender_domain` learned rules; skips generic domains (gmail.com, outlook.com, etc.); never
+  overwrites human rules; increments hit count if the rule already exists
 - **`source` field on `learned_rules`** — distinguishes `"human"` (Telegram/dashboard) from `"ai_auto"` (auto-saved); Alembic migration `004_add_learned_rules_source.py`
 - **Dashboard — operation mode selector** — sidebar dropdown shows current mode with emoji labels; writes to Redis on change; audits as `mode.changed` with from/to fields
 - **Telegram `/status`** — now includes current Operation Mode below the queue depths
@@ -265,7 +301,9 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ### Changed
 
-- `processing/worker.py`: classification is now mode-aware — reads `op_mode` from Redis once per job; `rules_only` skips LLM entirely; `llm_only` bypasses rule lookup; `hybrid`/`auto_learn` use the existing `HybridClassifier`; `op_mode` recorded in `email.classified` audit event
+- `processing/worker.py`: classification is now mode-aware — reads `op_mode` from Redis once per job;
+  `rules_only` skips LLM entirely; `llm_only` bypasses rule lookup; `hybrid`/`auto_learn` use the
+  existing `HybridClassifier`; `op_mode` recorded in `email.classified` audit event
 - `app/core/operation_mode.py`: `OPERATION_MODE_KEY`, `MODES`, `AUTO_LEARN_CONFIDENCE_THRESHOLD = 0.90`, `GENERIC_DOMAINS` set
 
 ---

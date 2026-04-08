@@ -51,6 +51,7 @@ class HybridClassifier:
                 conflict.prompt_tokens = llm_result.prompt_tokens
                 conflict.completion_tokens = llm_result.completion_tokens
                 conflict.total_tokens = llm_result.total_tokens
+                conflict.llm_time_seconds = llm_result.llm_time_seconds
                 return conflict
 
         # No rule — pure LLM
@@ -66,4 +67,5 @@ class HybridClassifier:
         low.prompt_tokens = llm_result.prompt_tokens
         low.completion_tokens = llm_result.completion_tokens
         low.total_tokens = llm_result.total_tokens
+        low.llm_time_seconds = llm_result.llm_time_seconds
         return low

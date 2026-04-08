@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 import httpx
 from .contracts import ClassificationResult
 
@@ -72,6 +73,7 @@ Body:
         }
 
         try:
+            _t0 = time.perf_counter()
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     f"{self.settings.llm_base_url}/chat/completions",
@@ -80,6 +82,7 @@ Body:
                         "Authorization": f"Bearer {self.settings.llm_api_key}"
                     }
                 )
+            _llm_time = time.perf_counter() - _t0
 
             # 🔴 Handle non-200
             if response.status_code != 200:
@@ -136,6 +139,7 @@ Body:
             result = ClassificationResult(folder, confidence)
             result.sender_type = sender_type
             result.sender_name = sender_name
+            result.llm_time_seconds = round(_llm_time, 3)
             return result
 
         except httpx.RequestError as e:

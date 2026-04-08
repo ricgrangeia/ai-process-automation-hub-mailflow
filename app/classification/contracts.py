@@ -11,6 +11,8 @@ class ClassificationResult:
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.total_tokens = 0
+        # LLM inference time — seconds from sending the HTTP request to receiving the response
+        self.llm_time_seconds: float = 0.0
         # Conflict context — set when source == "rule_conflict"
         self.rule_folder = None   # what the rule suggested
         self.llm_folder = None    # what the LLM said instead
