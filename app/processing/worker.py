@@ -141,6 +141,41 @@ async def run_actions(email, account, settings, session_factory, folder: str) ->
 # Main AI Worker Loop
 # ------------------------------------------------------------------------------
 
+async def _try_invoice_qr(email, settings, session_factory) -> None:
+    """
+    If TOOL_SERVER_URL is configured, try to extract invoice QR data from any
+    PDF attachments stored for this email. Runs fire-and-forget; never raises.
+    """
+    if not settings.tool_server_url:
+        return
+    if not email.raw_path:
+        return
+
+    from pathlib import Path as _Path
+    from app.invoices.extractor import extract_qr_from_pdf, persist_invoice
+
+    att_dir = _Path(email.raw_path).parent / "attachments"
+    pdfs = list(att_dir.glob("*.pdf")) if att_dir.exists() else []
+    if not pdfs:
+        logger.debug(f"No PDF attachments found for email {email.id} — skipping QR extraction")
+        return
+
+    for pdf in pdfs:
+        try:
+            results = await extract_qr_from_pdf(
+                str(pdf),
+                settings.tool_server_url,
+                settings.tool_server_api_key,
+            )
+            for invoice_data in results:
+                await persist_invoice(session_factory, email.id, invoice_data)
+            if results:
+                logger.info(f"Invoice QR extracted for email {email.id} from {pdf.name}")
+                break
+        except Exception as e:
+            logger.warning(f"Invoice QR extraction error for email {email.id}: {e}")
+
+
 async def _auto_save_rule(session_factory, email, folder: str, confidence: float) -> None:
     """
     Auto-save a high-confidence LLM decision as an ai_auto learned rule.
@@ -423,7 +458,13 @@ async def ai_worker_loop():
                             "sender_name": sender_name,
                         },
                     )
-                    # 7️⃣ Auto-learn: save high-confidence LLM decisions as rules
+                    # 7️⃣ Invoice QR extraction (fire and forget)
+                    if new_status == "moved" and (
+                        "invoice" in folder.lower() or "fatura" in folder.lower()
+                    ):
+                        await _try_invoice_qr(email, settings, session_factory)
+
+                    # 8️⃣ Auto-learn: save high-confidence LLM decisions as rules
                     if (
                         op_mode == "auto_learn"
                         and new_status == "moved"

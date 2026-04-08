@@ -186,6 +186,25 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
         details={"folder": folder, "move_success": move_success},
     )
 
+    # Invoice QR extraction — fire and forget
+    if move_success and ("invoice" in folder.lower() or "fatura" in folder.lower()):
+        try:
+            from app.invoices.extractor import extract_qr_from_pdf, persist_invoice
+            from pathlib import Path as _Path
+            if email.raw_path:
+                att_dir = _Path(email.raw_path).parent / "attachments"
+                pdfs = list(att_dir.glob("*.pdf")) if att_dir.exists() else []
+                for pdf in pdfs:
+                    results = await extract_qr_from_pdf(
+                        str(pdf), settings.tool_server_url, settings.tool_server_api_key
+                    )
+                    for invoice_data in results:
+                        await persist_invoice(session_factory, email_id, invoice_data)
+                    if results:
+                        break
+        except Exception as _e:
+            logger.warning(f"Invoice QR extraction failed for email {email_id}: {_e}")
+
     status_icon = "✅" if move_success else "⚠️"
 
     keyboard = InlineKeyboardMarkup([

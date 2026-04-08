@@ -42,14 +42,10 @@ def _safe_filename(value: str, fallback: str) -> str:
 
 
 class ExportPdfAction(EmailAction):
-    """Exports email body to PDF and copies PDF attachments to a structured folder.
-    If TOOL_SERVER_URL is configured and the email is classified as Invoices,
-    also extracts QR invoice data and persists it to the invoices table.
-    """
+    """Exports email body to PDF and copies PDF attachments to a structured folder."""
 
     def __init__(self, config: dict):
         self.path_template = config["path"]
-        self.session_factory = config.get("session_factory")
 
     async def execute(self, email, account, settings) -> bool:
         try:
@@ -90,26 +86,5 @@ class ExportPdfAction(EmailAction):
                         copied_pdfs.append(att_file)
                     except Exception as e:
                         logger.error(f"Failed to copy attachment {att_file.name}: {e}")
-
-        # 3. QR invoice extraction — only if Tool Server is configured
-        if settings.tool_server_url and self.session_factory:
-            label = getattr(email, "classification_label", "") or ""
-            if "invoice" in label.lower() or "invoic" in label.lower() or "fatura" in label.lower():
-                from app.invoices.extractor import extract_qr_from_pdf, persist_invoice
-                # Try attached PDFs first, then the exported body PDF
-                pdf_candidates = copied_pdfs or ([pdf_path] if pdf_path.exists() else [])
-                for pdf in pdf_candidates:
-                    try:
-                        results = await extract_qr_from_pdf(
-                            str(pdf),
-                            settings.tool_server_url,
-                            settings.tool_server_api_key,
-                        )
-                        for invoice_data in results:
-                            await persist_invoice(self.session_factory, email.id, invoice_data)
-                        if results:
-                            break  # first PDF with QR data is enough
-                    except Exception as e:
-                        logger.warning(f"Invoice QR extraction failed for {pdf}: {e}")
 
         return True
