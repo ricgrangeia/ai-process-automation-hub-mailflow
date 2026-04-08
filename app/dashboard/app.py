@@ -873,11 +873,49 @@ def page_folders(engine, settings):
             st.error("Folder name is required.")
         else:
             try:
+                print(f"[folders] create form submitted: name='{name}'", flush=True)
                 with engine.begin() as conn:
                     conn.execute(
                         text("INSERT INTO folders (name, is_active) VALUES (:name, true)"),
                         {"name": name},
                     )
+                print(f"[folders] folder '{name}' created in DB", flush=True)
+
+                # Create IMAP folder on all active accounts
+                from app.ingestion.imap.client import connect_imap, ensure_folder_exists
+                from app.core.crypto import decrypt_secret
+                imap_results = []
+                try:
+                    accounts_df = pd.read_sql(
+                        "SELECT id, imap_host, imap_port, username, password_encrypted "
+                        "FROM email_accounts WHERE active = true AND provider = 'imap'",
+                        engine,
+                    )
+                    print(f"[folders] IMAP create '{name}': {len(accounts_df)} account(s) found", flush=True)
+                    if accounts_df.empty:
+                        imap_results.append("⚠️ No active IMAP accounts found.")
+                    for _, acc in accounts_df.iterrows():
+                        try:
+                            password = decrypt_secret(settings.master_key, acc["password_encrypted"])
+                            conn_imap = connect_imap(
+                                acc["imap_host"],
+                                int(acc["imap_port"] or 993),
+                                acc["username"],
+                                password,
+                            )
+                            ensure_folder_exists(conn_imap, name)
+                            conn_imap.logout()
+                            result_line = f"✅ {acc['username']}"
+                            imap_results.append(result_line)
+                            print(f"[folders] IMAP create result: {result_line}", flush=True)
+                        except Exception as imap_e:
+                            result_line = f"❌ {acc['username']}: {imap_e}"
+                            imap_results.append(result_line)
+                            print(f"[folders] IMAP create error: {result_line}", flush=True)
+                except Exception as e:
+                    imap_results.append(f"⚠️ Could not load IMAP accounts: {e}")
+                    print(f"[folders] IMAP accounts load error: {e}", flush=True)
+
                 from app.core.audit import log_audit_sync
                 log_audit_sync(
                     engine,
@@ -887,9 +925,15 @@ def page_folders(engine, settings):
                     entity_type="folder",
                     details={"name": name},
                 )
-                st.success(f"Folder '{name}' added.")
+                all_ok = bool(imap_results) and all(r.startswith("✅") for r in imap_results)
+                bullets = "\n".join(f"- {r}" for r in imap_results)
+                msg = f"Folder '{name}' created.\n\nIMAP results:\n\n{bullets}"
+                if not all_ok:
+                    msg += "\n\n⚠️ Could not create folder on some accounts."
+                st.session_state["_folder_imap_msg"] = (msg, "info" if all_ok else "warning")
                 st.rerun()
             except Exception as e:
+                print(f"[folders] create exception: {e}", flush=True)
                 st.error(f"Error: {e}")
 
 
