@@ -143,33 +143,41 @@ async def _try_invoice_qr_bot(email, folder: str, email_id: int, settings, sessi
     Returns a human-readable status line to append to the Telegram reply."""
     if not ("invoice" in folder.lower() or "fatura" in folder.lower()):
         return ""
+    logger.info(f"[invoice-qr] Email {email_id} → folder '{folder}' — starting QR check")
     if not (email and email.raw_path):
+        logger.warning(f"[invoice-qr] Email {email_id} — no raw_path, skipping")
         return "\n\n📎 No PDF attachments (no storage path)."
     if not settings.tool_server_url:
+        logger.warning(f"[invoice-qr] Email {email_id} — TOOL_SERVER_URL not configured, skipping")
         return ""
     try:
         from app.invoices.extractor import extract_qr_from_pdf, persist_invoice
         from pathlib import Path as _Path
         att_dir = _Path(email.raw_path).parent / "attachments"
         pdfs = list(att_dir.glob("*.pdf")) if att_dir.exists() else []
+        logger.info(f"[invoice-qr] Email {email_id} — found {len(pdfs)} PDF(s) in {att_dir}")
         if not pdfs:
             return "\n\n📎 No PDF attachments found."
         decoded_count = 0
         for pdf in pdfs:
+            logger.info(f"[invoice-qr] Email {email_id} — sending {pdf.name} to tool server")
             results = await extract_qr_from_pdf(
                 str(pdf), settings.tool_server_url, settings.tool_server_api_key
             )
+            logger.info(f"[invoice-qr] Email {email_id} — tool server returned {len(results)} result(s) for {pdf.name}")
             for invoice_data in results:
                 await persist_invoice(session_factory, email_id, invoice_data)
                 decoded_count += 1
             if results:
                 break
         if decoded_count:
+            logger.info(f"[invoice-qr] Email {email_id} — ✅ {decoded_count} invoice record(s) saved")
             return f"\n\n📎 PDF found · ✅ QR decoded ({decoded_count} invoice record(s) saved)."
         else:
+            logger.info(f"[invoice-qr] Email {email_id} — ❌ PDFs found but no QR code decoded")
             return "\n\n📎 PDF found · ❌ No QR code detected."
     except Exception as _e:
-        logger.warning(f"Invoice QR extraction failed for email {email_id}: {_e}")
+        logger.warning(f"[invoice-qr] Email {email_id} — ⚠️ extraction error: {_e}")
         return "\n\n📎 PDF found · ⚠️ QR extraction error."
 
 
