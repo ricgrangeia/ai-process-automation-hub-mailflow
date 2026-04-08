@@ -687,6 +687,14 @@ def page_folders(engine, settings):
     st.title("📁 Folders")
     st.caption("Folders drive the AI prompt, Telegram buttons, and IMAP targets. Renaming also renames the IMAP folder on all active accounts.")
 
+    # Show IMAP rename feedback persisted across st.rerun()
+    if "_folder_imap_msg" in st.session_state:
+        msg, level = st.session_state.pop("_folder_imap_msg")
+        if level == "info":
+            st.info(msg)
+        else:
+            st.warning(msg)
+
     try:
         df = pd.read_sql(
             "SELECT id, name, is_active, created_at FROM folders ORDER BY name",
@@ -824,14 +832,12 @@ def page_folders(engine, settings):
                                 entity_id=folder_id,
                                 details={"old": old_name, "new": new_name},
                             )
-                            st.success(f"Renamed '{old_name}' → '{new_name}' in DB.")
                             if imap_results:
                                 all_ok = all(r.startswith("✅") for r in imap_results)
-                                msg = "IMAP rename results:\n" + "\n".join(imap_results)
-                                if all_ok:
-                                    st.info(msg)
-                                else:
-                                    st.warning(msg + "\n\n⚠️ The folder was not found or could not be renamed on some accounts. If no emails were ever moved there the IMAP label may not exist yet — the new name will be used for future moves.")
+                                msg = f"Renamed '{old_name}' → '{new_name}' in DB.\n\nIMAP results:\n" + "\n".join(imap_results)
+                                if not all_ok:
+                                    msg += "\n\n⚠️ Folder not found or rename failed on some accounts. If no emails were ever moved there the IMAP label may not exist yet — the new name will be used for future moves."
+                                st.session_state["_folder_imap_msg"] = (msg, "info" if all_ok else "warning")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Rename failed: {e}")
