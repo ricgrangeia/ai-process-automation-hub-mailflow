@@ -33,6 +33,7 @@ from app.core.operation_mode import (
     get_mode, OPERATION_MODE_KEY, MODES,
     AUTO_LEARN_CONFIDENCE_THRESHOLD, GENERIC_DOMAINS,
 )
+from app.folders.repository import get_active_folder_names
 
 
 # ------------------------------------------------------------------------------
@@ -235,7 +236,7 @@ async def ai_worker_loop():
             start_time = time.time()
             logger.info(f"📥 Processing job for Email ID: {email_id} (attempt {retries + 1}/{MAX_RETRIES})")
 
-            # 2️⃣ Load metadata
+            # 2️⃣ Load metadata + active folder list
             async with session_factory() as session:
                 email_result = await session.execute(
                     select(EmailMessage).where(EmailMessage.id == email_id)
@@ -251,6 +252,8 @@ async def ai_worker_loop():
                 )
                 account = acc_result.scalar_one()
 
+                active_folders = await get_active_folder_names(session)
+
             # 3️⃣ Classify (mode-aware)
             op_mode = await get_mode(r)
 
@@ -263,7 +266,7 @@ async def ai_worker_loop():
                 else:
                     classification.source = "rule"
             elif op_mode == "llm_only":
-                classification = await llm.classify(email)
+                classification = await llm.classify(email, folders=active_folders)
                 if classification.confidence < 0.75:
                     from app.classification.contracts import ClassificationResult
                     low = ClassificationResult("NeedsReview", classification.confidence)
@@ -275,7 +278,26 @@ async def ai_worker_loop():
                     low.total_tokens = getattr(classification, 'total_tokens', 0)
                     classification = low
             else:  # hybrid or auto_learn
-                classification = await classifier.classify(email)
+                classification = await classifier.classify(email, folders=active_folders)
+
+            # Validate the returned folder is in the active list.
+            # If the LLM suggested an unknown name, preserve it as a suggestion for the human.
+            from app.classification.contracts import ClassificationResult as CR
+            if classification.folder not in active_folders and classification.folder != "NeedsReview":
+                suggested = classification.folder
+                logger.info(
+                    f"LLM suggested new folder '{suggested}' for email {email_id} "
+                    f"— routing to NeedsReview with suggestion"
+                )
+                unknown = CR("NeedsReview", classification.confidence)
+                unknown.source = getattr(classification, 'source', 'llm')
+                unknown.sender_type = getattr(classification, 'sender_type', None)
+                unknown.sender_name = getattr(classification, 'sender_name', None)
+                unknown.prompt_tokens = getattr(classification, 'prompt_tokens', 0)
+                unknown.completion_tokens = getattr(classification, 'completion_tokens', 0)
+                unknown.total_tokens = getattr(classification, 'total_tokens', 0)
+                unknown.suggested_folder = suggested
+                classification = unknown
 
             folder = classification.folder
             confidence = classification.confidence
@@ -331,6 +353,8 @@ async def ai_worker_loop():
                     source=source,
                     rule_folder=getattr(classification, 'rule_folder', None),
                     llm_folder=getattr(classification, 'llm_folder', None),
+                    folders=active_folders,
+                    suggested_folder=getattr(classification, 'suggested_folder', None),
                 )
                 if sent:
                     async with session_factory() as s:

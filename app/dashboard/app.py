@@ -412,8 +412,21 @@ def page_email_accounts(engine, settings):
 # Page: Learned Rules
 # ---------------------------------------------------------------------------
 
-FOLDERS = ["Invoices", "Work", "Personal", "Marketing", "Spam", "Other"]
 MATCH_FIELDS = ["sender_domain", "sender_email", "subject_contains", "body_contains"]
+_DEFAULT_FOLDERS = ["Invoices", "Work", "Personal", "Marketing", "Spam", "Other"]
+
+
+def _get_folder_names(engine) -> list[str]:
+    """Load active folder names from DB. Falls back to defaults if table not yet migrated."""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT name FROM folders WHERE is_active = true ORDER BY name")
+            )
+            names = [r[0] for r in rows]
+        return names if names else list(_DEFAULT_FOLDERS)
+    except Exception:
+        return list(_DEFAULT_FOLDERS)
 
 
 def _actions_summary(actions: list) -> str:
@@ -430,6 +443,7 @@ def _actions_summary(actions: list) -> str:
 def page_learned_rules(engine, settings):
     st.title("📚 Learned Rules")
     st.caption("Rules are applied before the AI classifier — zero LLM cost, instant decisions.")
+    FOLDERS = _get_folder_names(engine)
 
     try:
         df = pd.read_sql(
@@ -666,6 +680,192 @@ def page_learned_rules(engine, settings):
 
 
 # ---------------------------------------------------------------------------
+# Page: Folders
+# ---------------------------------------------------------------------------
+
+def page_folders(engine, settings):
+    st.title("📁 Folders")
+    st.caption("Folders drive the AI prompt, Telegram buttons, and IMAP targets. Renaming also renames the IMAP folder on all active accounts.")
+
+    try:
+        df = pd.read_sql(
+            "SELECT id, name, is_active, created_at FROM folders ORDER BY name",
+            engine,
+        )
+    except Exception as e:
+        st.error(f"❌ Could not load folders: {e}")
+        return
+
+    st.metric("Total folders", len(df))
+
+    for _, row in df.iterrows():
+        folder_id = int(row["id"])
+        is_active = bool(row["is_active"])
+
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
+
+            with c1:
+                st.markdown(f"**📁 {row['name']}**")
+                st.caption(f"Created: {str(row['created_at'])[:10]}")
+
+            with c2:
+                st.markdown(f"{'🟢 Active' if is_active else '🔴 Disabled'}")
+
+            with c3:
+                toggle_label = "Disable" if is_active else "Enable"
+                if st.button(toggle_label, key=f"folder_toggle_{folder_id}"):
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text("UPDATE folders SET is_active = :val WHERE id = :id"),
+                            {"val": not is_active, "id": folder_id},
+                        )
+                    from app.core.audit import log_audit_sync
+                    log_audit_sync(
+                        engine,
+                        actor_type="dashboard",
+                        actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                        action="folder.toggled",
+                        entity_type="folder",
+                        entity_id=folder_id,
+                        details={"name": row["name"], "active": not is_active},
+                    )
+                    st.rerun()
+
+            with c4:
+                if st.button("Delete", key=f"folder_delete_{folder_id}"):
+                    # Only delete if no emails reference this folder
+                    with engine.connect() as conn:
+                        count = conn.execute(
+                            text("SELECT COUNT(*) FROM emails WHERE classification_label = :name"),
+                            {"name": row["name"]},
+                        ).scalar()
+                    if count > 0:
+                        st.error(f"Cannot delete — {count} email(s) use this folder. Disable it instead.")
+                    else:
+                        with engine.begin() as conn:
+                            conn.execute(
+                                text("DELETE FROM folders WHERE id = :id"),
+                                {"id": folder_id},
+                            )
+                        from app.core.audit import log_audit_sync
+                        log_audit_sync(
+                            engine,
+                            actor_type="dashboard",
+                            actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                            action="folder.deleted",
+                            entity_type="folder",
+                            entity_id=folder_id,
+                            details={"name": row["name"]},
+                        )
+                        st.rerun()
+
+            # Rename expander
+            with st.expander(f"✏️ Rename '{row['name']}'"):
+                with st.form(f"rename_folder_{folder_id}"):
+                    new_name = st.text_input("New folder name", value=row["name"], key=f"rename_input_{folder_id}")
+                    submitted = st.form_submit_button("Rename", use_container_width=True)
+
+                if submitted:
+                    new_name = new_name.strip()
+                    old_name = row["name"]
+                    if not new_name:
+                        st.error("Folder name cannot be empty.")
+                    elif new_name == old_name:
+                        st.info("Name unchanged.")
+                    else:
+                        try:
+                            # 1. Update DB folder name
+                            with engine.begin() as conn:
+                                conn.execute(
+                                    text("UPDATE folders SET name = :new WHERE id = :id"),
+                                    {"new": new_name, "id": folder_id},
+                                )
+                                # 2. Update all emails that used the old label
+                                conn.execute(
+                                    text("UPDATE emails SET classification_label = :new WHERE classification_label = :old"),
+                                    {"new": new_name, "old": old_name},
+                                )
+
+                            # 3. Rename IMAP folder on all active IMAP accounts
+                            from app.ingestion.imap.client import connect_imap, rename_imap_folder
+                            from app.core.crypto import decrypt_secret
+                            imap_results = []
+                            try:
+                                accounts_df = pd.read_sql(
+                                    "SELECT id, imap_host, imap_port, username, password_encrypted "
+                                    "FROM email_accounts WHERE active = true AND provider = 'imap'",
+                                    engine,
+                                )
+                                for _, acc in accounts_df.iterrows():
+                                    try:
+                                        password = decrypt_secret(acc["password_encrypted"], settings.master_key)
+                                        conn_imap = connect_imap(
+                                            acc["imap_host"],
+                                            int(acc["imap_port"] or 993),
+                                            acc["username"],
+                                            password,
+                                        )
+                                        ok = rename_imap_folder(conn_imap, old_name, new_name)
+                                        conn_imap.logout()
+                                        imap_results.append(f"{'✅' if ok else '⚠️'} {acc['username']}")
+                                    except Exception as imap_e:
+                                        imap_results.append(f"❌ {acc['username']}: {imap_e}")
+                            except Exception as e:
+                                imap_results.append(f"⚠️ Could not load IMAP accounts: {e}")
+
+                            from app.core.audit import log_audit_sync
+                            log_audit_sync(
+                                engine,
+                                actor_type="dashboard",
+                                actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                                action="folder.renamed",
+                                entity_type="folder",
+                                entity_id=folder_id,
+                                details={"old": old_name, "new": new_name},
+                            )
+                            st.success(f"Renamed '{old_name}' → '{new_name}'")
+                            if imap_results:
+                                st.info("IMAP rename results:\n" + "\n".join(imap_results))
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Rename failed: {e}")
+
+    st.divider()
+
+    # ── Add folder ──
+    st.subheader("➕ Add Folder")
+    with st.form("add_folder_form"):
+        new_folder_name = st.text_input("Folder name", placeholder="Legal")
+        submitted_add = st.form_submit_button("Add Folder", use_container_width=True)
+
+    if submitted_add:
+        name = new_folder_name.strip()
+        if not name:
+            st.error("Folder name is required.")
+        else:
+            try:
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("INSERT INTO folders (name, is_active) VALUES (:name, true)"),
+                        {"name": name},
+                    )
+                from app.core.audit import log_audit_sync
+                log_audit_sync(
+                    engine,
+                    actor_type="dashboard",
+                    actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                    action="folder.created",
+                    entity_type="folder",
+                    details={"name": name},
+                )
+                st.success(f"Folder '{name}' added.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Page: Audit Log
 # ---------------------------------------------------------------------------
 
@@ -826,7 +1026,7 @@ if login_screen():
 
     st.sidebar.markdown("---")
 
-    page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts", "📚 Learned Rules", "📋 Audit Log"])
+    page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts", "📚 Learned Rules", "📁 Folders", "📋 Audit Log"])
 
     if st.sidebar.button("Logout"):
         st.session_state["authenticated"] = False
@@ -838,5 +1038,7 @@ if login_screen():
         page_email_accounts(engine, settings)
     elif page == "📚 Learned Rules":
         page_learned_rules(engine, settings)
+    elif page == "📁 Folders":
+        page_folders(engine, settings)
     elif page == "📋 Audit Log":
         page_audit_log(engine)

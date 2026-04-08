@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 2.0.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 2.1.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -56,6 +56,8 @@ for supervision and account management.
 | CI pipeline — tests gate every push; deploy to Portainer only if tests pass | ✅ |
 | Rule validation — LLM always confirms rule matches; conflicts routed to human | ✅ |
 | Rule conflict card — Telegram shows rule vs AI disagreement for human decision | ✅ |
+| Dynamic folder management — dashboard CRUD + IMAP rename on all accounts | ✅ |
+| AI folder suggestions — LLM proposes new folders via Telegram card with one-click create | ✅ |
 
 ---
 
@@ -149,6 +151,7 @@ app/
 ├── messages/               # Email messages, attachments, disk storage
 ├── classification/         # Classifiers: rule, LLM (Qwen 2.5), hybrid
 │   └── contracts.py        # ClassificationResult — the shared boundary type
+├── folders/                # Dynamic folder registry — DB-backed, drives LLM prompt + Telegram UI
 ├── ingestion/
 │   ├── parser.py           # RFC822 email parser (shared by all sources)
 │   ├── imap/               # IMAP client + polling worker
@@ -173,7 +176,8 @@ alembic/                    # Database migration scripts
     ├── 001_baseline.py              # No-op — marks existing schema
     ├── 002_add_sender_fields.py     # Adds sender_name + sender_type to emails
     ├── 003_add_audit_logs.py        # Creates audit_logs table
-    └── 004_add_learned_rules_source.py  # Adds source column (human | ai_auto)
+    ├── 004_add_learned_rules_source.py  # Adds source column (human | ai_auto)
+    └── 005_add_folders.py               # Creates folders table, seeds defaults
 
 tests/
 ├── conftest.py             # Shared fixtures: FakeEmail, FakeSettings
@@ -210,6 +214,11 @@ tests/
 | `Spam` | LLM |
 | `Other` | LLM default |
 | `NeedsReview` | LLM confidence below threshold (0.75) |
+| *(custom)* | Added via dashboard — immediately available to LLM and Telegram buttons |
+
+Folders are stored in the `folders` DB table and managed from the **📁 Folders** dashboard page.
+Renaming a folder updates all existing emails and renames the IMAP folder on every active account.
+When the LLM suggests a folder name that doesn't exist yet, a Telegram card lets you create it with one tap.
 
 ---
 
@@ -313,6 +322,14 @@ After login, two pages are available from the sidebar:
 - Edit match field, match value, target folder, and PDF path inline
 - Delete rules permanently
 - Add rules manually without going through Telegram
+
+**📁 Folders**
+
+- List all classification folders with active/disabled status
+- Add new folders — immediately available to the LLM prompt and Telegram buttons
+- Rename folders — updates DB, all email records, and IMAP folder on every active account
+- Enable / disable without deleting
+- Delete folders — blocked if any emails still reference them
 
 **📋 Audit Log**
 

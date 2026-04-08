@@ -25,13 +25,13 @@ class HybridClassifier:
         self.llm = llm_classifier
         self.threshold = threshold
 
-    async def classify(self, email) -> ClassificationResult:
+    async def classify(self, email, folders: list[str] | None = None) -> ClassificationResult:
 
         rule_result = await self.rule.classify(email)
 
         if rule_result:
             # Rule matched — ask LLM to validate with the rule as context
-            llm_result = await self.llm.classify(email, rule_hint=rule_result.folder)
+            llm_result = await self.llm.classify(email, rule_hint=rule_result.folder, folders=folders)
 
             if llm_result.folder == rule_result.folder:
                 # Agreement — rule confirmed by the model
@@ -54,7 +54,7 @@ class HybridClassifier:
                 return conflict
 
         # No rule — pure LLM
-        llm_result = await self.llm.classify(email)
+        llm_result = await self.llm.classify(email, folders=folders)
 
         if llm_result.confidence >= self.threshold:
             return llm_result

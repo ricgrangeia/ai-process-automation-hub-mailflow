@@ -445,8 +445,6 @@ async def _push_delivery_job(query, result_id: str, method: str):
 #                  rv_skip_rule / rv_sender / rv_set_sender
 # ------------------------------------------------------------------------------
 
-FOLDERS = ["Invoices", "Work", "Personal", "Marketing", "Spam", "Other"]
-
 # Pending sender name input: {chat_id: email_id}
 _pending_sender_name: dict[int, int] = {}
 
@@ -499,10 +497,15 @@ async def handle_rv_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     email_id = parts[1]
     current = parts[2] if len(parts) > 2 else ""
 
+    from app.folders.repository import get_active_folder_names
+    session_factory, _ = get_session_factory()
+    async with session_factory() as session:
+        folder_names = await get_active_folder_names(session)
+
     keyboard = [
         [{"text": f"{'✅ ' if f == current else ''}📁 {f}",
           "callback_data": f"rv_set_folder:{email_id}:{f}"}]
-        for f in FOLDERS
+        for f in folder_names
     ]
     await query.edit_message_text(
         "📁 Choose the correct folder:",
@@ -811,6 +814,78 @@ async def handle_skip_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ------------------------------------------------------------------------------
+# Handler: folder_suggest_add:{email_id}:{folder_name}
+# LLM suggested a new folder that doesn't exist yet — user approved adding it.
+# ------------------------------------------------------------------------------
+
+async def handle_folder_suggest_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    parts = query.data.split(":", 2)
+    email_id = int(parts[1])
+    folder_name = parts[2]
+
+    session_factory, settings = get_session_factory()
+
+    async with session_factory() as session:
+        email = (await session.execute(
+            select(EmailMessage).where(EmailMessage.id == email_id)
+        )).scalar_one_or_none()
+        account = (await session.execute(
+            select(EmailAccount).where(EmailAccount.id == email.account_id)
+        )).scalar_one_or_none() if email else None
+
+    if not email or not account:
+        await query.edit_message_text("⚠️ Email not found.")
+        return
+
+    # 1. Create the folder in DB if it doesn't exist yet
+    async with session_factory() as session:
+        from sqlalchemy import text as _text
+        existing = await session.execute(
+            _text("SELECT id FROM folders WHERE name = :name"),
+            {"name": folder_name},
+        )
+        if not existing.scalar_one_or_none():
+            await session.execute(
+                _text("INSERT INTO folders (name, is_active) VALUES (:name, true)"),
+                {"name": folder_name},
+            )
+            await session.commit()
+
+    # 2. Move the email to the new IMAP folder
+    await _do_move(settings, email, account, folder_name)
+
+    # 3. Update email status in DB
+    async with session_factory() as session:
+        await session.execute(
+            sa_update(EmailMessage)
+            .where(EmailMessage.id == email_id)
+            .values(
+                status="moved",
+                classification_label=folder_name,
+                processed_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+    await log_audit(
+        session_factory,
+        actor_type="telegram",
+        actor_name=_telegram_actor(query.from_user),
+        action="folder.created_from_suggestion",
+        entity_type="folder",
+        details={"name": folder_name, "email_id": email_id},
+        tenant_id=getattr(email, "tenant_id", None),
+    )
+
+    await query.edit_message_text(
+        f"✅ Folder '{folder_name}' created and email moved."
+    )
+
+
+# ------------------------------------------------------------------------------
 # Entrypoint
 # ------------------------------------------------------------------------------
 
@@ -843,7 +918,8 @@ def main():
     app.add_handler(CommandHandler("learn",   handle_learn))
     app.add_handler(CommandHandler("search",  handle_search_command))
     # NeedsReview callbacks
-    app.add_handler(CallbackQueryHandler(handle_classify,       pattern=r"^classify:"))
+    app.add_handler(CallbackQueryHandler(handle_folder_suggest_add, pattern=r"^folder_suggest_add:"))
+    app.add_handler(CallbackQueryHandler(handle_classify,           pattern=r"^classify:"))
     app.add_handler(CallbackQueryHandler(handle_learn_move,     pattern=r"^learn_move:"))
     app.add_handler(CallbackQueryHandler(handle_learn_ask_path, pattern=r"^learn_ask_path:"))
     app.add_handler(CallbackQueryHandler(handle_learn_pdf,      pattern=r"^learn_pdf:"))

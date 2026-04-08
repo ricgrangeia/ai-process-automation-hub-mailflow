@@ -142,6 +142,54 @@ First stable release. Core email pipeline, AI classification, and dashboard are 
 
 ---
 
+## [2.1.0] — 2026-04-08
+
+### Added
+
+- **Dynamic folder management** (`app/folders/`) — folders are now stored in a `folders` DB table instead of being hardcoded throughout the codebase:
+  - `Folder` SQLAlchemy model with `name`, `is_active`, `created_at`
+  - `get_active_folder_names(session)` repository helper — async, falls back to defaults if table not yet migrated
+  - Alembic migration `005_add_folders.py` — creates table and seeds default folders (Invoices, Work, Personal, Marketing, Spam, Other)
+- **Dashboard — 📁 Folders page** — full CRUD management:
+  - List all folders with active/disabled status and creation date
+  - **Enable / Disable** toggle — removes folder from LLM prompt and Telegram buttons without deleting it
+  - **Rename** — updates DB, renames `emails.classification_label` for all affected emails, and runs IMAP `RENAME` on every active IMAP account; per-account success/failure reported inline
+  - **Delete** — blocked if any emails still reference the folder (prevents orphaned records); suggest disabling instead
+  - **➕ Add** — create a new folder; immediately available to the LLM and Telegram buttons
+  - All changes audited (`folder.created`, `folder.toggled`, `folder.renamed`, `folder.deleted`)
+- **AI folder suggestions (Option C)** — when the LLM classifies an email into a folder name that doesn't exist in the DB, the system preserves the suggestion instead of silently routing to NeedsReview:
+  - `ClassificationResult.suggested_folder` field — carries the unknown folder name through the pipeline
+  - `send_review_request` renders a distinct **🆕 New folder suggested** Telegram card with the AI's proposed name,
+    confidence, a **"➕ Add 'X' & move"** button, and the full existing folder list below
+  - `handle_folder_suggest_add` Telegram callback handler — creates the folder in DB (idempotent), moves the email
+    via IMAP, updates email status, audits as `folder.created_from_suggestion`
+- `rename_imap_folder(conn, old_name, new_name)` added to `app/ingestion/imap/client.py` — wraps IMAP `RENAME` command; returns `True`/`False`; handles missing folder gracefully
+
+### Changed
+
+- **LLM prompt now uses the live folder list** — `LLMClassifier.classify()` accepts `folders: list[str] | None`;
+  when provided, builds the "Classify into one of:" line dynamically from the DB instead of hardcoded names
+- **HybridClassifier** — `classify()` accepts `folders` and passes it to both LLM calls (rule-hint path and no-rule path)
+- **`processing/worker.py`** — fetches `active_folders` from DB in the same session that loads the email;
+  passes to `classify()` and `send_review_request()`; validates returned folder is in the active list
+- **`review/worker.py`** — loads active folders from DB and passes to `_send_review_card()` for dynamic keyboard
+- **`notifications.py`** — `send_review_request` accepts `folders` and `suggested_folder`; folder keyboard built from DB list; new suggestion card variant when `suggested_folder` is set
+- **`telegram/bot.py`** — `handle_rv_folder` fetches folder list from DB; removed hardcoded `FOLDERS` constant
+- **Dashboard Learned Rules page** — folder selectboxes now load from DB via `_get_folder_names(engine)`
+- `alembic/env.py` — `app.folders.models` imported so Alembic detects `Folder` in autogenerate
+
+### Fixed
+
+- **Telegram 400 Bad Request on review cards** — `review/worker.py` and `notifications.py` were sending messages
+  with `parse_mode="Markdown"`; subjects and addresses containing underscores caused silent rejection;
+  removed `parse_mode` from all messages that include user-supplied content
+- **`/recover` not triggering re-classification** — the command reset `status='new'` in DB but never pushed jobs
+  to Redis; ai-worker startup recovery excludes `pending_review` so emails were permanently stuck; fixed by
+  adding `r.lpush(EMAIL_QUEUE_KEY, payload)` for each recovered email using `RETURNING id, tenant_id`
+- **`telegram/bot.py` — sender name Markdown crash** — `f"✅ Sender name saved: *{text}*"` with `parse_mode="Markdown"` would fail when the user typed a name containing underscores; removed `parse_mode`
+
+---
+
 ## [2.0.0] — 2026-04-07
 
 ### Changed (Breaking — classification behaviour)

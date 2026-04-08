@@ -16,6 +16,7 @@ from app.core.database.base import Base  # noqa: F401 — registers DeclarativeB
 import app.messages.models              # noqa: F401 — EmailMessage, Attachment
 import app.accounts.models              # noqa: F401 — EmailAccount
 import app.classification.learned_rules # noqa: F401 — LearnedRule
+import app.folders.models               # noqa: F401 — Folder
 
 # ---------------------------------------------------------------------------
 # Alembic Config object, giving access to alembic.ini values.

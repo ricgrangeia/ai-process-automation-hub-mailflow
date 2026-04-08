@@ -8,7 +8,7 @@ import httpx
 
 logger = logging.getLogger("telegram-notifications")
 
-FOLDERS = ["Invoices", "Work", "Personal", "Marketing", "Spam", "Other"]
+_DEFAULT_FOLDERS = ["Invoices", "Work", "Personal", "Marketing", "Spam", "Other"]
 
 
 async def send_worker_started(bot_token: str, chat_id: str) -> None:
@@ -36,11 +36,14 @@ async def send_review_request(
     source: str = "llm",
     rule_folder: str | None = None,
     llm_folder: str | None = None,
+    folders: list[str] | None = None,
+    suggested_folder: str | None = None,
 ) -> bool:
     """
     Sends an inline-button message asking the user to classify the email.
 
-    Two variants:
+    Three variants:
+    - suggested_folder set: LLM proposed a new folder name — shows suggestion card.
     - source="rule_conflict": rule and LLM disagree — shows both suggestions.
     - anything else: standard low-confidence NeedsReview.
 
@@ -49,8 +52,29 @@ async def send_review_request(
     """
     subject_display = (subject or "(no subject)")[:80]
     confidence_pct = int(confidence * 100)
+    active_folders = folders if folders else _DEFAULT_FOLDERS
 
-    if source == "rule_conflict" and rule_folder and llm_folder:
+    if suggested_folder:
+        text = (
+            f"🆕 AI suggests a new folder\n\n"
+            f"From: {sender}\n"
+            f"Subject: {subject_display}\n\n"
+            f"🧠 AI classified as: {suggested_folder} ({confidence_pct}%)\n"
+            f"This folder does not exist yet.\n\n"
+            f"Create it and move there, or pick an existing folder:"
+        )
+        # Top row: add new folder button; then existing folders below
+        suggest_row = [
+            {"text": f"➕ Add '{suggested_folder}' & move",
+             "callback_data": f"folder_suggest_add:{email_id}:{suggested_folder}"}
+        ]
+        existing_buttons = [
+            {"text": folder, "callback_data": f"classify:{email_id}:{folder}"}
+            for folder in active_folders
+        ]
+        keyboard = [suggest_row] + [existing_buttons[i:i+2] for i in range(0, len(existing_buttons), 2)]
+
+    elif source == "rule_conflict" and rule_folder and llm_folder:
         text = (
             f"⚠️ Rule Conflict — human input needed\n\n"
             f"From: {sender}\n"
@@ -59,6 +83,12 @@ async def send_review_request(
             f"🧠 AI says: {llm_folder} ({confidence_pct}%)\n\n"
             f"They disagree. Which is correct?"
         )
+        buttons = [
+            {"text": folder, "callback_data": f"classify:{email_id}:{folder}"}
+            for folder in active_folders
+        ]
+        keyboard = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+
     else:
         text = (
             f"🤔 NeedsReview — AI confidence: {confidence_pct}%\n\n"
@@ -66,14 +96,11 @@ async def send_review_request(
             f"Subject: {subject_display}\n\n"
             f"Please classify this email:"
         )
-
-    buttons = [
-        {"text": folder, "callback_data": f"classify:{email_id}:{folder}"}
-        for folder in FOLDERS
-    ]
-
-    # Two buttons per row
-    keyboard = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+        buttons = [
+            {"text": folder, "callback_data": f"classify:{email_id}:{folder}"}
+            for folder in active_folders
+        ]
+        keyboard = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
 
     payload = {
         "chat_id": chat_id,

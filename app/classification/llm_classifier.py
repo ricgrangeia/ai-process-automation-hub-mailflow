@@ -11,7 +11,7 @@ class LLMClassifier:
     def __init__(self, settings):
         self.settings = settings
 
-    async def classify(self, email, rule_hint: str | None = None):
+    async def classify(self, email, rule_hint: str | None = None, folders: list[str] | None = None):
         """
         Classify an email.
 
@@ -19,6 +19,8 @@ class LLMClassifier:
                    The LLM is asked to validate the suggestion rather than classify
                    from scratch — it should agree (high confidence) or flag a conflict.
         """
+
+        folder_list = ", ".join(folders) if folders else "Invoices, Work, Personal, Marketing, Spam, Other"
 
         if rule_hint:
             hint_block = (
@@ -45,7 +47,7 @@ class LLMClassifier:
                     "role": "user",
                     "content": f"""
 Classify into one of:
-Invoices, Work, Personal, Marketing, Spam, Other
+{folder_list}
 {hint_block}
 Also identify the sender:
 - sender_type: "company" if sent by a business/organisation, "person" if sent by an individual

@@ -14,6 +14,8 @@ class ClassificationResult:
         # Conflict context — set when source == "rule_conflict"
         self.rule_folder = None   # what the rule suggested
         self.llm_folder = None    # what the LLM said instead
+        # Suggestion context — set when LLM returns a folder not in the active list
+        self.suggested_folder = None  # the unknown folder name the LLM proposed
 
 
 class EmailClassifier:

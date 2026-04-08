@@ -106,6 +106,34 @@ def move_message(conn, source_folder: str, target_folder: str, uid: str):
 
 
 # ------------------------------------------------------------------------------
+# Rename folder
+# ------------------------------------------------------------------------------
+
+def rename_imap_folder(conn, old_name: str, new_name: str) -> bool:
+    """Rename an IMAP folder. Returns True if successful, False if not found or failed."""
+    try:
+        # Check old folder exists first
+        status, folders = conn.list()
+        if status != "OK":
+            return False
+        exists = any(old_name in f.decode() for f in folders if f)
+        if not exists:
+            logger.info(f"IMAP folder '{old_name}' not found — skipping rename.")
+            return False
+
+        status, _ = conn.rename(old_name, new_name)
+        if status == "OK":
+            logger.info(f"Renamed IMAP folder: {old_name} → {new_name}")
+            return True
+        else:
+            logger.warning(f"IMAP RENAME returned non-OK status for {old_name}")
+            return False
+    except Exception as e:
+        logger.warning(f"Failed to rename IMAP folder {old_name} → {new_name}: {e}")
+        return False
+
+
+# ------------------------------------------------------------------------------
 # Ensure folder exists
 # ------------------------------------------------------------------------------
 

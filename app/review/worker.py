@@ -34,14 +34,14 @@ from app.core.config import get_settings
 from app.core.database.engine import make_engine, make_session_factory
 from app.messages.models import EmailMessage
 from app.review.queue import REVIEW_QUEUE_KEY
+from app.folders.repository import get_active_folder_names
+from app.folders.models import DEFAULT_FOLDERS
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("review-worker")
-
-FOLDERS = ["Invoices", "Work", "Personal", "Marketing", "Spam", "Other"]
 
 
 def _sender_label(sender_type: str | None, sender_name: str | None) -> str:
@@ -50,7 +50,7 @@ def _sender_label(sender_type: str | None, sender_name: str | None) -> str:
     return f"{icon} {name}"
 
 
-async def _send_review_card(bot_token: str, chat_id: str, email, job: dict) -> None:
+async def _send_review_card(bot_token: str, chat_id: str, email, job: dict, folders: list[str]) -> None:
     folder = job.get("folder", "?")
     confidence = int(float(job.get("confidence", 0)) * 100)
     sender_label = _sender_label(job.get("sender_type"), job.get("sender_name"))
@@ -120,6 +120,7 @@ async def run():
                 email = (await session.execute(
                     select(EmailMessage).where(EmailMessage.id == email_id)
                 )).scalar_one_or_none()
+                folders = await get_active_folder_names(session)
 
             if not email:
                 logger.warning(f"Email {email_id} not found — skipping review card.")
@@ -130,6 +131,7 @@ async def run():
                 settings.telegram_chat_id,
                 email,
                 job,
+                folders,
             )
 
         except Exception as e:
