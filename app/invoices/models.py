@@ -27,6 +27,12 @@ class Invoice(Base):
     vat_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     total_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
 
+    # Multibanco payment data
+    mb_entidade: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    mb_referencia: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    mb_valor: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    mb_data_limite: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     # Raw QR string and extraction metadata
     raw_qr: Mapped[str | None] = mapped_column(Text, nullable=True)
     extracted_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -81,8 +81,66 @@ async def extract_qr_from_pdf(pdf_path: str, tool_server_url: str, api_key: str 
         else:
             logger.debug(f"QR not recognised as PT invoice: {raw[:80]}")
 
+    # --- Also extract Multibanco payment data via text layer ---
+    mb = await extract_mb_payment_from_pdf(pdf_path, tool_server_url, api_key)
+    if mb:
+        for r in results:
+            r.update(mb)
+        if not results:
+            # No QR but we have MB data — return it as a partial record
+            results.append(mb)
+
     logger.info(f"Extracted {len(results)} invoice QR(s) from {path.name}")
     return results
+
+
+async def extract_mb_payment_from_pdf(pdf_path: str, tool_server_url: str, api_key: str = "") -> dict:
+    """
+    Calls /tools/pdf/payment/decode-base64 to extract Multibanco payment fields.
+    Returns a dict with mb_* keys, or empty dict on failure/no data.
+    """
+    path = Path(pdf_path)
+    try:
+        pdf_bytes = path.read_bytes()
+        pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    except Exception as e:
+        logger.error(f"Failed to read PDF {pdf_path}: {e}")
+        return {}
+
+    headers = {"x-api-key": api_key} if api_key else {}
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{tool_server_url}/tools/pdf/payment/decode-base64",
+                json={"filename": path.name, "file_base64": pdf_b64},
+                headers=headers,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        logger.warning(f"Payment extraction failed for {pdf_path}: {e}")
+        return {}
+
+    mb = data.get("mb_payment", {})
+    if not any(mb.values()):
+        return {}
+
+    result = {}
+    if mb.get("entidade"):
+        result["mb_entidade"] = mb["entidade"]
+    if mb.get("referencia"):
+        result["mb_referencia"] = mb["referencia"]
+    if mb.get("valor"):
+        try:
+            result["mb_valor"] = float(mb["valor"])
+        except ValueError:
+            pass
+    if mb.get("data_limite"):
+        result["mb_data_limite"] = mb["data_limite"]
+
+    logger.info(f"MB payment extracted from {path.name}: {result}")
+    return result
 
 
 async def persist_invoice(session_factory, email_id: int, data: dict) -> None:
