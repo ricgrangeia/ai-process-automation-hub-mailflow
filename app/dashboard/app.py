@@ -818,7 +818,7 @@ def page_folders(engine, settings):
                                     imap_results.append("⚠️ No active IMAP accounts found in DB.")
                                 for _, acc in accounts_df.iterrows():
                                     try:
-                                        password = decrypt_secret(acc["password_encrypted"], settings.master_key)
+                                        password = decrypt_secret(settings.master_key, acc["password_encrypted"])
                                         conn_imap = connect_imap(
                                             acc["imap_host"],
                                             int(acc["imap_port"] or 993),
