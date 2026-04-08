@@ -32,6 +32,16 @@ async def search_emails(session_factory, tenant_id: int, filters: dict) -> list[
             EmailMessage.from_address.ilike(filters["sender_email"])
         )
 
+    if filters.get("sender_name"):
+        conditions.append(
+            EmailMessage.sender_name.ilike(f"%{filters['sender_name']}%")
+        )
+
+    if filters.get("sender_type"):
+        conditions.append(
+            EmailMessage.sender_type == filters["sender_type"]
+        )
+
     if filters.get("folder"):
         conditions.append(
             EmailMessage.classification_label.ilike(filters["folder"])

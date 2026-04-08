@@ -3,6 +3,8 @@ Telegram Bot — NeedsReview callback handler.
 
 Callback data formats:
   classify:{email_id}:{folder}            — user picked a folder
+  folder_new_request:{email_id}          — user wants to type a new folder name
+  folder_suggest_add:{email_id}:{folder} — user approved AI-suggested new folder
   learn_move:{email_id}:{folder}          — save rule: move only
   learn_pdf:{email_id}:{folder}:{path}    — save rule: export PDF only
   learn_both:{email_id}:{folder}:{path}   — save rule: move + export PDF
@@ -50,6 +52,8 @@ logger = logging.getLogger("telegram-bot")
 
 # Stores pending path input per chat: {chat_id: (email_id, folder)}
 _pending_path: dict[int, tuple[int, str]] = {}
+# Stores pending new-folder name input per chat: {chat_id: email_id}
+_pending_new_folder: dict[int, int] = {}
 
 DEFAULT_PDF_PATH = "Exports/{year}/{month}/"
 
@@ -333,6 +337,102 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id in _pending_path:
         email_id, folder, with_move = _pending_path.pop(chat_id)
         await _persist_pdf_rule(update.message, email_id, folder, with_move, text)
+        return
+
+    # New folder name input
+    if chat_id in _pending_new_folder:
+        email_id = _pending_new_folder.pop(chat_id)
+        folder_name = text.strip()
+        if not folder_name:
+            await update.message.reply_text("⚠️ Folder name cannot be empty. Tap ➕ New folder again to retry.")
+            return
+
+        session_factory, settings = get_session_factory()
+
+        # Load email + account
+        async with session_factory() as session:
+            email = (await session.execute(
+                select(EmailMessage).where(EmailMessage.id == email_id)
+            )).scalar_one_or_none()
+            account = (await session.execute(
+                select(EmailAccount).where(EmailAccount.id == email.account_id)
+            )).scalar_one_or_none() if email else None
+
+        if not email or not account:
+            await update.message.reply_text("⚠️ Email not found.")
+            return
+
+        # 1. Create folder in DB (idempotent)
+        async with session_factory() as session:
+            from sqlalchemy import text as _text
+            existing = await session.execute(
+                _text("SELECT id FROM folders WHERE name = :name"),
+                {"name": folder_name},
+            )
+            if not existing.scalar_one_or_none():
+                await session.execute(
+                    _text("INSERT INTO folders (name, is_active) VALUES (:name, true)"),
+                    {"name": folder_name},
+                )
+                await session.commit()
+
+        # 2. Create IMAP folder on all active accounts
+        from app.ingestion.imap.client import connect_imap as _connect_imap, ensure_folder_exists as _ensure_folder
+        from app.core.crypto import decrypt_secret as _decrypt
+        from app.core.database.engine import make_engine as _make_engine
+        import pandas as _pd
+        from sqlalchemy import text as _text2
+
+        imap_results = []
+        try:
+            _engine = _make_engine(settings.database_url)
+            accounts_df = _pd.read_sql(
+                "SELECT id, imap_host, imap_port, username, password_encrypted "
+                "FROM email_accounts WHERE active = true AND provider = 'imap'",
+                _engine,
+            )
+            for _, acc in accounts_df.iterrows():
+                try:
+                    pw = _decrypt(settings.master_key, acc["password_encrypted"])
+                    conn_imap = _connect_imap(acc["imap_host"], int(acc["imap_port"] or 993), acc["username"], pw)
+                    _ensure_folder(conn_imap, folder_name)
+                    conn_imap.logout()
+                    imap_results.append(f"✅ {acc['username']}")
+                except Exception as ie:
+                    imap_results.append(f"⚠️ {acc['username']}: {ie}")
+        except Exception as e:
+            imap_results.append(f"⚠️ Could not load accounts: {e}")
+
+        # 3. Move the email
+        await _do_move(settings, email, account, folder_name)
+
+        # 4. Update DB status
+        async with session_factory() as session:
+            await session.execute(
+                sa_update(EmailMessage)
+                .where(EmailMessage.id == email_id)
+                .values(
+                    status="moved",
+                    classification_label=folder_name,
+                    processed_at=datetime.now(timezone.utc),
+                )
+            )
+            await session.commit()
+
+        await log_audit(
+            session_factory,
+            actor_type="telegram",
+            actor_name=_telegram_actor(update.effective_user),
+            action="folder.created_from_review",
+            entity_type="folder",
+            details={"name": folder_name, "email_id": email_id},
+            tenant_id=getattr(email, "tenant_id", None),
+        )
+
+        imap_summary = " | ".join(imap_results) if imap_results else "no IMAP accounts"
+        await update.message.reply_text(
+            f"✅ Folder '{folder_name}' created and email moved.\n\nIMAP: {imap_summary}"
+        )
         return
 
     # Sender name input
@@ -854,10 +954,32 @@ async def handle_folder_suggest_add(update: Update, context: ContextTypes.DEFAUL
             )
             await session.commit()
 
-    # 2. Move the email to the new IMAP folder
+    # 2. Create IMAP folder on all active accounts
+    from app.ingestion.imap.client import connect_imap as _connect_imap, ensure_folder_exists as _ensure_folder
+    from app.core.database.engine import make_engine as _make_engine
+    import pandas as _pd
+    try:
+        _engine = _make_engine(settings.database_url)
+        accounts_df = _pd.read_sql(
+            "SELECT id, imap_host, imap_port, username, password_encrypted "
+            "FROM email_accounts WHERE active = true AND provider = 'imap'",
+            _engine,
+        )
+        for _, acc in accounts_df.iterrows():
+            try:
+                pw = decrypt_secret(settings.master_key, acc["password_encrypted"])
+                conn_imap = _connect_imap(acc["imap_host"], int(acc["imap_port"] or 993), acc["username"], pw)
+                _ensure_folder(conn_imap, folder_name)
+                conn_imap.logout()
+            except Exception as ie:
+                logger.warning(f"IMAP folder create failed for {acc['username']}: {ie}")
+    except Exception as e:
+        logger.warning(f"Could not create IMAP folder on accounts: {e}")
+
+    # 3. Move the email to the new IMAP folder
     await _do_move(settings, email, account, folder_name)
 
-    # 3. Update email status in DB
+    # 4. Update email status in DB
     async with session_factory() as session:
         await session.execute(
             sa_update(EmailMessage)
@@ -882,6 +1004,26 @@ async def handle_folder_suggest_add(update: Update, context: ContextTypes.DEFAUL
 
     await query.edit_message_text(
         f"✅ Folder '{folder_name}' created and email moved."
+    )
+
+
+# ------------------------------------------------------------------------------
+# Handler: folder_new_request:{email_id}
+# User tapped "➕ New folder" on any NeedsReview card — ask them to type a name.
+# ------------------------------------------------------------------------------
+
+async def handle_folder_new_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    parts = query.data.split(":", 1)
+    email_id = int(parts[1])
+    chat_id = update.effective_chat.id
+
+    _pending_new_folder[chat_id] = email_id
+    await query.edit_message_text(
+        f"✏️ Type the new folder name to create and move email #{email_id} there:\n\n"
+        f"(e.g. Legal, Finance/Invoices, Work/Clients)"
     )
 
 
@@ -918,8 +1060,9 @@ def main():
     app.add_handler(CommandHandler("learn",   handle_learn))
     app.add_handler(CommandHandler("search",  handle_search_command))
     # NeedsReview callbacks
-    app.add_handler(CallbackQueryHandler(handle_folder_suggest_add, pattern=r"^folder_suggest_add:"))
-    app.add_handler(CallbackQueryHandler(handle_classify,           pattern=r"^classify:"))
+    app.add_handler(CallbackQueryHandler(handle_folder_suggest_add,  pattern=r"^folder_suggest_add:"))
+    app.add_handler(CallbackQueryHandler(handle_folder_new_request,  pattern=r"^folder_new_request:"))
+    app.add_handler(CallbackQueryHandler(handle_classify,            pattern=r"^classify:"))
     app.add_handler(CallbackQueryHandler(handle_learn_move,     pattern=r"^learn_move:"))
     app.add_handler(CallbackQueryHandler(handle_learn_ask_path, pattern=r"^learn_ask_path:"))
     app.add_handler(CallbackQueryHandler(handle_learn_pdf,      pattern=r"^learn_pdf:"))

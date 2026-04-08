@@ -54,6 +54,10 @@ async def send_review_request(
     confidence_pct = int(confidence * 100)
     active_folders = folders if folders else _DEFAULT_FOLDERS
 
+    new_folder_row = [
+        {"text": "➕ New folder", "callback_data": f"folder_new_request:{email_id}"}
+    ]
+
     if suggested_folder:
         text = (
             f"🆕 AI suggests a new folder\n\n"
@@ -63,7 +67,6 @@ async def send_review_request(
             f"This folder does not exist yet.\n\n"
             f"Create it and move there, or pick an existing folder:"
         )
-        # Top row: add new folder button; then existing folders below
         suggest_row = [
             {"text": f"➕ Add '{suggested_folder}' & move",
              "callback_data": f"folder_suggest_add:{email_id}:{suggested_folder}"}
@@ -72,7 +75,7 @@ async def send_review_request(
             {"text": folder, "callback_data": f"classify:{email_id}:{folder}"}
             for folder in active_folders
         ]
-        keyboard = [suggest_row] + [existing_buttons[i:i+2] for i in range(0, len(existing_buttons), 2)]
+        keyboard = [suggest_row] + [existing_buttons[i:i+2] for i in range(0, len(existing_buttons), 2)] + [new_folder_row]
 
     elif source == "rule_conflict" and rule_folder and llm_folder:
         text = (
@@ -87,7 +90,7 @@ async def send_review_request(
             {"text": folder, "callback_data": f"classify:{email_id}:{folder}"}
             for folder in active_folders
         ]
-        keyboard = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+        keyboard = [buttons[i:i+2] for i in range(0, len(buttons), 2)] + [new_folder_row]
 
     else:
         text = (
@@ -100,7 +103,7 @@ async def send_review_request(
             {"text": folder, "callback_data": f"classify:{email_id}:{folder}"}
             for folder in active_folders
         ]
-        keyboard = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+        keyboard = [buttons[i:i+2] for i in range(0, len(buttons), 2)] + [new_folder_row]
 
     payload = {
         "chat_id": chat_id,

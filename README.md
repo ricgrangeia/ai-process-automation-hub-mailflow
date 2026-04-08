@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 2.1.1 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 2.2.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -56,8 +56,12 @@ for supervision and account management.
 | CI pipeline — tests gate every push; deploy to Portainer only if tests pass | ✅ |
 | Rule validation — LLM always confirms rule matches; conflicts routed to human | ✅ |
 | Rule conflict card — Telegram shows rule vs AI disagreement for human decision | ✅ |
-| Dynamic folder management — dashboard CRUD + IMAP rename on all accounts | ✅ |
+| Dynamic folder management — dashboard CRUD + IMAP rename/create/delete on all accounts | ✅ |
 | AI folder suggestions — LLM proposes new folders via Telegram card with one-click create | ✅ |
+| Subfolder support — use `/` separator (e.g. `Work/Clients`), server separator auto-detected | ✅ |
+| Telegram "➕ New folder" on every NeedsReview card — type a name, creates in DB + IMAP + moves | ✅ |
+| Query search by sender_name and sender_type (individual / company) | ✅ |
+| LLM time tracking — dashboard Tempo(s) shows LLM inference time for all email paths | ✅ |
 
 ---
 

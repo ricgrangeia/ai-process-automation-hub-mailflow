@@ -38,6 +38,7 @@ from app.query.queue import QUERY_QUEUE_KEY, RESULT_KEY_PREFIX, RESULT_TTL_SECON
 from app.query.parser import parse_query
 from app.query.repository import search_emails
 from app.query.exporter import send_results_email
+from app.folders.repository import get_active_folder_names
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,7 +83,10 @@ async def _handle_search(job: dict, settings, session_factory, r) -> None:
 
     logger.info(f"Processing query: '{query_text}' for chat_id={chat_id}")
 
-    filters = await parse_query(query_text, settings)
+    async with session_factory() as session:
+        active_folders = await get_active_folder_names(session)
+
+    filters = await parse_query(query_text, settings, folders=active_folders)
     if filters is None:
         await _telegram_send(
             settings.telegram_bot_token, chat_id,
@@ -113,6 +117,8 @@ async def _handle_search(job: dict, settings, session_factory, r) -> None:
                 "id": email.id,
                 "subject": email.subject,
                 "from_address": email.from_address,
+                "sender_name": email.sender_name,
+                "sender_type": email.sender_type,
                 "received_at": email.received_at.isoformat() if email.received_at else None,
                 "classification_label": email.classification_label,
                 "raw_path": email.raw_path,
@@ -204,9 +210,12 @@ def _build_inline_summary_from_dicts(emails_data: list) -> str:
     for i, e in enumerate(emails_data[:10], 1):
         received = e["received_at"][:10] if e.get("received_at") else "?"
         subject = _decode_subject(e.get("subject") or "")[:60]
+        sender = e.get("sender_name") or e.get("from_address") or "?"
+        sender_type = e.get("sender_type")
+        type_tag = f" ({sender_type})" if sender_type else ""
         lines.append(
             f"{i}. *{subject}*\n"
-            f"   {e.get('from_address') or '?'} | {received} | {e.get('classification_label') or '?'}"
+            f"   {sender}{type_tag} | {received} | {e.get('classification_label') or '?'}"
         )
     if len(emails_data) > 10:
         lines.append(f"\n_…and {len(emails_data) - 10} more._")
@@ -219,6 +228,8 @@ class _EmailProxy:
         self.id = d.get("id")
         self.subject = d.get("subject")
         self.from_address = d.get("from_address")
+        self.sender_name = d.get("sender_name")
+        self.sender_type = d.get("sender_type")
         self.classification_label = d.get("classification_label")
         self.raw_path = d.get("raw_path")
         from datetime import datetime

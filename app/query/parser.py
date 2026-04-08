@@ -20,41 +20,48 @@ from datetime import date
 
 logger = logging.getLogger("query.parser")
 
-_SYSTEM_PROMPT = """You extract email search filters and return ONLY a JSON object. No explanation, no text, just JSON.
+_SYSTEM_PROMPT_TEMPLATE = """You extract email search filters and return ONLY a JSON object. No explanation, no text, just JSON.
 
-JSON fields: sender_domain, sender_email, folder, date_from, date_to, keyword.
-folder must be one of: Invoices, Work, Personal, Marketing, Spam, Other, or null.
+JSON fields: sender_domain, sender_email, sender_name, sender_type, folder, date_from, date_to, keyword.
+sender_type must be one of: individual, company, or null.
+sender_name is the person or company name (e.g. "Amazon", "John Silva"), or null.
+folder must be one of: {folder_list}, or null.
 Dates format: YYYY-MM-DD.
 
 Examples:
 Request: invoices from shop.pt January 2026
-{"sender_domain":"shop.pt","sender_email":null,"folder":"Invoices","date_from":"2026-01-01","date_to":"2026-01-31","keyword":null}
+{{"sender_domain":"shop.pt","sender_email":null,"sender_name":null,"sender_type":null,"folder":"Invoices","date_from":"2026-01-01","date_to":"2026-01-31","keyword":null}}
 
 Request: any invoice emails
-{"sender_domain":null,"sender_email":null,"folder":"Invoices","date_from":null,"date_to":null,"keyword":null}
+{{"sender_domain":null,"sender_email":null,"sender_name":null,"sender_type":null,"folder":"Invoices","date_from":null,"date_to":null,"keyword":null}}
 
-Request: marketing emails this year (today=2026-04-06)
-{"sender_domain":null,"sender_email":null,"folder":"Marketing","date_from":"2026-01-01","date_to":"2026-12-31","keyword":null}
+Request: emails from companies this month (today=2026-04-06)
+{{"sender_domain":null,"sender_email":null,"sender_name":null,"sender_type":"company","folder":null,"date_from":"2026-04-01","date_to":"2026-04-30","keyword":null}}
 
-Request: how many work emails last month (today=2026-04-06)
-{"sender_domain":null,"sender_email":null,"folder":"Work","date_from":"2026-03-01","date_to":"2026-03-31","keyword":null}
+Request: emails from Amazon
+{{"sender_domain":null,"sender_email":null,"sender_name":"Amazon","sender_type":null,"folder":null,"date_from":null,"date_to":null,"keyword":null}}
 
 Request: emails from john@company.com with keyword meeting
-{"sender_domain":null,"sender_email":"john@company.com","folder":null,"date_from":null,"date_to":null,"keyword":"meeting"}
+{{"sender_domain":null,"sender_email":"john@company.com","sender_name":null,"sender_type":null,"folder":null,"date_from":null,"date_to":null,"keyword":"meeting}}
 
-Request: spam this month (today=2026-04-06)
-{"sender_domain":null,"sender_email":null,"folder":"Spam","date_from":"2026-04-01","date_to":"2026-04-30","keyword":null}"""
+Request: personal emails from individuals last month (today=2026-04-06)
+{{"sender_domain":null,"sender_email":null,"sender_name":null,"sender_type":"individual","folder":"Personal","date_from":"2026-03-01","date_to":"2026-03-31","keyword":null}}"""
 
 
-async def parse_query(user_message: str, settings) -> dict:
+_DEFAULT_FOLDERS = ["Invoices", "Work", "Personal", "Marketing", "Spam", "Other"]
+
+
+async def parse_query(user_message: str, settings, folders: list[str] | None = None) -> dict:
     """
     Calls the LLM to extract search filters from a natural language query.
-    Returns a dict with keys: sender_domain, sender_email, folder,
-    date_from, date_to, keyword. Any unknown field is None.
+    Returns a dict with keys: sender_domain, sender_email, sender_name, sender_type,
+    folder, date_from, date_to, keyword. Any unknown field is None.
     """
     today = date.today().isoformat()
+    folder_list = ", ".join(folders) if folders else ", ".join(_DEFAULT_FOLDERS)
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(folder_list=folder_list)
 
-    user_prompt = f"""{_SYSTEM_PROMPT}
+    user_prompt = f"""{system_prompt}
 
 Request: {user_message} (today={today})
 """
@@ -105,6 +112,8 @@ Request: {user_message} (today={today})
         return {
             "sender_domain": _null(filters.get("sender_domain")),
             "sender_email":  _null(filters.get("sender_email")),
+            "sender_name":   _null(filters.get("sender_name")),
+            "sender_type":   _null(filters.get("sender_type")),
             "folder":        _null(filters.get("folder")),
             "date_from":     _null(filters.get("date_from")),
             "date_to":       _null(filters.get("date_to")),

@@ -6,6 +6,35 @@ This project uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.2.0] — 2026-04-08
+
+### Added
+
+- **Telegram "➕ New folder" button** on every NeedsReview card (standard, conflict, suggestion variants)
+  — user types a folder name, it is created in DB, on all IMAP accounts, and the email is moved immediately
+- **`folder_new_request` callback** in `bot.py` — stores pending state per chat, resolved on next text message
+- **Subfolder support** via IMAP hierarchy separator auto-detection (`_get_imap_separator`)
+  — canonical names use `/` (e.g. `Work/Clients`); converted to `.` for Dovecot/cPanel servers automatically
+- **`_normalize_folder`** helper in `imap/client.py` — used by `move_message`, `rename_imap_folder`, `ensure_folder_exists`
+- **Dashboard folder create** now also creates the IMAP label on all active accounts
+- **Dashboard folder delete** now also deletes the IMAP label on all active accounts (with separator normalisation)
+- **`handle_folder_suggest_add`** now creates the IMAP folder on all accounts (was DB-only before)
+- **Query search by `sender_name` and `sender_type`** — LLM prompt updated with examples;
+  repository filters added; `_EmailProxy` and Redis payload include both fields
+- **Folder list in query parser** fetched from DB at query time — LLM prompt always reflects current folders
+- **LLM inference time (`processing_time_seconds`)** now saved for all email paths
+  (Learning Mode and NeedsReview paths previously exited before the DB update)
+
+### Fixed
+
+- `decrypt_secret` argument order was swapped in dashboard IMAP rename — caused `InvalidToken` crash
+- `PYTHONUNBUFFERED=1` missing from `Dockerfile.dashboard` — `print()` output was buffered, never visible in `docker logs`
+- `logging.basicConfig` missing from `dashboard/app.py` — `imap-worker` logger output was silently discarded
+- Dashboard IMAP rename used substring match (`old_name in f.decode()`) — now uses exact parsed name via `_list_imap_folder_names`
+- Dashboard IMAP rename/delete/create results were rendered before `st.rerun()` — moved to `st.session_state` so they persist across the rerun and are displayed at top of page
+
+---
+
 ## [1.0.0] — 2026-04-03
 
 First stable release. Core email pipeline, AI classification, and dashboard are fully operational.
