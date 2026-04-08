@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 2.2.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 2.3.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -62,6 +62,8 @@ for supervision and account management.
 | Telegram "➕ New folder" on every NeedsReview card — type a name, creates in DB + IMAP + moves | ✅ |
 | Query search by sender_name and sender_type (individual / company) | ✅ |
 | LLM time tracking — dashboard Tempo(s) shows LLM inference time for all email paths | ✅ |
+| Invoice QR extraction — PDF attachments on Invoices folder decoded via AI Tool Server | ✅ |
+| Invoices dashboard page — KPIs (gross, VAT, taxable), seller chart, filterable table, CSV export | ✅ |
 
 ---
 
@@ -171,6 +173,10 @@ app/
 │   ├── repository.py       # Dynamic SQLAlchemy query against emails table
 │   ├── exporter.py         # SMTP email with .eml + PDF attachments
 │   └── worker.py           # Redis consumer — processes search + deliver jobs
+├── invoices/               # Invoice QR extraction domain
+│   ├── models.py           # Invoice ORM model (nif_seller, amounts, ATCUD, raw_qr)
+│   ├── qr_parser.py        # Portuguese AT/ATCUD QR string parser
+│   └── extractor.py        # Calls AI Tool Server, persists results
 ├── telegram/               # Telegram bot — thin UI layer, pushes jobs to Redis
 └── dashboard/              # Streamlit UI
 
@@ -181,7 +187,8 @@ alembic/                    # Database migration scripts
     ├── 002_add_sender_fields.py     # Adds sender_name + sender_type to emails
     ├── 003_add_audit_logs.py        # Creates audit_logs table
     ├── 004_add_learned_rules_source.py  # Adds source column (human | ai_auto)
-    └── 005_add_folders.py               # Creates folders table, seeds defaults
+    ├── 005_add_folders.py               # Creates folders table, seeds defaults
+    └── 006_add_invoices.py              # Creates invoices table
 
 tests/
 ├── conftest.py             # Shared fixtures: FakeEmail, FakeSettings
@@ -297,6 +304,10 @@ SMTP_PORT=587
 SMTP_USER=your@email.com
 SMTP_PASSWORD=your-app-password
 REPORT_RECIPIENT=recipient@email.com
+
+# AI Tool Server — optional, enables PDF QR invoice extraction
+TOOL_SERVER_URL=http://192.168.1.x:8000
+TOOL_SERVER_API_KEY=your-tool-server-key
 ```
 
 ---
@@ -334,6 +345,14 @@ After login, two pages are available from the sidebar:
 - Rename folders — updates DB, all email records, and IMAP folder on every active account
 - Enable / disable without deleting
 - Delete folders — blocked if any emails still reference them
+
+**🧾 Invoices**
+
+- Automatically populated when PDF attachments on Invoices-classified emails are decoded via the AI Tool Server
+- KPI row: gross total, total VAT, taxable base, unique sellers
+- Bar chart: top 10 sellers by gross amount
+- Filterable table: by date range, NIF seller, invoice number / ATCUD code
+- CSV export
 
 **📋 Audit Log**
 

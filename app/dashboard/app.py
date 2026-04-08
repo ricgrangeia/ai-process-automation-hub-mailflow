@@ -995,6 +995,138 @@ def page_folders(engine, settings):
 # Page: Audit Log
 # ---------------------------------------------------------------------------
 
+def page_invoices(engine):
+    st.title("🧾 Invoices")
+    st.caption("Invoice data extracted from PDF QR codes (Portuguese AT/ATCUD format).")
+
+    from datetime import datetime, timezone, timedelta
+
+    # ── Filters ──
+    col_months, col_nif, col_search = st.columns([1, 2, 2])
+    months_back = col_months.number_input("Last N months", min_value=1, max_value=24, value=3)
+    nif_filter = col_nif.text_input("NIF seller contains", placeholder="123456789")
+    search_filter = col_search.text_input("Invoice # / ATCUD contains", placeholder="FT 2026/1")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=int(months_back) * 30)
+
+    conditions = ["i.extracted_at >= %(cutoff)s"]
+    params: dict = {"cutoff": cutoff}
+
+    if nif_filter:
+        conditions.append("i.nif_seller ILIKE %(nif)s")
+        params["nif"] = f"%{nif_filter}%"
+
+    if search_filter:
+        conditions.append("(i.invoice_number ILIKE %(search)s OR i.atcud ILIKE %(search)s)")
+        params["search"] = f"%{search_filter}%"
+
+    where = " AND ".join(conditions)
+
+    try:
+        df = pd.read_sql(
+            f"""
+            SELECT
+                i.id,
+                i.email_id,
+                e.subject,
+                e.from_address,
+                i.nif_seller,
+                i.nif_buyer,
+                i.invoice_number,
+                i.atcud,
+                i.invoice_date,
+                i.taxable_amount,
+                i.vat_amount,
+                i.total_amount,
+                i.extracted_at
+            FROM invoices i
+            LEFT JOIN emails e ON e.id = i.email_id
+            WHERE {where}
+            ORDER BY i.invoice_date DESC NULLS LAST, i.extracted_at DESC
+            """,
+            engine,
+            params=params,
+        )
+    except Exception as e:
+        st.error(f"❌ Could not load invoices: {e}")
+        return
+
+    if df.empty:
+        st.info("No invoices found for the selected period.")
+        return
+
+    # ── KPI row ──
+    total_gross = pd.to_numeric(df["total_amount"], errors="coerce").sum()
+    total_vat = pd.to_numeric(df["vat_amount"], errors="coerce").sum()
+    total_taxable = pd.to_numeric(df["taxable_amount"], errors="coerce").sum()
+    unique_sellers = df["nif_seller"].nunique()
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Total (gross)", f"€ {total_gross:,.2f}")
+    k2.metric("Total VAT", f"€ {total_vat:,.2f}")
+    k3.metric("Taxable base", f"€ {total_taxable:,.2f}")
+    k4.metric("Unique sellers", unique_sellers)
+
+    st.divider()
+
+    # ── Per-seller breakdown chart ──
+    if not df["nif_seller"].isna().all():
+        seller_totals = (
+            df.groupby("nif_seller")["total_amount"]
+            .apply(lambda x: pd.to_numeric(x, errors="coerce").sum())
+            .reset_index()
+            .rename(columns={"total_amount": "Total (€)"})
+            .sort_values("Total (€)", ascending=False)
+            .head(10)
+        )
+        if not seller_totals.empty:
+            fig = px.bar(
+                seller_totals,
+                x="nif_seller",
+                y="Total (€)",
+                title="Top sellers by gross amount",
+                labels={"nif_seller": "NIF Seller"},
+                color_discrete_sequence=["#4a9eff"],
+            )
+            fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig, use_container_width=True)
+
+    # ── Table ──
+    display = df[[
+        "invoice_date", "invoice_number", "atcud",
+        "nif_seller", "nif_buyer",
+        "taxable_amount", "vat_amount", "total_amount",
+        "subject", "email_id",
+    ]].copy()
+
+    for col in ["taxable_amount", "vat_amount", "total_amount"]:
+        display[col] = pd.to_numeric(display[col], errors="coerce").apply(
+            lambda v: f"€ {v:,.2f}" if pd.notna(v) else "—"
+        )
+    display["invoice_date"] = pd.to_datetime(display["invoice_date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
+
+    st.dataframe(
+        display.rename(columns={
+            "invoice_date": "Date",
+            "invoice_number": "Invoice #",
+            "atcud": "ATCUD",
+            "nif_seller": "NIF Seller",
+            "nif_buyer": "NIF Buyer",
+            "taxable_amount": "Taxable",
+            "vat_amount": "VAT",
+            "total_amount": "Total",
+            "subject": "Subject",
+            "email_id": "Email ID",
+        }),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    # ── CSV export ──
+    csv = df.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Export CSV", csv, "invoices.csv", "text/csv")
+
+
 def page_audit_log(engine):
     st.title("📋 Audit Log")
 
@@ -1152,7 +1284,7 @@ if login_screen():
 
     st.sidebar.markdown("---")
 
-    page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts", "📚 Learned Rules", "📁 Folders", "📋 Audit Log"])
+    page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts", "📚 Learned Rules", "📁 Folders", "🧾 Invoices", "📋 Audit Log"])
 
     if st.sidebar.button("Logout"):
         st.session_state["authenticated"] = False
@@ -1166,5 +1298,7 @@ if login_screen():
         page_learned_rules(engine, settings)
     elif page == "📁 Folders":
         page_folders(engine, settings)
+    elif page == "🧾 Invoices":
+        page_invoices(engine)
     elif page == "📋 Audit Log":
         page_audit_log(engine)

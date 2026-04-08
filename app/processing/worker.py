@@ -124,7 +124,8 @@ async def run_actions(email, account, settings, session_factory, folder: str) ->
     success = True
     for config in actions_config:
         try:
-            action = get_action(config)
+            enriched = {**config, "session_factory": session_factory}
+            action = get_action(enriched)
             ok = await action.execute(email, account, settings)
             if not ok:
                 success = False

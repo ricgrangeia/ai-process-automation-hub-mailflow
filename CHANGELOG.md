@@ -6,6 +6,31 @@ This project uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.3.0] — 2026-04-08
+
+### Added
+
+- **Invoice QR extraction** — when an email is classified as Invoices and has PDF attachments,
+  `ExportPdfAction` calls the AI Tool Server `/tools/pdf/qr/decode-base64` endpoint,
+  parses the Portuguese AT/ATCUD QR format, and persists structured data to a new `invoices` table
+- **`app/invoices/` domain** — `models.py` (Invoice ORM), `qr_parser.py` (AT QR field parser),
+  `extractor.py` (HTTP call + upsert)
+- **Alembic migration 006** — creates `invoices` table with indexes on `email_id` and `nif_seller`
+- **`🧾 Invoices` dashboard page** — KPI row (gross total, VAT, taxable base, unique sellers),
+  top-sellers bar chart, filterable table (date range, NIF, invoice number), CSV export
+- **`TOOL_SERVER_URL` + `TOOL_SERVER_API_KEY`** settings — optional; feature silently disabled when empty
+- **`session_factory` injected into action config** — allows actions to persist data without
+  additional arguments to `execute()`
+
+### Changed
+
+- `ExportPdfAction` now accepts `session_factory` from the action config and triggers QR extraction
+  after copying PDF attachments (only when folder label contains "invoice" / "fatura")
+- `run_actions` in `processing/worker.py` enriches each action config dict with `session_factory`
+  before instantiation
+
+---
+
 ## [2.2.0] — 2026-04-08
 
 ### Added

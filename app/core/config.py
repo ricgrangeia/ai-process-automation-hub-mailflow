@@ -27,6 +27,10 @@ class Settings:
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # AI Tool Server (PDF QR decode, web search, etc.)
+    tool_server_url: str = ""
+    tool_server_api_key: str = ""
+
     # SMTP — required for query result emails
     smtp_host: str = ""
     smtp_port: int = 587
@@ -55,6 +59,10 @@ def get_settings() -> Settings:
         max_unseen_per_cycle=int(os.environ.get("MAX_UNSEEN_PER_CYCLE", "20")),
         inbox_folder=os.environ.get("INBOX_FOLDER", "INBOX"),
         mark_seen_after_store=os.environ.get("MARK_SEEN_AFTER_STORE", "true").lower() == "true",
+
+        # AI Tool Server
+        tool_server_url=os.environ.get("TOOL_SERVER_URL", ""),
+        tool_server_api_key=os.environ.get("TOOL_SERVER_API_KEY", ""),
 
         # Telegram
         telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
