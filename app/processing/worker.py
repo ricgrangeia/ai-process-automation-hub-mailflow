@@ -302,6 +302,7 @@ async def ai_worker_loop():
             source = getattr(classification, 'source', 'llm')
             sender_type = getattr(classification, 'sender_type', None)
             sender_name = getattr(classification, 'sender_name', None)
+            llm_time = getattr(classification, 'llm_time_seconds', None) or None
 
             # 3b️⃣ Persist sender identity regardless of what happens next
             async with session_factory() as s:
@@ -333,6 +334,7 @@ async def ai_worker_loop():
                             status="pending_review",
                             ai_confidence=float(confidence),
                             ai_source=str(source),
+                            processing_time_seconds=float(llm_time) if llm_time else None,
                         )
                     )
                     await s.commit()
@@ -363,6 +365,7 @@ async def ai_worker_loop():
                                 status="pending_review",
                                 ai_confidence=float(confidence),
                                 ai_source=str(source),
+                                processing_time_seconds=float(llm_time) if llm_time else None,
                                 prompt_tokens=getattr(classification, 'prompt_tokens', 0),
                                 completion_tokens=getattr(classification, 'completion_tokens', 0),
                                 total_tokens=getattr(classification, 'total_tokens', 0),
@@ -377,7 +380,6 @@ async def ai_worker_loop():
 
             # 6️⃣ Persist result
             new_status = "moved" if action_success else "failed_move"
-            llm_time = getattr(classification, 'llm_time_seconds', None)
 
             async with session_factory() as update_session:
                 stmt = (
