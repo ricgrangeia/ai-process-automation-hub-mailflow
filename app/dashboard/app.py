@@ -824,9 +824,14 @@ def page_folders(engine, settings):
                                 entity_id=folder_id,
                                 details={"old": old_name, "new": new_name},
                             )
-                            st.success(f"Renamed '{old_name}' → '{new_name}'")
+                            st.success(f"Renamed '{old_name}' → '{new_name}' in DB.")
                             if imap_results:
-                                st.info("IMAP rename results:\n" + "\n".join(imap_results))
+                                all_ok = all(r.startswith("✅") for r in imap_results)
+                                msg = "IMAP rename results:\n" + "\n".join(imap_results)
+                                if all_ok:
+                                    st.info(msg)
+                                else:
+                                    st.warning(msg + "\n\n⚠️ The folder was not found or could not be renamed on some accounts. If no emails were ever moved there the IMAP label may not exist yet — the new name will be used for future moves.")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Rename failed: {e}")

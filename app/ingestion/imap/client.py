@@ -109,15 +109,34 @@ def move_message(conn, source_folder: str, target_folder: str, uid: str):
 # Rename folder
 # ------------------------------------------------------------------------------
 
+def _list_imap_folder_names(conn) -> list[str]:
+    """Return the list of folder names from the IMAP LIST response."""
+    status, raw = conn.list()
+    if status != "OK":
+        return []
+    names = []
+    for entry in raw:
+        if not entry:
+            continue
+        decoded = entry.decode() if isinstance(entry, bytes) else str(entry)
+        # LIST response: (\Flags) "sep" "name"  or  (\Flags) "sep" name
+        # Split on the separator token and take everything after
+        parts = decoded.split('" ')
+        if len(parts) >= 2:
+            name = parts[-1].strip().strip('"')
+        else:
+            # Fallback: last whitespace-delimited token
+            name = decoded.rsplit(None, 1)[-1].strip().strip('"')
+        names.append(name)
+    return names
+
+
 def rename_imap_folder(conn, old_name: str, new_name: str) -> bool:
     """Rename an IMAP folder. Returns True if successful, False if not found or failed."""
     try:
-        # Check old folder exists first
-        status, folders = conn.list()
-        if status != "OK":
-            return False
-        exists = any(old_name in f.decode() for f in folders if f)
-        if not exists:
+        folder_names = _list_imap_folder_names(conn)
+        logger.debug(f"IMAP folders visible: {folder_names}")
+        if old_name not in folder_names:
             logger.info(f"IMAP folder '{old_name}' not found — skipping rename.")
             return False
 
@@ -126,7 +145,11 @@ def rename_imap_folder(conn, old_name: str, new_name: str) -> bool:
             logger.info(f"Renamed IMAP folder: {old_name} → {new_name}")
             return True
         else:
-            logger.warning(f"IMAP RENAME returned non-OK status for {old_name}")
+            logger.warning(f"IMAP RENAME returned non-OK for '{old_name}', trying CREATE fallback.")
+            # Fallback: create new folder so future moves land correctly
+            if new_name not in folder_names:
+                conn.create(new_name)
+                logger.info(f"Created IMAP folder '{new_name}' as fallback.")
             return False
     except Exception as e:
         logger.warning(f"Failed to rename IMAP folder {old_name} → {new_name}: {e}")
@@ -138,15 +161,8 @@ def rename_imap_folder(conn, old_name: str, new_name: str) -> bool:
 # ------------------------------------------------------------------------------
 
 def ensure_folder_exists(conn, folder_name: str):
-
-    status, folders = conn.list()
-
-    if status != "OK":
-        raise Exception("Failed to list IMAP folders")
-
-    for f in folders:
-        if folder_name in f.decode():
-            return
-
+    folder_names = _list_imap_folder_names(conn)
+    if folder_name in folder_names:
+        return
     logger.info(f"Creating folder: {folder_name}")
     conn.create(folder_name)
