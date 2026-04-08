@@ -86,6 +86,9 @@ def mark_seen(conn, folder: str, uid: str):
 
 def move_message(conn, source_folder: str, target_folder: str, uid: str):
 
+    sep = _get_imap_separator(conn)
+    target_imap = _normalize_folder(target_folder, sep)
+
     ensure_folder_exists(conn, target_folder)
 
     status, _ = conn.select(source_folder)
@@ -93,7 +96,7 @@ def move_message(conn, source_folder: str, target_folder: str, uid: str):
     if status != "OK":
         raise Exception(f"Failed to select folder {source_folder}")
 
-    result = conn.uid("COPY", uid, target_folder)
+    result = conn.uid("COPY", uid, target_imap)
 
     if result[0] != "OK":
         logger.error(f"IMAP COPY failed: {result}")
@@ -102,12 +105,25 @@ def move_message(conn, source_folder: str, target_folder: str, uid: str):
     conn.uid("STORE", uid, "+FLAGS", r"(\Deleted)")
     conn.expunge()
 
-    logger.info(f"Moved UID {uid} → {target_folder}")
+    logger.info(f"Moved UID {uid} → {target_imap}")
 
 
 # ------------------------------------------------------------------------------
 # Rename folder
 # ------------------------------------------------------------------------------
+
+def _get_imap_separator(conn) -> str:
+    """Return the folder hierarchy separator for this IMAP server (e.g. '/' or '.')."""
+    status, raw = conn.list('""', '""')
+    if status == "OK" and raw:
+        decoded = raw[0].decode() if isinstance(raw[0], bytes) else str(raw[0])
+        # e.g. (\Noselect) "/" ""  or  (\Noselect) "." ""
+        import re
+        m = re.search(r'\) "(.)" ', decoded)
+        if m:
+            return m.group(1)
+    return "/"
+
 
 def _list_imap_folder_names(conn) -> list[str]:
     """Return the list of folder names from the IMAP LIST response."""
@@ -131,25 +147,34 @@ def _list_imap_folder_names(conn) -> list[str]:
     return names
 
 
+def _normalize_folder(name: str, separator: str) -> str:
+    """Convert a canonical folder name (using '/') to the server's separator."""
+    if separator == "/":
+        return name
+    return name.replace("/", separator)
+
+
 def rename_imap_folder(conn, old_name: str, new_name: str) -> bool:
     """Rename an IMAP folder. Returns True if successful, False if not found or failed."""
     try:
+        sep = _get_imap_separator(conn)
+        old_imap = _normalize_folder(old_name, sep)
+        new_imap = _normalize_folder(new_name, sep)
         folder_names = _list_imap_folder_names(conn)
-        logger.debug(f"IMAP folders visible: {folder_names}")
-        if old_name not in folder_names:
-            logger.info(f"IMAP folder '{old_name}' not found — skipping rename.")
+        logger.debug(f"IMAP sep='{sep}' folders visible: {folder_names}")
+        if old_imap not in folder_names:
+            logger.info(f"IMAP folder '{old_imap}' not found — skipping rename.")
             return False
 
-        status, _ = conn.rename(old_name, new_name)
+        status, _ = conn.rename(old_imap, new_imap)
         if status == "OK":
-            logger.info(f"Renamed IMAP folder: {old_name} → {new_name}")
+            logger.info(f"Renamed IMAP folder: {old_imap} → {new_imap}")
             return True
         else:
-            logger.warning(f"IMAP RENAME returned non-OK for '{old_name}', trying CREATE fallback.")
-            # Fallback: create new folder so future moves land correctly
-            if new_name not in folder_names:
-                conn.create(new_name)
-                logger.info(f"Created IMAP folder '{new_name}' as fallback.")
+            logger.warning(f"IMAP RENAME returned non-OK for '{old_imap}', trying CREATE fallback.")
+            if new_imap not in folder_names:
+                conn.create(new_imap)
+                logger.info(f"Created IMAP folder '{new_imap}' as fallback.")
             return False
     except Exception as e:
         logger.warning(f"Failed to rename IMAP folder {old_name} → {new_name}: {e}")
@@ -161,8 +186,10 @@ def rename_imap_folder(conn, old_name: str, new_name: str) -> bool:
 # ------------------------------------------------------------------------------
 
 def ensure_folder_exists(conn, folder_name: str):
+    sep = _get_imap_separator(conn)
+    imap_name = _normalize_folder(folder_name, sep)
     folder_names = _list_imap_folder_names(conn)
-    if folder_name in folder_names:
+    if imap_name in folder_names:
         return
-    logger.info(f"Creating folder: {folder_name}")
-    conn.create(folder_name)
+    logger.info(f"Creating folder: {imap_name} (sep='{sep}')")
+    conn.create(imap_name)

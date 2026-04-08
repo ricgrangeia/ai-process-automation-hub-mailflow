@@ -787,10 +787,19 @@ def page_folders(engine, settings):
                                         acc["username"],
                                         password,
                                     )
-                                    status, _ = conn_imap.delete(folder_name)
+                                    from app.ingestion.imap.client import _get_imap_separator, _normalize_folder, _list_imap_folder_names
+                                    sep = _get_imap_separator(conn_imap)
+                                    imap_name = _normalize_folder(folder_name, sep)
+                                    existing = _list_imap_folder_names(conn_imap)
+                                    print(f"[folders] IMAP sep='{sep}' imap_name='{imap_name}' exists={imap_name in existing}", flush=True)
+                                    if imap_name in existing:
+                                        status, resp = conn_imap.delete(imap_name)
+                                        ok = status == "OK"
+                                        print(f"[folders] IMAP delete status={status} resp={resp}", flush=True)
+                                    else:
+                                        ok = False
                                     conn_imap.logout()
-                                    ok = status == "OK"
-                                    result_line = f"{'✅' if ok else '⚠️ not found:'} {acc['username']}"
+                                    result_line = f"{'✅' if ok else '⚠️ not in IMAP:'} {acc['username']}"
                                     imap_results.append(result_line)
                                     print(f"[folders] IMAP delete result: {result_line}", flush=True)
                                 except Exception as imap_e:
