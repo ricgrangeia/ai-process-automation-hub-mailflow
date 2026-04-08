@@ -782,6 +782,7 @@ def page_folders(engine, settings):
                     submitted = st.form_submit_button("Rename", use_container_width=True)
 
                 if submitted:
+                    print(f"[folders] rename form submitted: old='{row['name']}' new='{new_name}'")
                     new_name = new_name.strip()
                     old_name = row["name"]
                     if not new_name:
@@ -854,6 +855,7 @@ def page_folders(engine, settings):
                             st.session_state["_folder_imap_msg"] = (msg, "info" if all_ok else "warning")
                             st.rerun()
                         except Exception as e:
+                            print(f"[folders] rename exception: {e}")
                             st.error(f"Rename failed: {e}")
 
     st.divider()
