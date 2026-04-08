@@ -48,13 +48,26 @@ async def extract_qr_from_pdf(pdf_path: str, tool_server_url: str, api_key: str 
         logger.error(f"Tool Server QR decode failed for {pdf_path}: {e}")
         return []
 
-    # Response may be a list of QR strings or a dict with a "qr_codes" key
+    # Response: {"qrcodes": [{"data": "...", "method": "...", ...}, ...], ...}
     qr_strings: list[str] = []
     if isinstance(data, list):
-        qr_strings = [str(x) for x in data if x]
+        # Flat list of strings or dicts
+        for x in data:
+            if isinstance(x, dict):
+                v = x.get("data")
+                if v:
+                    qr_strings.append(str(v))
+            elif x:
+                qr_strings.append(str(x))
     elif isinstance(data, dict):
-        codes = data.get("qr_codes") or data.get("results") or []
-        qr_strings = [str(x) for x in codes if x]
+        codes = data.get("qrcodes") or data.get("qr_codes") or data.get("results") or []
+        for x in codes:
+            if isinstance(x, dict):
+                v = x.get("data")
+                if v:
+                    qr_strings.append(str(v))
+            elif x:
+                qr_strings.append(str(x))
 
     if not qr_strings:
         logger.info(f"No QR codes found in {pdf_path}")
