@@ -126,41 +126,73 @@ async def extract_mb_payment_from_pdf(pdf_path: str, tool_server_url: str, api_k
     if not any(mb.values()):
         return {}
 
+    # LLM endpoint already returns mb_* prefixed keys; map directly to model fields
     result = {}
-    if mb.get("entidade"):
-        result["mb_entidade"] = mb["entidade"]
-    if mb.get("referencia"):
-        result["mb_referencia"] = mb["referencia"]
-    if mb.get("valor"):
+    for field in ("mb_entidade", "mb_referencia", "mb_data_limite"):
+        if mb.get(field):
+            result[field] = mb[field]
+    if mb.get("mb_valor") is not None:
         try:
-            result["mb_valor"] = float(mb["valor"])
-        except ValueError:
+            result["mb_valor"] = float(mb["mb_valor"])
+        except (ValueError, TypeError):
             pass
-    if mb.get("data_limite"):
-        result["mb_data_limite"] = mb["data_limite"]
 
     logger.info(f"MB payment extracted from {path.name}: {result}")
     return result
 
 
 async def persist_invoice(session_factory, email_id: int, data: dict) -> None:
-    """Upsert an Invoice row for the given email."""
+    """
+    Upsert an Invoice row.
+
+    Deduplication priority:
+      1. (nif_seller, invoice_number) — business key; same invoice number from the
+         same seller in the same year is always the same document.
+      2. email_id fallback — for partial records where QR was not decoded.
+
+    Update policy:
+      - Never overwrite fields that already have a value.
+      - Always fill in NULL fields, including MB payment data discovered later.
+    """
     from sqlalchemy import select
     from app.invoices.models import Invoice
 
+    nif_seller     = data.get("nif_seller")
+    invoice_number = data.get("invoice_number")
+
     async with session_factory() as session:
-        existing = (await session.execute(
-            select(Invoice).where(Invoice.email_id == email_id)
-        )).scalar_one_or_none()
+        existing = None
+
+        # 1 — match by business key
+        if nif_seller and invoice_number:
+            existing = (await session.execute(
+                select(Invoice).where(
+                    Invoice.nif_seller == nif_seller,
+                    Invoice.invoice_number == invoice_number,
+                )
+            )).scalar_one_or_none()
+
+        # 2 — fallback: same email
+        if existing is None:
+            existing = (await session.execute(
+                select(Invoice).where(Invoice.email_id == email_id)
+            )).scalar_one_or_none()
 
         if existing:
-            for k, v in data.items():
-                if hasattr(existing, k) and v is not None:
-                    setattr(existing, k, v)
+            filled = [
+                k for k, v in data.items()
+                if hasattr(existing, k) and v is not None and getattr(existing, k) is None
+            ]
+            for k in filled:
+                setattr(existing, k, data[k])
+            if filled:
+                await session.commit()
+                logger.info(f"Invoice {existing.id} updated — filled: {filled}")
+            else:
+                logger.info(f"Invoice {existing.id} already complete, nothing to update")
         else:
             session.add(Invoice(email_id=email_id, **{
                 k: v for k, v in data.items() if hasattr(Invoice, k)
             }))
-
-        await session.commit()
-    logger.info(f"Invoice record saved for email {email_id}")
+            await session.commit()
+            logger.info(f"Invoice created for email {email_id} ({invoice_number or 'no QR'})")

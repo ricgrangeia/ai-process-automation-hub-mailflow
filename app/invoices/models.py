@@ -1,14 +1,19 @@
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Integer, String, Numeric, DateTime, Text, ForeignKey, func
+from sqlalchemy import Integer, String, Numeric, DateTime, Text, ForeignKey, UniqueConstraint, func
 
 from app.core.database.base import Base
 
 
 class Invoice(Base):
     __tablename__ = "invoices"
+    __table_args__ = (
+        # Business key: same invoice number from the same seller = same invoice
+        # Nullable columns allow multiple NULLs in PostgreSQL (partial records without QR)
+        UniqueConstraint("nif_seller", "invoice_number", name="uq_invoices_seller_number"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    email_id: Mapped[int] = mapped_column(ForeignKey("emails.id"), index=True, unique=True)
+    email_id: Mapped[int] = mapped_column(ForeignKey("emails.id"), index=True)
 
     # Seller (emitente)
     nif_seller: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
