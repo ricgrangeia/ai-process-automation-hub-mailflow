@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 2.3.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 2.4.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -63,7 +63,11 @@ for supervision and account management.
 | Query search by sender_name and sender_type (individual / company) | ✅ |
 | LLM time tracking — dashboard Tempo(s) shows LLM inference time for all email paths | ✅ |
 | Invoice QR extraction — PDF attachments on Invoices folder decoded via AI Tool Server | ✅ |
+| Invoice payment data — Multibanco entity, reference, amount and due date extracted via LLM | ✅ |
+| Invoice deduplication — same invoice number + seller = one record, never duplicated across emails | ✅ |
 | Invoices dashboard page — KPIs (gross, VAT, taxable), seller chart, filterable table, CSV export | ✅ |
+| Invoices dashboard delete — select and permanently remove invoice records with confirmation | ✅ |
+| LLM routing via AI API — mailflow routes LLM calls through ai-api instead of vLLM directly | ✅ |
 
 ---
 
@@ -174,9 +178,9 @@ app/
 │   ├── exporter.py         # SMTP email with .eml + PDF attachments
 │   └── worker.py           # Redis consumer — processes search + deliver jobs
 ├── invoices/               # Invoice QR extraction domain
-│   ├── models.py           # Invoice ORM model (nif_seller, amounts, ATCUD, raw_qr)
+│   ├── models.py           # Invoice ORM model (nif_seller, amounts, ATCUD, MB payment fields, raw_qr)
 │   ├── qr_parser.py        # Portuguese AT/ATCUD QR string parser
-│   └── extractor.py        # Calls AI Tool Server, persists results
+│   └── extractor.py        # Calls AI Tool Server combined endpoint, deduplicates by seller+number, persists
 ├── telegram/               # Telegram bot — thin UI layer, pushes jobs to Redis
 └── dashboard/              # Streamlit UI
 
@@ -188,7 +192,9 @@ alembic/                    # Database migration scripts
     ├── 003_add_audit_logs.py        # Creates audit_logs table
     ├── 004_add_learned_rules_source.py  # Adds source column (human | ai_auto)
     ├── 005_add_folders.py               # Creates folders table, seeds defaults
-    └── 006_add_invoices.py              # Creates invoices table
+    ├── 006_add_invoices.py              # Creates invoices table
+    ├── 007_add_mb_payment_to_invoices.py    # Adds Multibanco payment columns to invoices
+    └── 008_invoice_dedup_by_seller_number.py  # Changes unique key from email_id to (nif_seller, invoice_number)
 
 tests/
 ├── conftest.py             # Shared fixtures: FakeEmail, FakeSettings
@@ -278,10 +284,11 @@ STORAGE_ROOT=/storage
 # Credential encryption (required — generate with secrets.token_hex(32))
 MASTER_KEY=change-me-to-a-random-secret
 
-# LLM (OpenAI-compatible endpoint)
-LLM_BASE_URL=http://fastapi:8000/v1
-LLM_API_KEY=your-api-key
-LLM_MODEL=qwen2.5-7b-instruct
+# LLM — route through ai-api (recommended) or point directly at vLLM
+# Using ai-api gives LangGraph tool routing + full message history support
+LLM_BASE_URL=http://ai-api:8000/v1
+LLM_API_KEY=your-api-api-key
+LLM_MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ
 
 # Worker behaviour (optional)
 POLL_INTERVAL_SEC=240
@@ -349,10 +356,14 @@ After login, two pages are available from the sidebar:
 **🧾 Invoices**
 
 - Automatically populated when PDF attachments on Invoices-classified emails are decoded via the AI Tool Server
+- QR code data (AT/ATCUD): NIF seller/buyer, invoice number, date, taxable amount, VAT, gross total
+- Payment data (extracted from PDF text via LLM): Multibanco entity, reference, amount, due date
+- Deduplication: same invoice number + seller = one record, even if received in multiple emails
 - KPI row: gross total, total VAT, taxable base, unique sellers
 - Bar chart: top 10 sellers by gross amount
 - Filterable table: by date range, NIF seller, invoice number / ATCUD code
 - CSV export
+- Delete: select one or multiple records with confirmation, removes only the invoice data (original email kept)
 
 **📋 Audit Log**
 
@@ -401,8 +412,9 @@ make shell          # Shell into ai-worker container
 
 ## Roadmap
 
-- [ ] Invoice / document OCR extraction
-- [ ] Supplier detection and matching
+- [ ] Invoice OCR — handle scanned PDFs with no text layer
+- [ ] Supplier name resolution — map NIF to company name via AT public registry
+- [ ] Invoice status tracking — paid / unpaid / overdue based on due date
 - [ ] REST API (FastAPI) for external integrations
 - [ ] Webhook notifications on classification events
 - [ ] Docker health check endpoints
@@ -423,6 +435,10 @@ make shell          # Shell into ai-worker container
 - [x] CI pipeline — tests gate every push; Portainer deploy only fires on master after green tests
 - [x] Rule validation — LLM always confirms rule matches; rule_confirmed (agree) or rule_conflict (disagree → human)
 - [x] Rule conflict card — Telegram shows exactly what rule said vs what AI said; human decides
+- [x] Invoice MB payment extraction — LLM reads PDF text layer, extracts Multibanco entity/reference/amount/due date
+- [x] Invoice deduplication — unique on (nif_seller, invoice_number); duplicate emails update missing fields only
+- [x] Invoices delete — dashboard allows selecting and removing invoice records with confirmation
+- [x] LLM routing via ai-api — mailflow routes through ai-api /v1/chat/completions with full message history
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

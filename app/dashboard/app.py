@@ -1126,6 +1126,47 @@ def page_invoices(engine):
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Export CSV", csv, "invoices.csv", "text/csv")
 
+    # ── Delete ──
+    st.divider()
+    with st.expander("🗑️ Delete invoices"):
+        # Build a human-readable label for each row
+        def _row_label(row) -> str:
+            num  = row.get("invoice_number") or row.get("atcud") or f"ID {row['id']}"
+            date = row.get("invoice_date") or "?"
+            nif  = row.get("nif_seller") or "?"
+            return f"{num}  ·  {date}  ·  NIF {nif}"
+
+        options: dict[str, int] = {
+            _row_label(row): int(row["id"])
+            for _, row in df.iterrows()
+        }
+
+        selected_labels = st.multiselect(
+            "Select invoices to delete",
+            options=list(options.keys()),
+            placeholder="Choose one or more invoices…",
+        )
+
+        if selected_labels:
+            ids_to_delete = [options[label] for label in selected_labels]
+            st.warning(
+                f"⚠️ {len(ids_to_delete)} invoice record(s) will be permanently deleted. "
+                "This does **not** delete the original email."
+            )
+            confirmed = st.checkbox("Yes, I want to delete these records")
+            if confirmed:
+                if st.button("🗑️ Delete selected", type="primary"):
+                    try:
+                        with engine.begin() as conn:
+                            conn.execute(
+                                text("DELETE FROM invoices WHERE id = ANY(:ids)"),
+                                {"ids": ids_to_delete},
+                            )
+                        st.success(f"✅ Deleted {len(ids_to_delete)} invoice(s).")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Delete failed: {e}")
+
 
 def page_audit_log(engine):
     st.title("📋 Audit Log")
