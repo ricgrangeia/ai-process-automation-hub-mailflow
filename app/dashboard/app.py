@@ -5,9 +5,16 @@ from sqlalchemy.orm import Session
 import plotly.express as px
 from dotenv import load_dotenv
 from email.header import decode_header, make_header
+import logging
 import os
 import sys
 from pathlib import Path
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    stream=sys.stdout,
+)
 
 
 def _decode_mime_header(value):
@@ -805,6 +812,9 @@ def page_folders(engine, settings):
                                     "FROM email_accounts WHERE active = true AND provider = 'imap'",
                                     engine,
                                 )
+                                print(f"[folders] IMAP rename '{old_name}'→'{new_name}': {len(accounts_df)} account(s) found")
+                                if accounts_df.empty:
+                                    imap_results.append("⚠️ No active IMAP accounts found in DB.")
                                 for _, acc in accounts_df.iterrows():
                                     try:
                                         password = decrypt_secret(acc["password_encrypted"], settings.master_key)
@@ -816,11 +826,16 @@ def page_folders(engine, settings):
                                         )
                                         ok = rename_imap_folder(conn_imap, old_name, new_name)
                                         conn_imap.logout()
-                                        imap_results.append(f"{'✅' if ok else '⚠️'} {acc['username']}")
+                                        result_line = f"{'✅' if ok else '⚠️ not found:'} {acc['username']}"
+                                        imap_results.append(result_line)
+                                        print(f"[folders] IMAP rename result: {result_line}")
                                     except Exception as imap_e:
-                                        imap_results.append(f"❌ {acc['username']}: {imap_e}")
+                                        result_line = f"❌ {acc['username']}: {imap_e}"
+                                        imap_results.append(result_line)
+                                        print(f"[folders] IMAP rename error: {result_line}")
                             except Exception as e:
                                 imap_results.append(f"⚠️ Could not load IMAP accounts: {e}")
+                                print(f"[folders] IMAP accounts load error: {e}")
 
                             from app.core.audit import log_audit_sync
                             log_audit_sync(
@@ -832,12 +847,11 @@ def page_folders(engine, settings):
                                 entity_id=folder_id,
                                 details={"old": old_name, "new": new_name},
                             )
-                            if imap_results:
-                                all_ok = all(r.startswith("✅") for r in imap_results)
-                                msg = f"Renamed '{old_name}' → '{new_name}' in DB.\n\nIMAP results:\n" + "\n".join(imap_results)
-                                if not all_ok:
-                                    msg += "\n\n⚠️ Folder not found or rename failed on some accounts. If no emails were ever moved there the IMAP label may not exist yet — the new name will be used for future moves."
-                                st.session_state["_folder_imap_msg"] = (msg, "info" if all_ok else "warning")
+                            all_ok = bool(imap_results) and all(r.startswith("✅") for r in imap_results)
+                            msg = f"Renamed '{old_name}' → '{new_name}' in DB.\n\nIMAP results:\n" + "\n".join(imap_results)
+                            if not all_ok:
+                                msg += "\n\n⚠️ Folder not found or rename failed. If no emails were ever moved there the IMAP label may not exist yet — future moves will use the new name."
+                            st.session_state["_folder_imap_msg"] = (msg, "info" if all_ok else "warning")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Rename failed: {e}")
