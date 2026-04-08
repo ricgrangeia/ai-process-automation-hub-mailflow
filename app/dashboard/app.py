@@ -782,7 +782,7 @@ def page_folders(engine, settings):
                     submitted = st.form_submit_button("Rename", use_container_width=True)
 
                 if submitted:
-                    print(f"[folders] rename form submitted: old='{row['name']}' new='{new_name}'")
+                    print(f"[folders] rename form submitted: old='{row['name']}' new='{new_name}'", flush=True)
                     new_name = new_name.strip()
                     old_name = row["name"]
                     if not new_name:
@@ -813,7 +813,7 @@ def page_folders(engine, settings):
                                     "FROM email_accounts WHERE active = true AND provider = 'imap'",
                                     engine,
                                 )
-                                print(f"[folders] IMAP rename '{old_name}'→'{new_name}': {len(accounts_df)} account(s) found")
+                                print(f"[folders] IMAP rename '{old_name}'→'{new_name}': {len(accounts_df)} account(s) found", flush=True)
                                 if accounts_df.empty:
                                     imap_results.append("⚠️ No active IMAP accounts found in DB.")
                                 for _, acc in accounts_df.iterrows():
@@ -829,14 +829,14 @@ def page_folders(engine, settings):
                                         conn_imap.logout()
                                         result_line = f"{'✅' if ok else '⚠️ not found:'} {acc['username']}"
                                         imap_results.append(result_line)
-                                        print(f"[folders] IMAP rename result: {result_line}")
+                                        print(f"[folders] IMAP rename result: {result_line}", flush=True)
                                     except Exception as imap_e:
                                         result_line = f"❌ {acc['username']}: {imap_e}"
                                         imap_results.append(result_line)
-                                        print(f"[folders] IMAP rename error: {result_line}")
+                                        print(f"[folders] IMAP rename error: {result_line}", flush=True)
                             except Exception as e:
                                 imap_results.append(f"⚠️ Could not load IMAP accounts: {e}")
-                                print(f"[folders] IMAP accounts load error: {e}")
+                                print(f"[folders] IMAP accounts load error: {e}", flush=True)
 
                             from app.core.audit import log_audit_sync
                             log_audit_sync(
@@ -849,13 +849,14 @@ def page_folders(engine, settings):
                                 details={"old": old_name, "new": new_name},
                             )
                             all_ok = bool(imap_results) and all(r.startswith("✅") for r in imap_results)
-                            msg = f"Renamed '{old_name}' → '{new_name}' in DB.\n\nIMAP results:\n" + "\n".join(imap_results)
+                            bullets = "\n".join(f"- {r}" for r in imap_results)
+                            msg = f"Renamed '{old_name}' → '{new_name}' in DB.\n\nIMAP results:\n\n{bullets}"
                             if not all_ok:
                                 msg += "\n\n⚠️ Folder not found or rename failed. If no emails were ever moved there the IMAP label may not exist yet — future moves will use the new name."
                             st.session_state["_folder_imap_msg"] = (msg, "info" if all_ok else "warning")
                             st.rerun()
                         except Exception as e:
-                            print(f"[folders] rename exception: {e}")
+                            print(f"[folders] rename exception: {e}", flush=True)
                             st.error(f"Rename failed: {e}")
 
     st.divider()
