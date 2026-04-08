@@ -114,7 +114,7 @@ def _inject_mobile_css():
         .stTabs [data-baseweb="tab"] {
             min-width: max-content !important;
             padding: 10px 16px !important;
-        }
+        }width='stretch
     }
     </style>
     """, unsafe_allow_html=True)
@@ -136,7 +136,7 @@ def login_screen():
             with st.form("login_form", clear_on_submit=False):
                 user_input = st.text_input("Utilizador", key="input_user")
                 pw_input = st.text_input("Password", type="password", key="input_pw")
-                submit = st.form_submit_button("Entrar", use_container_width=True)
+                submit = st.form_submit_button("Entrar", width='stretch')
 
                 if submit:
                     env_user = os.environ.get("DASHBOARD_USER", "admin")
@@ -208,12 +208,12 @@ def page_dashboard(engine, settings):
         with g1:
             st.plotly_chart(
                 px.pie(df, names="Categoria", hole=0.4, title="Distribuição de Pastas"),
-                use_container_width=True,
+                width='stretch',
             )
         with g2:
             st.plotly_chart(
                 px.histogram(df, x="Origem", color="Origem", title="Decisões: Regras vs IA"),
-                use_container_width=True,
+                width='stretch',
             )
 
         st.subheader("📋 Registos Recentes")
@@ -224,7 +224,7 @@ def page_dashboard(engine, settings):
         )
         st.dataframe(
             df,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             column_config={
                 "Confiança": st.column_config.NumberColumn(format="%d%%"),
@@ -331,7 +331,7 @@ def page_email_accounts(engine, settings):
             username = col1.text_input("Username (usually same as email)")
             password = col2.text_input("Password", type="password")
             active = st.checkbox("Active", value=True)
-            submitted = st.form_submit_button("Add IMAP Account", use_container_width=True)
+            submitted = st.form_submit_button("Add IMAP Account", width='stretch')
 
         if submitted:
             if not email or not imap_host or not username or not password:
@@ -378,7 +378,7 @@ def page_email_accounts(engine, settings):
             o_tenant_id = col1.number_input("Tenant ID", min_value=1, value=1, step=1, key="o_tid")
             o_email = col2.text_input("Email / UPN", key="o_email")
             o_active = st.checkbox("Active", value=True, key="o_active")
-            submitted_o = st.form_submit_button("Add Outlook Account", use_container_width=True)
+            submitted_o = st.form_submit_button("Add Outlook Account", width='stretch')
 
         if submitted_o:
             if not o_email:
@@ -564,7 +564,7 @@ def page_learned_rules(engine, settings):
                             key=f"pdf_{rule_id}",
                         )
 
-                        if st.form_submit_button("💾 Save changes", use_container_width=True):
+                        if st.form_submit_button("💾 Save changes", width='stretch'):
                             new_actions = []
                             if new_folder != "(none)":
                                 new_actions.append({"type": "move_folder", "folder": new_folder})
@@ -636,7 +636,7 @@ def page_learned_rules(engine, settings):
         ac3, ac4 = st.columns(2)
         a_folder = ac3.selectbox("Move to folder", ["(none)"] + FOLDERS)
         a_pdf = ac4.text_input("Export PDF path (blank = off)", placeholder="Company/{year}/{month}/")
-        submitted = st.form_submit_button("Add Rule", use_container_width=True)
+        submitted = st.form_submit_button("Add Rule", width='stretch')
 
     if submitted:
         if not a_value.strip():
@@ -758,11 +758,49 @@ def page_folders(engine, settings):
                     if count > 0:
                         st.error(f"Cannot delete — {count} email(s) use this folder. Disable it instead.")
                     else:
+                        folder_name = row["name"]
+                        print(f"[folders] delete: '{folder_name}'", flush=True)
                         with engine.begin() as conn:
                             conn.execute(
                                 text("DELETE FROM folders WHERE id = :id"),
                                 {"id": folder_id},
                             )
+                        print(f"[folders] folder '{folder_name}' deleted from DB", flush=True)
+
+                        # Delete IMAP folder on all active accounts
+                        from app.ingestion.imap.client import connect_imap
+                        from app.core.crypto import decrypt_secret
+                        imap_results = []
+                        try:
+                            accounts_df = pd.read_sql(
+                                "SELECT id, imap_host, imap_port, username, password_encrypted "
+                                "FROM email_accounts WHERE active = true AND provider = 'imap'",
+                                engine,
+                            )
+                            print(f"[folders] IMAP delete '{folder_name}': {len(accounts_df)} account(s)", flush=True)
+                            for _, acc in accounts_df.iterrows():
+                                try:
+                                    password = decrypt_secret(settings.master_key, acc["password_encrypted"])
+                                    conn_imap = connect_imap(
+                                        acc["imap_host"],
+                                        int(acc["imap_port"] or 993),
+                                        acc["username"],
+                                        password,
+                                    )
+                                    status, _ = conn_imap.delete(folder_name)
+                                    conn_imap.logout()
+                                    ok = status == "OK"
+                                    result_line = f"{'✅' if ok else '⚠️ not found:'} {acc['username']}"
+                                    imap_results.append(result_line)
+                                    print(f"[folders] IMAP delete result: {result_line}", flush=True)
+                                except Exception as imap_e:
+                                    result_line = f"❌ {acc['username']}: {imap_e}"
+                                    imap_results.append(result_line)
+                                    print(f"[folders] IMAP delete error: {result_line}", flush=True)
+                        except Exception as e:
+                            imap_results.append(f"⚠️ Could not load IMAP accounts: {e}")
+                            print(f"[folders] IMAP accounts load error: {e}", flush=True)
+
                         from app.core.audit import log_audit_sync
                         log_audit_sync(
                             engine,
@@ -771,15 +809,22 @@ def page_folders(engine, settings):
                             action="folder.deleted",
                             entity_type="folder",
                             entity_id=folder_id,
-                            details={"name": row["name"]},
+                            details={"name": folder_name},
                         )
+                        if imap_results:
+                            all_ok = all(r.startswith("✅") for r in imap_results)
+                            bullets = "\n".join(f"- {r}" for r in imap_results)
+                            msg = f"Folder '{folder_name}' deleted from DB.\n\nIMAP results:\n\n{bullets}"
+                            if not all_ok:
+                                msg += "\n\n⚠️ Could not delete folder on some accounts (may not exist in IMAP)."
+                            st.session_state["_folder_imap_msg"] = (msg, "info" if all_ok else "warning")
                         st.rerun()
 
             # Rename expander
             with st.expander(f"✏️ Rename '{row['name']}'"):
                 with st.form(f"rename_folder_{folder_id}"):
                     new_name = st.text_input("New folder name", value=row["name"], key=f"rename_input_{folder_id}")
-                    submitted = st.form_submit_button("Rename", use_container_width=True)
+                    submitted = st.form_submit_button("Rename", width='stretch')
 
                 if submitted:
                     print(f"[folders] rename form submitted: old='{row['name']}' new='{new_name}'", flush=True)
@@ -865,7 +910,7 @@ def page_folders(engine, settings):
     st.subheader("➕ Add Folder")
     with st.form("add_folder_form"):
         new_folder_name = st.text_input("Folder name", placeholder="Legal")
-        submitted_add = st.form_submit_button("Add Folder", use_container_width=True)
+        submitted_add = st.form_submit_button("Add Folder", width='stretch')
 
     if submitted_add:
         name = new_folder_name.strip()
@@ -1018,7 +1063,7 @@ def page_audit_log(engine):
 
         st.dataframe(
             df,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             column_config={
                 "Time": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm:ss"),
