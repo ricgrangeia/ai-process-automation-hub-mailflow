@@ -138,27 +138,39 @@ async def _save_rule(session_factory, email, folder: str, actions: list) -> str 
 # Invoice QR extraction helper (shared across classify / rv_approve / rv_set_folder)
 # ------------------------------------------------------------------------------
 
-async def _try_invoice_qr_bot(email, folder: str, email_id: int, settings, session_factory) -> None:
-    """Fire-and-forget: extract invoice QR from PDF attachments when folder matches."""
+async def _try_invoice_qr_bot(email, folder: str, email_id: int, settings, session_factory) -> str:
+    """Extract invoice QR from PDF attachments when folder matches.
+    Returns a human-readable status line to append to the Telegram reply."""
     if not ("invoice" in folder.lower() or "fatura" in folder.lower()):
-        return
-    if not (email and email.raw_path and settings.tool_server_url):
-        return
+        return ""
+    if not (email and email.raw_path):
+        return "\n\n📎 No PDF attachments (no storage path)."
+    if not settings.tool_server_url:
+        return ""
     try:
         from app.invoices.extractor import extract_qr_from_pdf, persist_invoice
         from pathlib import Path as _Path
         att_dir = _Path(email.raw_path).parent / "attachments"
         pdfs = list(att_dir.glob("*.pdf")) if att_dir.exists() else []
+        if not pdfs:
+            return "\n\n📎 No PDF attachments found."
+        decoded_count = 0
         for pdf in pdfs:
             results = await extract_qr_from_pdf(
                 str(pdf), settings.tool_server_url, settings.tool_server_api_key
             )
             for invoice_data in results:
                 await persist_invoice(session_factory, email_id, invoice_data)
+                decoded_count += 1
             if results:
                 break
+        if decoded_count:
+            return f"\n\n📎 PDF found · ✅ QR decoded ({decoded_count} invoice record(s) saved)."
+        else:
+            return "\n\n📎 PDF found · ❌ No QR code detected."
     except Exception as _e:
         logger.warning(f"Invoice QR extraction failed for email {email_id}: {_e}")
+        return "\n\n📎 PDF found · ⚠️ QR extraction error."
 
 
 # ------------------------------------------------------------------------------
@@ -213,9 +225,7 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
         details={"folder": folder, "move_success": move_success},
     )
 
-    # Invoice QR extraction — fire and forget
-    if move_success:
-        await _try_invoice_qr_bot(email, folder, email_id, settings, session_factory)
+    qr_info = await _try_invoice_qr_bot(email, folder, email_id, settings, session_factory) if move_success else ""
 
     status_icon = "✅" if move_success else "⚠️"
 
@@ -227,7 +237,8 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(
         f"{status_icon} Moved to *{folder}*.\n\n"
-        f"Remember this for future emails from the same sender?",
+        f"Remember this for future emails from the same sender?"
+        f"{qr_info}",
         parse_mode="Markdown",
         reply_markup=keyboard,
     )
@@ -618,8 +629,8 @@ async def handle_rv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tenant_id=getattr(email, "tenant_id", None),
         details={"folder": folder},
     )
-    await _try_invoice_qr_bot(email, folder, email_id, settings, session_factory)
-    await query.edit_message_text(f"✅ Approved → *{folder}*. No rule saved.", parse_mode="Markdown")
+    qr_info = await _try_invoice_qr_bot(email, folder, email_id, settings, session_factory)
+    await query.edit_message_text(f"✅ Approved → *{folder}*. No rule saved.{qr_info}", parse_mode="Markdown")
 
 
 async def handle_rv_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -684,14 +695,14 @@ async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYP
         tenant_id=getattr(email, "tenant_id", None),
         details={"folder": folder, "via": "review_card"},
     )
-    await _try_invoice_qr_bot(email, folder, email_id, settings2, session_factory2)
+    qr_info = await _try_invoice_qr_bot(email, folder, email_id, settings2, session_factory2)
 
     keyboard = [
         [{"text": "💾 Save as rule", "callback_data": f"rv_save_rule:{email_id}:{folder}"}],
         [{"text": "Skip — just this once", "callback_data": f"rv_skip_rule:{email_id}"}],
     ]
     await query.edit_message_text(
-        f"📁 Moved to *{folder}*.\n\nSave as a learned rule for future emails from this sender?",
+        f"📁 Moved to *{folder}*.\n\nSave as a learned rule for future emails from this sender?{qr_info}",
         parse_mode="Markdown",
         reply_markup={"inline_keyboard": keyboard},
     )
