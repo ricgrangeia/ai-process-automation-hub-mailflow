@@ -319,9 +319,9 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kw_encoded = "|".join(keywords)
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Save rule",        callback_data=f"learn_move:{email_id}:{folder}:{kw_encoded}")],
-        [InlineKeyboardButton("✏️ Edit keywords",   callback_data=f"learn_ask_path:{email_id}:{folder}:with_move")],
-        [InlineKeyboardButton("🚫 Just this once",   callback_data=f"skip_learn:{email_id}")],
+        [InlineKeyboardButton("✅ Save rule",              callback_data=f"learn_move:{email_id}:{folder}:{kw_encoded}")],
+        [InlineKeyboardButton("📄 Setup rule + export PDF", callback_data=f"learn_ask_path:{email_id}:{folder}:with_move")],
+        [InlineKeyboardButton("🚫 Just this once",         callback_data=f"skip_learn:{email_id}")],
     ])
 
     try:
