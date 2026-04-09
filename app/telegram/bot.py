@@ -1181,11 +1181,66 @@ async def handle_rv_edit_kw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _pending_rv_kw[chat_id] = (email_id, folder, kw_encoded, query.message.message_id)
     kw_display = " · ".join(kw_encoded.split("|")) if kw_encoded else "_none_"
 
+    back_keyboard = {
+        "inline_keyboard": [
+            [{"text": "⬅️ Back", "callback_data": f"rv_back_kw:{email_id}:{folder}:{kw_encoded}"}],
+        ]
+    }
     await query.edit_message_text(
         f"✏️ *Edit keywords*\n\nCurrent: {kw_display}\n\n"
         f"Type new keywords (space or comma separated), or send `-` to clear.",
         parse_mode="Markdown",
+        reply_markup=back_keyboard,
     )
+
+
+async def handle_rv_back_kw(update: Update, context: ContextTypes.DEFAULT_TYPE):  # noqa: ARG001
+    """⬅️ Back button on the edit-keywords prompt — restore the review card."""
+    query = update.callback_query
+    await _safe_answer(query)
+    # Format: rv_back_kw:{email_id}:{folder}:{kw_encoded}
+    parts      = query.data.split(":", 3)
+    email_id   = int(parts[1])
+    folder     = parts[2]
+    kw_encoded = parts[3] if len(parts) > 3 else ""
+    chat_id    = query.message.chat_id
+
+    # Cancel any pending keyword input
+    _pending_rv_kw.pop(chat_id, None)
+
+    keywords   = [k for k in kw_encoded.split("|") if k]
+    kw_display = " · ".join(keywords) if keywords else "none detected"
+
+    session_factory, _ = get_session_factory()
+    async with session_factory() as session:
+        email = (await session.execute(
+            select(EmailMessage).where(EmailMessage.id == email_id)
+        )).scalar_one_or_none()
+
+    sender_label_text = (email.from_address or "?").lower() if email else "?"
+    subject           = (email.subject or "(no subject)")[:80] if email else ""
+    sender_name       = getattr(email, "sender_name", None) or "?"
+    sender_type       = getattr(email, "sender_type", None)
+    icon = "🏢" if sender_type == "company" else "👤" if sender_type == "person" else "❓"
+
+    text = (
+        f"📋 Learning Mode Review\n\n"
+        f"Subject: {subject}\n"
+        f"From: {sender_label_text}\n"
+        f"Sender: {icon} {sender_name}\n\n"
+        f"🔑 Keywords: {kw_display}\n\n"
+        f"What should we do?"
+    )
+    keyboard = {
+        "inline_keyboard": [
+            [{"text": f"✅ Approve → {folder}", "callback_data": f"rv_approve:{email_id}:{folder}:{kw_encoded}"}],
+            [{"text": "📁 Change folder",        "callback_data": f"rv_folder:{email_id}:{folder}"}],
+            [{"text": "➕ New folder",            "callback_data": f"folder_new_request:{email_id}"}],
+            [{"text": "👤 Fix sender",            "callback_data": f"rv_sender:{email_id}"}],
+            [{"text": "✏️ Keywords",             "callback_data": f"rv_edit_kw:{email_id}:{folder}:{kw_encoded}"}],
+        ]
+    }
+    await query.edit_message_text(text, reply_markup=keyboard)
 
 
 async def handle_rv_sender(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1711,6 +1766,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_rv_save_rule,  pattern=r"^rv_save_rule:"))
     app.add_handler(CallbackQueryHandler(handle_rv_skip_rule,  pattern=r"^rv_skip_rule:"))
     app.add_handler(CallbackQueryHandler(handle_rv_edit_kw,    pattern=r"^rv_edit_kw:"))
+    app.add_handler(CallbackQueryHandler(handle_rv_back_kw,    pattern=r"^rv_back_kw:"))
     app.add_handler(CallbackQueryHandler(handle_rv_sender,     pattern=r"^rv_sender:"))
     app.add_handler(CallbackQueryHandler(handle_rv_set_sender, pattern=r"^rv_set_sender:"))
     # Query callbacks
