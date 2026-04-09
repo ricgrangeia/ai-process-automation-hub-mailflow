@@ -744,7 +744,27 @@ async def handle_rv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         details={"folder": folder},
     )
     qr_info = await _try_invoice_qr_bot(email, folder, email_id, settings, session_factory)
-    await query.edit_message_text(f"✅ Approved → *{folder}*. No rule saved.{qr_info}", parse_mode="Markdown")
+
+    # Offer Approach B rule proposal (same as classify flow)
+    sender_email = (email.from_address or "").lower() if email else ""
+    keywords = _extract_keywords(email.subject or "", email.body_text or "") if email else []
+    kw_encoded = "|".join(keywords)
+    kw_display = " · ".join(f"`{k}`" for k in keywords) if keywords else "_none detected_"
+
+    keyboard = [
+        [{"text": "✅ Save rule",               "callback_data": f"rv_save_rule:{email_id}:{folder}:{kw_encoded}"}],
+        [{"text": "📄 Setup rule + export PDF", "callback_data": f"learn_ask_path:{email_id}:{folder}:with_move"}],
+        [{"text": "🚫 Just this once",          "callback_data": f"rv_skip_rule:{email_id}"}],
+    ]
+    await query.edit_message_text(
+        f"✅ Approved → *{folder}*\\.\n\n"
+        f"💾 Save rule for future emails?\n"
+        f"📧 `{sender_email}`\n"
+        f"🔑 {kw_display}"
+        f"{qr_info}",
+        parse_mode="MarkdownV2",
+        reply_markup={"inline_keyboard": keyboard},
+    )
 
 
 async def handle_rv_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
