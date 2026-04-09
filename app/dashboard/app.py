@@ -1038,6 +1038,10 @@ def page_invoices(engine):
                 i.taxable_amount,
                 i.vat_amount,
                 i.total_amount,
+                i.mb_entidade,
+                i.mb_referencia,
+                i.mb_valor,
+                i.mb_data_limite,
                 i.extracted_at
             FROM invoices i
             LEFT JOIN emails e ON e.id = i.email_id
@@ -1096,6 +1100,7 @@ def page_invoices(engine):
         "invoice_date", "invoice_number", "atcud",
         "nif_seller", "nif_buyer",
         "taxable_amount", "vat_amount", "total_amount",
+        "mb_entidade", "mb_referencia", "mb_valor", "mb_data_limite",
         "subject", "email_id",
     ]].copy()
 
@@ -1103,6 +1108,9 @@ def page_invoices(engine):
         display[col] = pd.to_numeric(display[col], errors="coerce").apply(
             lambda v: f"€ {v:,.2f}" if pd.notna(v) else "—"
         )
+    display["mb_valor"] = pd.to_numeric(display["mb_valor"], errors="coerce").apply(
+        lambda v: f"€ {v:,.2f}" if pd.notna(v) else "—"
+    )
     display["invoice_date"] = pd.to_datetime(display["invoice_date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
 
     st.dataframe(
@@ -1115,6 +1123,10 @@ def page_invoices(engine):
             "taxable_amount": "Taxable",
             "vat_amount": "VAT",
             "total_amount": "Total",
+            "mb_entidade": "MB Entity",
+            "mb_referencia": "MB Ref",
+            "mb_valor": "MB Amount",
+            "mb_data_limite": "MB Due",
             "subject": "Subject",
             "email_id": "Email ID",
         }),
