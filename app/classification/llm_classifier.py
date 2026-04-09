@@ -143,9 +143,9 @@ Body:
             return result
 
         except httpx.RequestError as e:
-            logger.error(f"LLM request failed: {e}")
+            logger.error(f"LLM request failed: {type(e).__name__}: {e}")
             return ClassificationResult("NeedsReview", 0.0)
 
         except Exception as e:
-            logger.error(f"Unexpected LLM error: {e}")
+            logger.error(f"Unexpected LLM error: {type(e).__name__}: {e}")
             return ClassificationResult("NeedsReview", 0.0)
