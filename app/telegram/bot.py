@@ -429,19 +429,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # 2. Create IMAP folder on all active accounts
         from app.ingestion.imap.client import connect_imap as _connect_imap, ensure_folder_exists as _ensure_folder
         from app.core.crypto import decrypt_secret as _decrypt
-        from app.core.database.engine import make_engine as _make_engine
-        import pandas as _pd
         from sqlalchemy import text as _text2
 
         imap_results = []
         try:
-            _engine = _make_engine(settings.database_url)
-            accounts_df = _pd.read_sql(
-                "SELECT id, imap_host, imap_port, username, password_encrypted "
-                "FROM email_accounts WHERE active = true AND provider = 'imap'",
-                _engine,
-            )
-            for _, acc in accounts_df.iterrows():
+            async with session_factory() as _sess:
+                _rows = (await _sess.execute(
+                    _text2(
+                        "SELECT id, imap_host, imap_port, username, password_encrypted "
+                        "FROM email_accounts WHERE active = true AND provider = 'imap'"
+                    )
+                )).mappings().all()
+
+            for acc in _rows:
                 try:
                     pw = _decrypt(settings.master_key, acc["password_encrypted"])
                     conn_imap = _connect_imap(acc["imap_host"], int(acc["imap_port"] or 993), acc["username"], pw)
