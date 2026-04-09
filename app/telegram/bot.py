@@ -109,42 +109,102 @@ async def _do_move(settings, email, account, folder: str) -> bool:
     return await asyncio.to_thread(_move)
 
 
-async def _save_rule(session_factory, email, folder: str, actions: list) -> str | None:
-    """Persists a LearnedRule. Returns the match_value used (domain) or None."""
+def _extract_keywords(subject: str, body: str, max_keywords: int = 3) -> list[str]:
+    """
+    Extract up to max_keywords meaningful words from subject + body.
+
+    Strategy:
+    - Combine subject + first 500 chars of body
+    - Remove punctuation, lowercase
+    - Filter stopwords (PT + EN)
+    - Pick longest unique words first (longer = more specific)
+    """
+    import re
+    import unicodedata
+
+    _STOPWORDS = {
+        # PT
+        "de", "da", "do", "das", "dos", "a", "o", "as", "os", "e", "em", "para",
+        "por", "com", "se", "no", "na", "nos", "nas", "ao", "à", "um", "uma",
+        "que", "este", "esta", "estes", "estas", "esse", "essa", "seu", "sua",
+        "mais", "mas", "ou", "não", "é", "foi", "ser", "ter", "tem", "seu",
+        "pelo", "pela", "pelos", "pelas", "como", "são", "até", "já", "nos",
+        # EN
+        "the", "a", "an", "and", "or", "in", "on", "at", "to", "for", "of",
+        "is", "it", "be", "as", "by", "we", "you", "this", "that", "with",
+        "from", "have", "has", "are", "was", "were", "will", "your", "our",
+    }
+
+    text = f"{subject} {body[:500]}"
+    # Normalize accents
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    # Remove non-alpha (keep spaces)
+    text = re.sub(r"[^a-zA-Z\s]", " ", text)
+    words = [w.lower() for w in text.split() if len(w) >= 4]
+
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for w in sorted(words, key=len, reverse=True):
+        if w not in _STOPWORDS and w not in seen:
+            seen.add(w)
+            candidates.append(w)
+        if len(candidates) == max_keywords:
+            break
+
+    return candidates
+
+
+async def _save_rule(
+    session_factory,
+    email,
+    folder: str,
+    actions: list,
+    conditions: list | None = None,
+    min_match: int = 1,
+) -> str | None:
+    """
+    Persist a LearnedRule with structured conditions.
+
+    conditions: list of {"type": "sender_email"|"sender_domain"|"keyword", "value": "..."}
+    If conditions is None, falls back to sender_email condition only.
+    Returns the primary match value (sender email) or None on failure.
+    """
     if not email or not email.from_address:
         return None
 
-    domain = email.from_address.split("@")[-1].lower() if "@" in email.from_address else None
-    if not domain:
-        return None
+    sender = email.from_address.lower()
+
+    if conditions is None:
+        conditions = [{"type": "sender_email", "value": sender}]
 
     async with session_factory() as session:
-        # Upsert: update if a rule for this domain already exists
+        # Allow multiple rules per sender — only skip if exact same conditions exist
         existing = await session.execute(
             select(LearnedRule).where(
                 LearnedRule.tenant_id == email.tenant_id,
-                LearnedRule.match_field == "sender_domain",
-                LearnedRule.match_value == domain,
+                LearnedRule.active == True,
+                LearnedRule.conditions == conditions,
             )
         )
         rule = existing.scalar_one_or_none()
 
         if rule:
             rule.actions = actions
-            rule.active = True
+            rule.min_match = min_match
         else:
             session.add(LearnedRule(
                 tenant_id=email.tenant_id,
-                match_field="sender_domain",
-                match_value=domain,
+                conditions=conditions,
+                min_match=min_match,
                 actions=actions,
                 created_from_email_id=email.id,
             ))
 
         await session.commit()
 
-    logger.info(f"📚 Saved learned rule: sender_domain={domain} → actions={actions}")
-    return domain
+    logger.info(f"📚 Rule saved: conditions={conditions} min_match={min_match} → {actions}")
+    return sender
 
 
 # ------------------------------------------------------------------------------
@@ -250,18 +310,29 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status_icon = "✅" if move_success else "⚠️"
 
+    # Build Approach B rule proposal: full email + auto-detected keywords
+    sender_email = (email.from_address or "").lower()
+    keywords = _extract_keywords(email.subject or "", email.body_text or "")
+    kw_display = " · ".join(f"`{k}`" for k in keywords) if keywords else "_none detected_"
+
+    # Encode keywords in callback data (joined by |)
+    kw_encoded = "|".join(keywords)
+
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Yes — always move to this folder", callback_data=f"learn_move:{email_id}:{folder}")],
-        [InlineKeyboardButton("✅ Yes — also export PDF",            callback_data=f"learn_ask_path:{email_id}:{folder}:with_move")],
-        [InlineKeyboardButton("🚫 No — just this once",              callback_data=f"skip_learn:{email_id}")],
+        [InlineKeyboardButton("✅ Save rule",        callback_data=f"learn_move:{email_id}:{folder}:{kw_encoded}")],
+        [InlineKeyboardButton("✏️ Edit keywords",   callback_data=f"learn_ask_path:{email_id}:{folder}:with_move")],
+        [InlineKeyboardButton("🚫 Just this once",   callback_data=f"skip_learn:{email_id}")],
     ])
 
     try:
         await query.edit_message_text(
             f"{status_icon} Moved to *{folder}*.\n\n"
-            f"Remember this for future emails from the same sender?"
+            f"💾 Save rule for future emails?\n"
+            f"📧 `{sender_email}`\n"
+            f"🔑 {kw_display}\n"
+            f"→ *{folder}* \\(email OR 2\\+ keywords\\)"
             f"{qr_info}",
-            parse_mode="Markdown",
+            parse_mode="MarkdownV2",
             reply_markup=keyboard,
         )
     except Exception as _e:
@@ -277,9 +348,12 @@ async def handle_learn_move(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await _safe_answer(query)
 
-    parts = query.data.split(":")
+    # Format: learn_move:{email_id}:{folder}:{kw1|kw2|kw3}  (keywords optional)
+    parts = query.data.split(":", 3)
     email_id = int(parts[1])
     folder = parts[2]
+    kw_encoded = parts[3] if len(parts) > 3 else ""
+    keywords = [k for k in kw_encoded.split("|") if k] if kw_encoded else []
 
     session_factory, _ = get_session_factory()
 
@@ -289,9 +363,20 @@ async def handle_learn_move(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )).scalar_one_or_none()
 
     actions = [{"type": "move_folder", "folder": folder}]
-    domain = await _save_rule(session_factory, email, folder, actions)
 
-    if domain:
+    # Build conditions: sender_email + keywords
+    sender_email = (email.from_address or "").lower() if email else ""
+    conditions = [{"type": "sender_email", "value": sender_email}]
+    for kw in keywords:
+        conditions.append({"type": "keyword", "value": kw.lower()})
+
+    # Fire if: email matches OR at least 2 keywords match
+    min_match = 1 if not keywords else 2
+
+    saved = await _save_rule(session_factory, email, folder, actions, conditions, min_match)
+
+    if saved:
+        kw_line = f"\n🔑 Keywords: {', '.join(f'`{k}`' for k in keywords)}" if keywords else ""
         await log_audit(
             session_factory,
             actor_type="telegram",
@@ -300,14 +385,16 @@ async def handle_learn_move(update: Update, context: ContextTypes.DEFAULT_TYPE):
             entity_type="rule",
             entity_id=None,
             tenant_id=getattr(email, "tenant_id", None),
-            details={"domain": domain, "folder": folder, "actions": actions},
+            details={"sender": sender_email, "keywords": keywords, "folder": folder},
         )
         await query.edit_message_text(
-            f"📚 Rule saved — emails from *{domain}* will be moved to *{folder}*.",
-            parse_mode="Markdown",
+            f"📚 Rule saved\\!\n"
+            f"📧 `{saved}`{kw_line}\n"
+            f"→ *{folder}*",
+            parse_mode="MarkdownV2",
         )
     else:
-        await query.edit_message_text("⚠️ Could not extract sender domain to create a rule.")
+        await query.edit_message_text("⚠️ Could not save rule — no sender address found.")
 
 
 # ------------------------------------------------------------------------------
@@ -374,14 +461,16 @@ async def _persist_pdf_rule(query_or_message, email_id, folder, with_move, path)
         actions.append({"type": "move_folder", "folder": folder})
     actions.append({"type": "export_pdf", "path": path})
 
-    domain = await _save_rule(session_factory, email, folder, actions)
+    sender_email = (email.from_address or "").lower() if email else ""
+    conditions = [{"type": "sender_email", "value": sender_email}]
+    saved = await _save_rule(session_factory, email, folder, actions, conditions, min_match=1)
 
     label = "Move & Export PDF" if with_move else "Export PDF"
     msg = (
-        f"📚 Rule saved — *{label}* for emails from *{domain}*.\n"
+        f"📚 Rule saved — *{label}* for emails from `{saved}`.\n"
         f"PDF path: `{path}`"
-        if domain else
-        "⚠️ Could not extract sender domain to create a rule."
+        if saved else
+        "⚠️ Could not save rule — no sender address found."
     )
 
     if hasattr(query_or_message, 'edit_message_text'):
@@ -722,13 +811,23 @@ async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYP
     )
     qr_info = await _try_invoice_qr_bot(email, folder, email_id, settings2, session_factory2)
 
+    sender_email = (email.from_address or "").lower()
+    keywords = _extract_keywords(email.subject or "", email.body_text or "")
+    kw_encoded = "|".join(keywords)
+    kw_display = " · ".join(f"`{k}`" for k in keywords) if keywords else "_none_"
+
     keyboard = [
-        [{"text": "💾 Save as rule", "callback_data": f"rv_save_rule:{email_id}:{folder}"}],
-        [{"text": "Skip — just this once", "callback_data": f"rv_skip_rule:{email_id}"}],
+        [{"text": "✅ Save rule",      "callback_data": f"rv_save_rule:{email_id}:{folder}:{kw_encoded}"}],
+        [{"text": "🚫 Just this once", "callback_data": f"rv_skip_rule:{email_id}"}],
     ]
     await query.edit_message_text(
-        f"📁 Moved to *{folder}*.\n\nSave as a learned rule for future emails from this sender?{qr_info}",
-        parse_mode="Markdown",
+        f"📁 Moved to *{folder}*\\.\n\n"
+        f"💾 Save rule?\n"
+        f"📧 `{sender_email}`\n"
+        f"🔑 {kw_display}\n"
+        f"→ *{folder}*"
+        f"{qr_info}",
+        parse_mode="MarkdownV2",
         reply_markup={"inline_keyboard": keyboard},
     )
 
@@ -736,8 +835,12 @@ async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYP
 async def handle_rv_save_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await _safe_answer(query)
-    _, email_id_str, folder = query.data.split(":", 2)
-    email_id = int(email_id_str)
+    # Format: rv_save_rule:{email_id}:{folder}:{kw1|kw2|kw3}
+    parts = query.data.split(":", 3)
+    email_id = int(parts[1])
+    folder = parts[2]
+    kw_encoded = parts[3] if len(parts) > 3 else ""
+    keywords = [k for k in kw_encoded.split("|") if k] if kw_encoded else []
 
     session_factory, _ = get_session_factory()
     async with session_factory() as session:
@@ -746,9 +849,16 @@ async def handle_rv_save_rule(update: Update, context: ContextTypes.DEFAULT_TYPE
         )).scalar_one_or_none()
 
     actions = [{"type": "move_folder", "folder": folder}]
-    domain = await _save_rule(session_factory, email, folder, actions)
+    sender_email = (email.from_address or "").lower() if email else ""
+    conditions = [{"type": "sender_email", "value": sender_email}]
+    for kw in keywords:
+        conditions.append({"type": "keyword", "value": kw.lower()})
+    min_match = 1 if not keywords else 2
 
-    if domain:
+    saved = await _save_rule(session_factory, email, folder, actions, conditions, min_match)
+
+    if saved:
+        kw_line = f"\n🔑 {', '.join(keywords)}" if keywords else ""
         await log_audit(
             session_factory,
             actor_type="telegram",
@@ -757,13 +867,13 @@ async def handle_rv_save_rule(update: Update, context: ContextTypes.DEFAULT_TYPE
             entity_type="rule",
             entity_id=None,
             tenant_id=getattr(email, "tenant_id", None),
-            details={"domain": domain, "folder": folder, "via": "review_card"},
+            details={"sender": sender_email, "keywords": keywords, "folder": folder},
         )
         await query.edit_message_text(
-            f"📚 Rule saved — *{domain}* → *{folder}*.", parse_mode="Markdown"
+            f"📚 Rule saved — `{saved}`{kw_line} → *{folder}*.", parse_mode="Markdown"
         )
     else:
-        await query.edit_message_text("⚠️ Could not extract sender domain.")
+        await query.edit_message_text("⚠️ Could not save rule — no sender address found.")
 
 
 async def handle_rv_skip_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):

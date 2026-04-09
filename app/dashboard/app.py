@@ -419,7 +419,6 @@ def page_email_accounts(engine, settings):
 # Page: Learned Rules
 # ---------------------------------------------------------------------------
 
-MATCH_FIELDS = ["sender_domain", "sender_email", "subject_contains", "body_contains"]
 _DEFAULT_FOLDERS = ["Invoices", "Work", "Personal", "Marketing", "Spam", "Other"]
 
 
@@ -455,7 +454,7 @@ def page_learned_rules(engine, settings):
     try:
         df = pd.read_sql(
             """
-            SELECT id, tenant_id, match_field, match_value, actions,
+            SELECT id, tenant_id, conditions, min_match, actions,
                    hit_count, active, created_at
             FROM learned_rules
             ORDER BY active DESC, hit_count DESC, created_at DESC
@@ -482,14 +481,17 @@ def page_learned_rules(engine, settings):
                 c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
 
                 with c1:
-                    field_icon = {
-                        "sender_domain": "🌐",
-                        "sender_email": "📧",
-                        "subject_contains": "📝",
-                        "body_contains": "📄",
-                    }.get(row["match_field"], "❓")
+                    conditions = row["conditions"] or []
+                    _type_icon = {"sender_email": "📧", "sender_domain": "🌐", "keyword": "🔑"}
+                    cond_lines = []
+                    for c in conditions:
+                        icon = _type_icon.get(c.get("type", ""), "❓")
+                        cond_lines.append(f"{icon} `{c.get('value','')}`")
+                    min_match = int(row.get("min_match") or 1)
+                    cond_text = "  \n".join(cond_lines) if cond_lines else "_no conditions_"
                     st.markdown(
-                        f"**{field_icon} {row['match_field']}** = `{row['match_value']}`  \n"
+                        f"{cond_text}  \n"
+                        f"_match ≥ {min_match}_  \n"
                         f"{_actions_summary(row['actions'])}"
                     )
 
@@ -520,8 +522,7 @@ def page_learned_rules(engine, settings):
                             entity_type="rule",
                             entity_id=rule_id,
                             details={
-                                "match_field": row["match_field"],
-                                "match_value": row["match_value"],
+                                "conditions": row["conditions"],
                                 "active": not is_active,
                             },
                         )
@@ -530,15 +531,23 @@ def page_learned_rules(engine, settings):
                 # Edit expander
                 with st.expander(f"✏️ Edit rule #{rule_id}"):
                     with st.form(f"edit_rule_{rule_id}"):
-                        ef1, ef2 = st.columns(2)
-                        new_field = ef1.selectbox(
-                            "Match field", MATCH_FIELDS,
-                            index=MATCH_FIELDS.index(row["match_field"])
-                            if row["match_field"] in MATCH_FIELDS else 0,
-                            key=f"field_{rule_id}",
+                        st.caption("Conditions (one per line, format: `type:value`)")
+                        existing_conditions = row["conditions"] or []
+                        cond_text_default = "\n".join(
+                            f"{c.get('type','')}:{c.get('value','')}"
+                            for c in existing_conditions
                         )
-                        new_value = ef2.text_input(
-                            "Match value", value=row["match_value"], key=f"value_{rule_id}"
+                        cond_text_input = st.text_area(
+                            "Conditions",
+                            value=cond_text_default,
+                            help="Types: sender_email, sender_domain, keyword\nExample:\nsender_email:invoices@company.pt\nkeyword:Fatura\nkeyword:pagamento",
+                            key=f"cond_{rule_id}",
+                        )
+                        new_min_match = st.number_input(
+                            "Min conditions to match",
+                            min_value=1, max_value=10,
+                            value=int(row.get("min_match") or 1),
+                            key=f"min_{rule_id}",
                         )
 
                         # Parse existing actions for prefill
@@ -565,6 +574,15 @@ def page_learned_rules(engine, settings):
                         )
 
                         if st.form_submit_button("💾 Save changes", width='stretch'):
+                            # Parse conditions from text area
+                            new_conditions = []
+                            for line in cond_text_input.strip().splitlines():
+                                line = line.strip()
+                                if ":" in line:
+                                    ctype, _, cval = line.partition(":")
+                                    if ctype.strip() and cval.strip():
+                                        new_conditions.append({"type": ctype.strip(), "value": cval.strip()})
+
                             new_actions = []
                             if new_folder != "(none)":
                                 new_actions.append({"type": "move_folder", "folder": new_folder})
@@ -576,12 +594,12 @@ def page_learned_rules(engine, settings):
                                 conn.execute(
                                     text(
                                         "UPDATE learned_rules "
-                                        "SET match_field = :mf, match_value = :mv, actions = :ac::jsonb "
+                                        "SET conditions = :cond::jsonb, min_match = :mm, actions = :ac::jsonb "
                                         "WHERE id = :id"
                                     ),
                                     {
-                                        "mf": new_field,
-                                        "mv": new_value,
+                                        "cond": _json.dumps(new_conditions),
+                                        "mm": int(new_min_match),
                                         "ac": _json.dumps(new_actions),
                                         "id": rule_id,
                                     },
@@ -595,8 +613,8 @@ def page_learned_rules(engine, settings):
                                 entity_type="rule",
                                 entity_id=rule_id,
                                 details={
-                                    "match_field": new_field,
-                                    "match_value": new_value,
+                                    "conditions": new_conditions,
+                                    "min_match": int(new_min_match),
                                     "actions": new_actions,
                                 },
                             )
@@ -618,8 +636,7 @@ def page_learned_rules(engine, settings):
                             entity_type="rule",
                             entity_id=rule_id,
                             details={
-                                "match_field": row["match_field"],
-                                "match_value": row["match_value"],
+                                "conditions": row["conditions"],
                             },
                         )
                         st.rerun()
@@ -629,20 +646,32 @@ def page_learned_rules(engine, settings):
     # ── Add rule manually ──
     st.subheader("➕ Add Rule Manually")
     with st.form("add_rule_form"):
+        a_tenant = st.number_input("Tenant ID", min_value=1, value=1, step=1)
+        st.caption("Conditions — one per line, format `type:value`")
+        a_cond_text = st.text_area(
+            "Conditions",
+            placeholder="sender_email:invoices@company.pt\nkeyword:Fatura\nkeyword:pagamento",
+            help="Types: sender_email, sender_domain, keyword",
+        )
+        a_min_match = st.number_input("Min conditions to match", min_value=1, max_value=10, value=1, step=1)
         ac1, ac2 = st.columns(2)
-        a_tenant = ac1.number_input("Tenant ID", min_value=1, value=1, step=1)
-        a_field = ac2.selectbox("Match field", MATCH_FIELDS)
-        a_value = st.text_input("Match value", placeholder="amazon.com")
-        ac3, ac4 = st.columns(2)
-        a_folder = ac3.selectbox("Move to folder", ["(none)"] + FOLDERS)
-        a_pdf = ac4.text_input("Export PDF path (blank = off)", placeholder="Company/{year}/{month}/")
+        a_folder = ac1.selectbox("Move to folder", ["(none)"] + FOLDERS)
+        a_pdf = ac2.text_input("Export PDF path (blank = off)", placeholder="Company/{year}/{month}/")
         submitted = st.form_submit_button("Add Rule", width='stretch')
 
     if submitted:
-        if not a_value.strip():
-            st.error("Match value is required.")
+        import json as _json
+        new_conditions = []
+        for line in a_cond_text.strip().splitlines():
+            line = line.strip()
+            if ":" in line:
+                ctype, _, cval = line.partition(":")
+                if ctype.strip() and cval.strip():
+                    new_conditions.append({"type": ctype.strip(), "value": cval.strip()})
+
+        if not new_conditions:
+            st.error("At least one condition is required.")
         else:
-            import json as _json
             new_actions = []
             if a_folder != "(none)":
                 new_actions.append({"type": "move_folder", "folder": a_folder})
@@ -656,13 +685,13 @@ def page_learned_rules(engine, settings):
                         conn.execute(
                             text(
                                 "INSERT INTO learned_rules "
-                                "(tenant_id, match_field, match_value, actions, active) "
-                                "VALUES (:tid, :mf, :mv, :ac::jsonb, true)"
+                                "(tenant_id, conditions, min_match, actions, active) "
+                                "VALUES (:tid, :cond::jsonb, :mm, :ac::jsonb, true)"
                             ),
                             {
                                 "tid": int(a_tenant),
-                                "mf": a_field,
-                                "mv": a_value.strip(),
+                                "cond": _json.dumps(new_conditions),
+                                "mm": int(a_min_match),
                                 "ac": _json.dumps(new_actions),
                             },
                         )
@@ -673,14 +702,10 @@ def page_learned_rules(engine, settings):
                         actor_name=os.environ.get("DASHBOARD_USER", "admin"),
                         action="rule.created",
                         entity_type="rule",
-                        details={
-                            "match_field": a_field,
-                            "match_value": a_value.strip(),
-                            "actions": new_actions,
-                        },
+                        details={"conditions": new_conditions, "min_match": int(a_min_match), "actions": new_actions},
                         tenant_id=int(a_tenant),
                     )
-                    st.success(f"Rule added: `{a_field}` = `{a_value.strip()}`")
+                    st.success(f"Rule added with {len(new_conditions)} condition(s).")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
