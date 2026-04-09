@@ -92,15 +92,18 @@ async def _send_review_card(bot_token: str, chat_id: str, email, job: dict, fold
         f"What should we do?"
     )
 
+    kw_encoded = "|".join(keywords)
+
     keyboard = [
         [
-            {"text": f"✅ Approve → {folder}", "callback_data": f"rv_approve:{email.id}:{folder}"},
+            {"text": f"✅ Approve → {folder}", "callback_data": f"rv_approve:{email.id}:{folder}:{kw_encoded}"},
         ],
         [
             {"text": "📁 Change folder", "callback_data": f"rv_folder:{email.id}:{folder}"},
             {"text": "👤 Fix sender",    "callback_data": f"rv_sender:{email.id}"},
         ],
         [
+            {"text": "✏️ Keywords",  "callback_data": f"rv_edit_kw:{email.id}:{folder}:{kw_encoded}"},
             {"text": "➕ New folder", "callback_data": f"folder_new_request:{email.id}"},
         ],
     ]

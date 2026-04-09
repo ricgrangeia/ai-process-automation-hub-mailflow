@@ -643,6 +643,63 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
 
+    # ── Review-card keyword edit ───────────────────────────────────────────────
+    if chat_id in _pending_rv_kw:
+        email_id, folder, _, message_id = _pending_rv_kw.pop(chat_id)
+
+        if text.strip() == "-":
+            new_kw_encoded = ""
+            new_keywords   = []
+        else:
+            new_keywords   = [w.strip().lower() for w in text.replace(",", " ").split() if w.strip()]
+            new_kw_encoded = "|".join(new_keywords)
+
+        kw_display   = " · ".join(new_keywords) if new_keywords else "none detected"
+
+        session_factory, _ = get_session_factory()
+        async with session_factory() as session:
+            email = (await session.execute(
+                select(EmailMessage).where(EmailMessage.id == email_id)
+            )).scalar_one_or_none()
+
+        sender_label_text = (email.from_address or "?").lower() if email else "?"
+        subject = (email.subject or "(no subject)")[:80] if email else ""
+        sender_name = getattr(email, "sender_name", None) or "?"
+        sender_type = getattr(email, "sender_type", None)
+        icon = "🏢" if sender_type == "company" else "👤" if sender_type == "person" else "❓"
+
+        new_text = (
+            f"📋 Learning Mode Review\n\n"
+            f"Subject: {subject}\n"
+            f"From: {sender_label_text}\n"
+            f"Sender: {icon} {sender_name}\n\n"
+            f"🔑 Keywords: {kw_display}\n\n"
+            f"What should we do?"
+        )
+        new_keyboard = {
+            "inline_keyboard": [
+                [{"text": f"✅ Approve → {folder}", "callback_data": f"rv_approve:{email_id}:{folder}:{new_kw_encoded}"}],
+                [
+                    {"text": "📁 Change folder", "callback_data": f"rv_folder:{email_id}:{folder}"},
+                    {"text": "👤 Fix sender",    "callback_data": f"rv_sender:{email_id}"},
+                ],
+                [
+                    {"text": "✏️ Keywords",  "callback_data": f"rv_edit_kw:{email_id}:{folder}:{new_kw_encoded}"},
+                    {"text": "➕ New folder", "callback_data": f"folder_new_request:{email_id}"},
+                ],
+            ]
+        }
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=new_text,
+                reply_markup=new_keyboard,
+            )
+        except Exception:
+            pass
+        return
+
     # ── Rule-draft card input ──────────────────────────────────────────────────
     if chat_id in _rule_input_mode:
         mode  = _rule_input_mode.pop(chat_id)
@@ -961,8 +1018,11 @@ _pending_sender_name: dict[int, int] = {}
 async def handle_rv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await _safe_answer(query)
-    _, email_id_str, folder = query.data.split(":", 2)
-    email_id = int(email_id_str)
+    # Format: rv_approve:{email_id}:{folder}[:{kw_encoded}]
+    parts      = query.data.split(":", 3)
+    email_id   = int(parts[1])
+    folder     = parts[2]
+    kw_encoded = parts[3] if len(parts) > 3 else ""
 
     session_factory, settings = get_session_factory()
 
@@ -999,8 +1059,10 @@ async def handle_rv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     qr_info = await _try_invoice_qr_bot(email, folder, email_id, settings, session_factory)
 
     sender_email = (email.from_address or "").lower() if email else ""
-    keywords     = _extract_keywords(email.subject or "", email.body_text or "") if email else []
-    chat_id      = query.message.chat_id
+    # Use keywords from the review card (user may have edited them) or fall back to auto-detect
+    keywords = [k for k in kw_encoded.split("|") if k] if kw_encoded else \
+               (_extract_keywords(email.subject or "", email.body_text or "") if email else [])
+    chat_id  = query.message.chat_id
     await _send_rule_card(query, chat_id, email_id, folder, keywords, sender_email, qr_info)
 
 
@@ -1103,6 +1165,31 @@ async def handle_rv_skip_rule(update: Update, context: ContextTypes.DEFAULT_TYPE
     _rule_draft.pop(chat_id, None)
     _rule_input_mode.pop(chat_id, None)
     await query.edit_message_text("👍 Done — no rule saved.")
+
+
+# {chat_id: (email_id, folder, kw_encoded, message_id)}
+_pending_rv_kw: dict[int, tuple] = {}
+
+
+async def handle_rv_edit_kw(update: Update, context: ContextTypes.DEFAULT_TYPE):  # noqa: ARG001
+    """✏️ Keywords on the review card — ask user to type new keywords."""
+    query = update.callback_query
+    await _safe_answer(query)
+    # Format: rv_edit_kw:{email_id}:{folder}:{kw_encoded}
+    parts      = query.data.split(":", 3)
+    email_id   = int(parts[1])
+    folder     = parts[2]
+    kw_encoded = parts[3] if len(parts) > 3 else ""
+    chat_id    = query.message.chat_id
+
+    _pending_rv_kw[chat_id] = (email_id, folder, kw_encoded, query.message.message_id)
+    kw_display = " · ".join(kw_encoded.split("|")) if kw_encoded else "_none_"
+
+    await query.edit_message_text(
+        f"✏️ *Edit keywords*\n\nCurrent: {kw_display}\n\n"
+        f"Type new keywords (space or comma separated), or send `-` to clear.",
+        parse_mode="Markdown",
+    )
 
 
 async def handle_rv_sender(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1627,6 +1714,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_rv_set_folder, pattern=r"^rv_set_folder:"))
     app.add_handler(CallbackQueryHandler(handle_rv_save_rule,  pattern=r"^rv_save_rule:"))
     app.add_handler(CallbackQueryHandler(handle_rv_skip_rule,  pattern=r"^rv_skip_rule:"))
+    app.add_handler(CallbackQueryHandler(handle_rv_edit_kw,    pattern=r"^rv_edit_kw:"))
     app.add_handler(CallbackQueryHandler(handle_rv_sender,     pattern=r"^rv_sender:"))
     app.add_handler(CallbackQueryHandler(handle_rv_set_sender, pattern=r"^rv_set_sender:"))
     # Query callbacks
