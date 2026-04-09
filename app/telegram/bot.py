@@ -8,7 +8,8 @@ Callback data formats:
   learn_move:{email_id}:{folder}          — save rule: move only
   learn_pdf:{email_id}:{folder}:{path}    — save rule: export PDF only
   learn_both:{email_id}:{folder}:{path}   — save rule: move + export PDF
-  learn_ask_path:{email_id}:{folder}      — ask for PDF export path
+  learn_ask_path:{email_id}:{folder}:{with_move}:{kw_encoded} — ask for PDF export path
+  kw_keep / kw_edit / kw_none             — keywords confirmation step
   skip_learn:{email_id}                   — no rule saved
 """
 
@@ -50,12 +51,99 @@ logging.basicConfig(
 )
 logger = logging.getLogger("telegram-bot")
 
-# Stores pending path input per chat: {chat_id: (email_id, folder)}
-_pending_path: dict[int, tuple[int, str]] = {}
+# Stores pending path input per chat: {chat_id: (email_id, folder, with_move, keywords)}
+_pending_path: dict[int, tuple] = {}
+# Stores pending keywords input per chat: {chat_id: (email_id, folder, with_move, path, keywords)}
+_pending_keywords: dict[int, tuple] = {}
 # Stores pending new-folder name input per chat: {chat_id: email_id}
 _pending_new_folder: dict[int, int] = {}
 
+# ── Rule draft card state ──────────────────────────────────────────────────────
+# Single interactive card that the user configures before saving a rule.
+# {chat_id: {"email_id", "message_id", "folder", "keywords", "export_path", "sender_email", "qr_info"}}
+_rule_draft: dict[int, dict] = {}
+# Which field the user is currently typing: "keywords" | "path" | "folder"
+_rule_input_mode: dict[int, str] = {}
+
 DEFAULT_PDF_PATH = "Exports/{year}/{month}/"
+
+
+# ------------------------------------------------------------------------------
+# Rule-draft card builder
+# ------------------------------------------------------------------------------
+
+def _build_rule_card(draft: dict) -> tuple[str, InlineKeyboardMarkup]:
+    """Build the text + keyboard for the single interactive rule-setup card."""
+    folder      = draft["folder"]
+    keywords    = draft.get("keywords") or []
+    path        = draft.get("export_path")
+    sender      = draft.get("sender_email", "")
+    qr_info     = draft.get("qr_info", "")
+
+    kw_display   = " · ".join(f"`{k}`" for k in keywords) if keywords else "_none_"
+    path_display = f"`{path}`" if path else "_not set_"
+
+    text = (
+        f"✅ Moved to *{folder}*\n\n"
+        f"📋 *Configure rule for future emails:*\n"
+        f"📧 `{sender}`\n"
+        f"📁 Folder: *{folder}*\n"
+        f"🔑 Keywords: {kw_display}\n"
+        f"📂 Export path: {path_display}"
+        f"{qr_info}"
+    )
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirm & Save rule", callback_data="rd_save")],
+        [InlineKeyboardButton("📁 Move only (no rule)",  callback_data="rd_move")],
+        [
+            InlineKeyboardButton("✏️ Keywords",     callback_data="rd_kw"),
+            InlineKeyboardButton("📂 Export path",  callback_data="rd_path"),
+        ],
+        [InlineKeyboardButton("➕ New folder",       callback_data="rd_newfolder")],
+    ])
+
+    return text, keyboard
+
+
+async def _send_rule_card(query, chat_id: int, email_id: int, folder: str,
+                          keywords: list[str], sender_email: str, qr_info: str = ""):
+    """Replace the current message with the rule-setup card and persist the draft."""
+    draft = {
+        "email_id":     email_id,
+        "message_id":   query.message.message_id,
+        "folder":       folder,
+        "keywords":     keywords,
+        "export_path":  None,
+        "sender_email": sender_email,
+        "qr_info":      qr_info,
+    }
+    text, keyboard = _build_rule_card(draft)
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    except Exception as _e:
+        if "is not modified" not in str(_e):
+            raise
+    _rule_draft[chat_id] = draft
+
+
+async def _refresh_rule_card(bot, chat_id: int):
+    """Re-render the rule card in-place after a draft field changes."""
+    draft = _rule_draft.get(chat_id)
+    if not draft:
+        return
+    text, keyboard = _build_rule_card(draft)
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=draft["message_id"],
+            text=text,
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+        )
+    except Exception as _e:
+        if "is not modified" not in str(_e):
+            raise
 
 
 # ------------------------------------------------------------------------------
@@ -306,38 +394,15 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
         details={"folder": folder, "move_success": move_success},
     )
 
-    qr_info = await _try_invoice_qr_bot(email, folder, email_id, settings, session_factory) if move_success else ""
-
-    status_icon = "✅" if move_success else "⚠️"
-
-    # Build Approach B rule proposal: full email + auto-detected keywords
+    qr_info      = await _try_invoice_qr_bot(email, folder, email_id, settings, session_factory) if move_success else ""
     sender_email = (email.from_address or "").lower()
-    keywords = _extract_keywords(email.subject or "", email.body_text or "")
-    kw_display = " · ".join(f"`{k}`" for k in keywords) if keywords else "_none detected_"
+    keywords     = _extract_keywords(email.subject or "", email.body_text or "")
+    chat_id      = query.message.chat_id
 
-    # Encode keywords in callback data (joined by |)
-    kw_encoded = "|".join(keywords)
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Save rule",              callback_data=f"learn_move:{email_id}:{folder}:{kw_encoded}")],
-        [InlineKeyboardButton("📄 Setup rule + export PDF", callback_data=f"learn_ask_path:{email_id}:{folder}:with_move")],
-        [InlineKeyboardButton("🚫 Just this once",         callback_data=f"skip_learn:{email_id}")],
-    ])
-
-    try:
-        await query.edit_message_text(
-            f"{status_icon} Moved to *{folder}*.\n\n"
-            f"💾 Save rule for future emails?\n"
-            f"📧 `{sender_email}`\n"
-            f"🔑 {kw_display}\n"
-            f"→ *{folder}* (email OR 2+ keywords)"
-            f"{qr_info}",
-            parse_mode="Markdown",
-            reply_markup=keyboard,
-        )
-    except Exception as _e:
-        if "is not modified" not in str(_e):
-            raise
+    if move_success:
+        await _send_rule_card(query, chat_id, email_id, folder, keywords, sender_email, qr_info)
+    else:
+        await query.edit_message_text(f"⚠️ Move to *{folder}* failed.", parse_mode="Markdown")
 
 
 # ------------------------------------------------------------------------------
@@ -406,14 +471,17 @@ async def handle_learn_ask_path(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await _safe_answer(query)
 
-    parts = query.data.split(":")
-    email_id = int(parts[1])
-    folder = parts[2]
-    with_move = len(parts) > 3 and parts[3] == "with_move"
+    # Format: learn_ask_path:{email_id}:{folder}:{with_move_flag}:{kw_encoded}
+    parts = query.data.split(":", 4)
+    email_id  = int(parts[1])
+    folder    = parts[2]
+    with_move = (parts[3] == "1") if len(parts) > 3 else True
+    kw_encoded = parts[4] if len(parts) > 4 else ""
+    keywords   = [k for k in kw_encoded.split("|") if k] if kw_encoded else []
 
     chat_id = query.message.chat_id
     # Store state so the next plain text message is treated as path input
-    _pending_path[chat_id] = (email_id, folder, with_move)
+    _pending_path[chat_id] = (email_id, folder, with_move, keywords)
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(
@@ -433,6 +501,7 @@ async def handle_learn_ask_path(update: Update, context: ContextTypes.DEFAULT_TY
 
 # ------------------------------------------------------------------------------
 # Handler: learn_pdf:{email_id}:{folder}:{with_move}:{path}
+# "Use default path" button — go to keywords step next
 # ------------------------------------------------------------------------------
 
 async def handle_learn_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -440,15 +509,95 @@ async def handle_learn_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _safe_answer(query)
 
     parts = query.data.split(":", 4)
-    email_id = int(parts[1])
-    folder = parts[2]
+    email_id  = int(parts[1])
+    folder    = parts[2]
     with_move = parts[3] == "1"
-    path = parts[4]
+    path      = parts[4]
 
-    await _persist_pdf_rule(query, email_id, folder, with_move, path)
+    chat_id = query.message.chat_id
+    # Retrieve keywords stored when the path step began
+    pending = _pending_path.pop(chat_id, None)
+    keywords = pending[3] if pending and len(pending) > 3 else []
+
+    await _ask_keywords_step(query, chat_id, email_id, folder, with_move, path, keywords)
 
 
-async def _persist_pdf_rule(query_or_message, email_id, folder, with_move, path):
+# ------------------------------------------------------------------------------
+# Keywords confirmation step (shown after path is set)
+# ------------------------------------------------------------------------------
+
+async def _ask_keywords_step(msg_or_query, chat_id: int, email_id: int, folder: str,
+                              with_move: bool, path: str, keywords: list[str]):
+    """Show the detected keywords and let the user keep, remove, or replace them."""
+    _pending_keywords[chat_id] = (email_id, folder, with_move, path, keywords)
+
+    kw_display = " · ".join(f"`{k}`" for k in keywords) if keywords else "_none detected_"
+
+    keep_label = f"✅ Keep: {', '.join(keywords)}" if keywords else "✅ No keywords (sender only)"
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(keep_label, callback_data="kw_keep")],
+        [InlineKeyboardButton("✏️ Type new keywords", callback_data="kw_edit")],
+        [InlineKeyboardButton("❌ Remove keywords",   callback_data="kw_none")],
+    ])
+
+    text = (
+        f"✅ Path: `{path}`\n\n"
+        f"🔑 Keywords detected: {kw_display}\n\n"
+        f"Keep them, type your own (space-separated), or remove."
+    )
+
+    if hasattr(msg_or_query, "edit_message_text"):
+        await msg_or_query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    else:
+        await msg_or_query.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+
+
+async def handle_kw_keep(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Keep the auto-detected keywords as-is."""
+    query = update.callback_query
+    await _safe_answer(query)
+    chat_id = query.message.chat_id
+    pending = _pending_keywords.pop(chat_id, None)
+    if not pending:
+        await query.edit_message_text("⚠️ Session expired — please start again.")
+        return
+    email_id, folder, with_move, path, keywords = pending
+    await _persist_pdf_rule(query, email_id, folder, with_move, path, keywords)
+
+
+async def handle_kw_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ask the user to type new keywords."""
+    query = update.callback_query
+    await _safe_answer(query)
+    chat_id = query.message.chat_id
+    # Keep state in _pending_keywords, just change the message
+    pending = _pending_keywords.get(chat_id)
+    if not pending:
+        await query.edit_message_text("⚠️ Session expired — please start again.")
+        return
+    await query.edit_message_text(
+        "✏️ Type your keywords (space-separated):\n\nExample: `fatura referencia pagamento`",
+        parse_mode="Markdown",
+    )
+
+
+async def handle_kw_none(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Save without keywords — match by sender email only."""
+    query = update.callback_query
+    await _safe_answer(query)
+    chat_id = query.message.chat_id
+    pending = _pending_keywords.pop(chat_id, None)
+    if not pending:
+        await query.edit_message_text("⚠️ Session expired — please start again.")
+        return
+    email_id, folder, with_move, path, _ = pending
+    await _persist_pdf_rule(query, email_id, folder, with_move, path, keywords=[])
+
+
+async def _persist_pdf_rule(query_or_message, email_id: int, folder: str,
+                             with_move: bool, path: str, keywords: list[str] | None = None):
+    if keywords is None:
+        keywords = []
     session_factory, _ = get_session_factory()
 
     async with session_factory() as session:
@@ -462,13 +611,18 @@ async def _persist_pdf_rule(query_or_message, email_id, folder, with_move, path)
     actions.append({"type": "export_pdf", "path": path})
 
     sender_email = (email.from_address or "").lower() if email else ""
-    conditions = [{"type": "sender_email", "value": sender_email}]
-    saved = await _save_rule(session_factory, email, folder, actions, conditions, min_match=1)
+    conditions   = [{"type": "sender_email", "value": sender_email}]
+    for kw in keywords:
+        conditions.append({"type": "keyword", "value": kw.lower()})
+    min_match = 1 if not keywords else 2
 
-    label = "Move & Export PDF" if with_move else "Export PDF"
+    saved = await _save_rule(session_factory, email, folder, actions, conditions, min_match)
+
+    label  = "Move & Export PDF" if with_move else "Export PDF"
+    kw_line = f"\n🔑 Keywords: {', '.join(f'`{k}`' for k in keywords)}" if keywords else ""
     msg = (
         f"📚 Rule saved — *{label}* for emails from `{saved}`.\n"
-        f"PDF path: `{path}`"
+        f"PDF path: `{path}`{kw_line}"
         if saved else
         "⚠️ Could not save rule — no sender address found."
     )
@@ -489,10 +643,109 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text.strip()
 
-    # PDF path input takes priority
+    # ── Rule-draft card input ──────────────────────────────────────────────────
+    if chat_id in _rule_input_mode:
+        mode  = _rule_input_mode.pop(chat_id)
+        draft = _rule_draft.get(chat_id)
+
+        if not draft:
+            await update.message.reply_text("⚠️ Session expired — please start again.")
+            return
+
+        if mode == "keywords":
+            if text.strip() == "-":
+                draft["keywords"] = []
+            else:
+                draft["keywords"] = [
+                    w.strip().lower() for w in text.replace(",", " ").split() if w.strip()
+                ]
+            await _refresh_rule_card(context.bot, chat_id)
+            return
+
+        if mode == "path":
+            draft["export_path"] = text.strip()
+            await _refresh_rule_card(context.bot, chat_id)
+            return
+
+        if mode == "folder":
+            folder_name = text.strip()
+            if not folder_name:
+                await update.message.reply_text("⚠️ Folder name cannot be empty.")
+                _rule_input_mode[chat_id] = "folder"  # keep waiting
+                return
+
+            session_factory, settings = get_session_factory()
+
+            # Create folder in DB (idempotent)
+            async with session_factory() as session:
+                from sqlalchemy import text as _sqlt
+                existing = await session.execute(
+                    _sqlt("SELECT id FROM folders WHERE name = :name"), {"name": folder_name}
+                )
+                if not existing.scalar_one_or_none():
+                    await session.execute(
+                        _sqlt("INSERT INTO folders (name, is_active) VALUES (:name, true)"),
+                        {"name": folder_name},
+                    )
+                    await session.commit()
+
+            # Create IMAP folder
+            from app.ingestion.imap.client import connect_imap as _connect_imap, ensure_folder_exists as _ensure_folder
+            from app.core.crypto import decrypt_secret as _decrypt
+            from sqlalchemy import text as _sqlt2
+            try:
+                async with session_factory() as _sess:
+                    _rows = (await _sess.execute(
+                        _sqlt2(
+                            "SELECT imap_host, imap_port, username, password_encrypted "
+                            "FROM email_accounts WHERE active = true AND provider = 'imap'"
+                        )
+                    )).mappings().all()
+                for acc in _rows:
+                    try:
+                        pw = _decrypt(settings.master_key, acc["password_encrypted"])
+                        conn = _connect_imap(acc["imap_host"], int(acc["imap_port"] or 993), acc["username"], pw)
+                        _ensure_folder(conn, folder_name)
+                        conn.logout()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Re-move the email to the new folder
+            email_id = draft["email_id"]
+            async with session_factory() as session:
+                email = (await session.execute(
+                    select(EmailMessage).where(EmailMessage.id == email_id)
+                )).scalar_one_or_none()
+                account = (await session.execute(
+                    select(EmailAccount).where(EmailAccount.id == email.account_id)
+                )).scalar_one_or_none() if email else None
+            if email and account:
+                await _do_move(settings, email, account, folder_name)
+                async with session_factory() as session:
+                    await session.execute(
+                        sa_update(EmailMessage)
+                        .where(EmailMessage.id == email_id)
+                        .values(classification_label=folder_name)
+                    )
+                    await session.commit()
+
+            draft["folder"] = folder_name
+            await _refresh_rule_card(context.bot, chat_id)
+            return
+
+    # Keywords input (typed after path is confirmed)
+    if chat_id in _pending_keywords:
+        email_id, folder, with_move, path, _ = _pending_keywords.pop(chat_id)
+        new_keywords = [w.strip().lower() for w in text.replace(",", " ").split() if w.strip()]
+        await _persist_pdf_rule(update.message, email_id, folder, with_move, path, keywords=new_keywords)
+        return
+
+    # PDF path input
     if chat_id in _pending_path:
-        email_id, folder, with_move = _pending_path.pop(chat_id)
-        await _persist_pdf_rule(update.message, email_id, folder, with_move, text)
+        email_id, folder, with_move, keywords = _pending_path.pop(chat_id)
+        await _ask_keywords_step(update.message, chat_id, email_id, folder, with_move, text, keywords)
         return
 
     # New folder name input
@@ -745,26 +998,10 @@ async def handle_rv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     qr_info = await _try_invoice_qr_bot(email, folder, email_id, settings, session_factory)
 
-    # Offer Approach B rule proposal (same as classify flow)
     sender_email = (email.from_address or "").lower() if email else ""
-    keywords = _extract_keywords(email.subject or "", email.body_text or "") if email else []
-    kw_encoded = "|".join(keywords)
-    kw_display = " · ".join(f"`{k}`" for k in keywords) if keywords else "_none detected_"
-
-    keyboard = [
-        [{"text": "✅ Save rule",               "callback_data": f"rv_save_rule:{email_id}:{folder}:{kw_encoded}"}],
-        [{"text": "📄 Setup rule + export PDF", "callback_data": f"learn_ask_path:{email_id}:{folder}:with_move"}],
-        [{"text": "🚫 Just this once",          "callback_data": f"rv_skip_rule:{email_id}"}],
-    ]
-    await query.edit_message_text(
-        f"✅ Approved → *{folder}*.\n\n"
-        f"💾 Save rule for future emails?\n"
-        f"📧 `{sender_email}`\n"
-        f"🔑 {kw_display}"
-        f"{qr_info}",
-        parse_mode="Markdown",
-        reply_markup={"inline_keyboard": keyboard},
-    )
+    keywords     = _extract_keywords(email.subject or "", email.body_text or "") if email else []
+    chat_id      = query.message.chat_id
+    await _send_rule_card(query, chat_id, email_id, folder, keywords, sender_email, qr_info)
 
 
 async def handle_rv_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1103,6 +1340,148 @@ async def handle_restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ------------------------------------------------------------------------------
+# Handlers: rule-draft card  (rd_save / rd_move / rd_kw / rd_path /
+#           rd_newfolder / rd_default_path)
+# ------------------------------------------------------------------------------
+
+async def handle_rd_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Confirm & Save rule — persist rule with all configured options."""
+    query = update.callback_query
+    await _safe_answer(query)
+    chat_id = query.message.chat_id
+    draft = _rule_draft.pop(chat_id, None)
+
+    if not draft:
+        await query.edit_message_text("⚠️ Session expired — please start again.")
+        return
+
+    email_id   = draft["email_id"]
+    folder     = draft["folder"]
+    keywords   = draft.get("keywords") or []
+    path       = draft.get("export_path")
+    session_factory, _ = get_session_factory()
+
+    async with session_factory() as session:
+        email = (await session.execute(
+            select(EmailMessage).where(EmailMessage.id == email_id)
+        )).scalar_one_or_none()
+
+    actions = [{"type": "move_folder", "folder": folder}]
+    if path:
+        actions.append({"type": "export_pdf", "path": path})
+
+    sender_email = (email.from_address or "").lower() if email else ""
+    conditions   = [{"type": "sender_email", "value": sender_email}]
+    for kw in keywords:
+        conditions.append({"type": "keyword", "value": kw.lower()})
+    min_match = 1 if not keywords else 2
+
+    saved = await _save_rule(session_factory, email, folder, actions, conditions, min_match)
+
+    if saved:
+        kw_line   = f"\n🔑 Keywords: {', '.join(f'`{k}`' for k in keywords)}" if keywords else ""
+        path_line = f"\n📂 Export: `{path}`" if path else ""
+        await log_audit(
+            session_factory,
+            actor_type="telegram",
+            actor_name=_telegram_actor(query.from_user),
+            action="rule.created",
+            entity_type="rule",
+            entity_id=None,
+            tenant_id=getattr(email, "tenant_id", None),
+            details={"sender": sender_email, "keywords": keywords, "folder": folder, "path": path},
+        )
+        await query.edit_message_text(
+            f"📚 Rule saved!\n📧 `{saved}`{kw_line}{path_line}\n→ *{folder}*",
+            parse_mode="Markdown",
+        )
+    else:
+        await query.edit_message_text("⚠️ Could not save rule — no sender address found.")
+
+
+async def handle_rd_move(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Move only — dismiss the rule card without saving a rule."""
+    query = update.callback_query
+    await _safe_answer(query)
+    chat_id = query.message.chat_id
+    draft = _rule_draft.pop(chat_id, None)
+    folder = draft["folder"] if draft else "folder"
+    await query.edit_message_text(f"👍 Moved to *{folder}* — no rule saved.", parse_mode="Markdown")
+
+
+async def handle_rd_kw(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Prompt the user to type new keywords."""
+    query = update.callback_query
+    await _safe_answer(query)
+    chat_id = query.message.chat_id
+    if chat_id not in _rule_draft:
+        await query.answer("Session expired.", show_alert=True)
+        return
+    _rule_input_mode[chat_id] = "keywords"
+    draft = _rule_draft[chat_id]
+    kw_display = " · ".join(f"`{k}`" for k in (draft.get("keywords") or [])) or "_none_"
+    await query.edit_message_text(
+        f"✏️ *Edit keywords*\n\nCurrent: {kw_display}\n\n"
+        f"Type new keywords (space or comma separated), or send `-` to clear.",
+        parse_mode="Markdown",
+    )
+
+
+async def handle_rd_path(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Prompt the user to type an export path."""
+    query = update.callback_query
+    await _safe_answer(query)
+    chat_id = query.message.chat_id
+    if chat_id not in _rule_draft:
+        await query.answer("Session expired.", show_alert=True)
+        return
+    _rule_input_mode[chat_id] = "path"
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            f"Use default: {DEFAULT_PDF_PATH}",
+            callback_data="rd_default_path"
+        )]
+    ])
+    await query.edit_message_text(
+        f"📂 *Set export path*\n\n"
+        f"Type the path or use the default.\n"
+        f"Supported variables: `{{year}}`, `{{month}}`, `{{day}}`\n\n"
+        f"Example: `Company/{{year}}/{{month}}/Invoices/`",
+        parse_mode="Markdown",
+        reply_markup=keyboard,
+    )
+
+
+async def handle_rd_default_path(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Use the default export path."""
+    query = update.callback_query
+    await _safe_answer(query)
+    chat_id = query.message.chat_id
+    _rule_input_mode.pop(chat_id, None)
+    draft = _rule_draft.get(chat_id)
+    if not draft:
+        await query.answer("Session expired.", show_alert=True)
+        return
+    draft["export_path"] = DEFAULT_PDF_PATH
+    await _refresh_rule_card(context.bot, chat_id)
+
+
+async def handle_rd_newfolder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Prompt the user to type a new folder name."""
+    query = update.callback_query
+    await _safe_answer(query)
+    chat_id = query.message.chat_id
+    if chat_id not in _rule_draft:
+        await query.answer("Session expired.", show_alert=True)
+        return
+    _rule_input_mode[chat_id] = "folder"
+    await query.edit_message_text(
+        "➕ *New folder*\n\nType the folder name to create and move the email to:",
+        parse_mode="Markdown",
+    )
+
+
+# ------------------------------------------------------------------------------
 # Handler: skip_learn:{email_id}
 # ------------------------------------------------------------------------------
 
@@ -1265,7 +1644,17 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_learn_move,     pattern=r"^learn_move:"))
     app.add_handler(CallbackQueryHandler(handle_learn_ask_path, pattern=r"^learn_ask_path:"))
     app.add_handler(CallbackQueryHandler(handle_learn_pdf,      pattern=r"^learn_pdf:"))
+    app.add_handler(CallbackQueryHandler(handle_kw_keep,        pattern=r"^kw_keep$"))
+    app.add_handler(CallbackQueryHandler(handle_kw_edit,        pattern=r"^kw_edit$"))
+    app.add_handler(CallbackQueryHandler(handle_kw_none,        pattern=r"^kw_none$"))
     app.add_handler(CallbackQueryHandler(handle_skip_learn,     pattern=r"^skip_learn:"))
+    # Rule-draft card
+    app.add_handler(CallbackQueryHandler(handle_rd_save,         pattern=r"^rd_save$"))
+    app.add_handler(CallbackQueryHandler(handle_rd_move,         pattern=r"^rd_move$"))
+    app.add_handler(CallbackQueryHandler(handle_rd_kw,           pattern=r"^rd_kw$"))
+    app.add_handler(CallbackQueryHandler(handle_rd_path,         pattern=r"^rd_path$"))
+    app.add_handler(CallbackQueryHandler(handle_rd_default_path, pattern=r"^rd_default_path$"))
+    app.add_handler(CallbackQueryHandler(handle_rd_newfolder,    pattern=r"^rd_newfolder$"))
     # Review (learning mode) callbacks
     app.add_handler(CallbackQueryHandler(handle_rv_approve,    pattern=r"^rv_approve:"))
     app.add_handler(CallbackQueryHandler(handle_rv_folder,     pattern=r"^rv_folder:"))
