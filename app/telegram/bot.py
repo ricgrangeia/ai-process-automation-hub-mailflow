@@ -62,6 +62,19 @@ DEFAULT_PDF_PATH = "Exports/{year}/{month}/"
 # Helpers
 # ------------------------------------------------------------------------------
 
+async def _safe_answer(query) -> None:
+    """Answer a callback query, ignoring stale/expired query errors.
+
+    Telegram requires query.answer() within 30s. If the bot restarts with a
+    backlog, or a slow handler causes Telegram to re-deliver the callback, the
+    query ID will be expired and answer() raises BadRequest. Safe to ignore.
+    """
+    try:
+        await query.answer()
+    except Exception:
+        pass
+
+
 def get_session_factory():
     settings = get_settings()
     engine = make_engine(settings.database_url)
@@ -187,7 +200,7 @@ async def _try_invoice_qr_bot(email, folder: str, email_id: int, settings, sessi
 
 async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
 
     _, email_id_str, folder = query.data.split(":", 2)
     email_id = int(email_id_str)
@@ -262,7 +275,7 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_learn_move(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
 
     parts = query.data.split(":")
     email_id = int(parts[1])
@@ -304,7 +317,7 @@ async def handle_learn_move(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_learn_ask_path(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
 
     parts = query.data.split(":")
     email_id = int(parts[1])
@@ -337,7 +350,7 @@ async def handle_learn_ask_path(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_learn_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
 
     parts = query.data.split(":", 4)
     email_id = int(parts[1])
@@ -567,7 +580,7 @@ async def handle_search_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_query_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     result_id = query.data.split(":", 1)[1]
     await _push_delivery_job(query, result_id, "inline")
     await query.edit_message_text("📱 Fetching results…")
@@ -575,7 +588,7 @@ async def handle_query_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_query_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     result_id = query.data.split(":", 1)[1]
     await _push_delivery_job(query, result_id, "email")
     await query.edit_message_text("📧 Sending results by email…")
@@ -605,7 +618,7 @@ _pending_sender_name: dict[int, int] = {}
 
 async def handle_rv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     _, email_id_str, folder = query.data.split(":", 2)
     email_id = int(email_id_str)
 
@@ -647,7 +660,7 @@ async def handle_rv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_rv_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     parts = query.data.split(":", 2)
     email_id = parts[1]
     current = parts[2] if len(parts) > 2 else ""
@@ -670,7 +683,7 @@ async def handle_rv_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     _, email_id_str, folder = query.data.split(":", 2)
     email_id = int(email_id_str)
 
@@ -722,7 +735,7 @@ async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_rv_save_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     _, email_id_str, folder = query.data.split(":", 2)
     email_id = int(email_id_str)
 
@@ -755,13 +768,13 @@ async def handle_rv_save_rule(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def handle_rv_skip_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     await query.edit_message_text("👍 Done — no rule saved.")
 
 
 async def handle_rv_sender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     email_id = query.data.split(":")[1]
 
     keyboard = [
@@ -776,7 +789,7 @@ async def handle_rv_sender(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_rv_set_sender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     _, email_id_str, sender_type = query.data.split(":", 2)
     email_id = int(email_id_str)
     chat_id = query.message.chat_id
@@ -965,7 +978,7 @@ async def handle_restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_skip_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
     await query.edit_message_text("👍 Done — no rule saved.")
 
 
@@ -976,7 +989,7 @@ async def handle_skip_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_folder_suggest_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
 
     parts = query.data.split(":", 2)
     email_id = int(parts[1])
@@ -1070,7 +1083,7 @@ async def handle_folder_suggest_add(update: Update, context: ContextTypes.DEFAUL
 
 async def handle_folder_new_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await _safe_answer(query)
 
     parts = query.data.split(":", 1)
     email_id = int(parts[1])
