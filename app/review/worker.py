@@ -50,19 +50,45 @@ def _sender_label(sender_type: str | None, sender_name: str | None) -> str:
     return f"{icon} {name}"
 
 
+def _extract_keywords_simple(subject: str, body: str, max_kw: int = 3) -> list[str]:
+    """Lightweight keyword extractor (no NLP — avoids import from bot.py)."""
+    import re, unicodedata
+    STOPWORDS = {
+        "de", "da", "do", "das", "dos", "em", "a", "o", "as", "os", "e", "ou",
+        "um", "uma", "para", "com", "por", "que", "se", "no", "na", "ao", "the",
+        "and", "for", "fwd", "re", "fw", "is", "in", "on", "to", "of", "at",
+    }
+    text = f"{subject} {(body or '')[:300]}"
+    words = re.findall(r"[a-záàãâéêíóôõúüçA-Z]{4,}", text)
+    seen, out = set(), []
+    for w in words:
+        nf = unicodedata.normalize("NFD", w.lower())
+        nf = "".join(c for c in nf if unicodedata.category(c) != "Mn")
+        if nf not in STOPWORDS and nf not in seen:
+            seen.add(nf)
+            out.append(w.lower())
+        if len(out) == max_kw:
+            break
+    return out
+
+
 async def _send_review_card(bot_token: str, chat_id: str, email, job: dict, folders: list[str]) -> None:
-    folder = job.get("folder", "?")
-    confidence = int(float(job.get("confidence", 0)) * 100)
+    folder       = job.get("folder", "?")
+    confidence   = int(float(job.get("confidence", 0)) * 100)
     sender_label = _sender_label(job.get("sender_type"), job.get("sender_name"))
-    source = job.get("source", "llm")
-    subject = (email.subject or "(no subject)")[:80]
+    source       = job.get("source", "llm")
+    subject      = (email.subject or "(no subject)")[:80]
+    sender_email = (email.from_address or "?").lower()
+    keywords     = _extract_keywords_simple(email.subject or "", email.body_text or "")
+    kw_display   = " · ".join(keywords) if keywords else "none detected"
 
     text = (
         f"📋 Learning Mode Review\n\n"
         f"Subject: {subject}\n"
-        f"From: {email.from_address or '?'}\n"
+        f"From: {sender_email}\n"
         f"Sender: {sender_label}\n\n"
-        f"AI Decision: {folder} ({confidence}% · {source})\n\n"
+        f"🧠 AI Decision: {folder} ({confidence}% · {source})\n"
+        f"🔑 Keywords: {kw_display}\n\n"
         f"What should we do?"
     )
 

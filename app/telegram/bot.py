@@ -1066,38 +1066,24 @@ async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYP
         tenant_id=getattr(email, "tenant_id", None),
         details={"folder": folder, "via": "review_card"},
     )
-    qr_info = await _try_invoice_qr_bot(email, folder, email_id, settings2, session_factory2)
-
+    qr_info      = await _try_invoice_qr_bot(email, folder, email_id, settings2, session_factory2)
     sender_email = (email.from_address or "").lower()
-    keywords = _extract_keywords(email.subject or "", email.body_text or "")
-    kw_encoded = "|".join(keywords)
-    kw_display = " · ".join(f"`{k}`" for k in keywords) if keywords else "_none_"
-
-    keyboard = [
-        [{"text": "✅ Save rule",      "callback_data": f"rv_save_rule:{email_id}:{folder}:{kw_encoded}"}],
-        [{"text": "🚫 Just this once", "callback_data": f"rv_skip_rule:{email_id}"}],
-    ]
-    await query.edit_message_text(
-        f"📁 Moved to *{folder}*.\n\n"
-        f"💾 Save rule?\n"
-        f"📧 `{sender_email}`\n"
-        f"🔑 {kw_display}\n"
-        f"→ *{folder}*"
-        f"{qr_info}",
-        parse_mode="Markdown",
-        reply_markup={"inline_keyboard": keyboard},
-    )
+    keywords     = _extract_keywords(email.subject or "", email.body_text or "")
+    chat_id      = query.message.chat_id
+    await _send_rule_card(query, chat_id, email_id, folder, keywords, sender_email, qr_info)
 
 
 async def handle_rv_save_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fallback for old-format rv_save_rule buttons still in Telegram chat history."""
     query = update.callback_query
     await _safe_answer(query)
-    # Format: rv_save_rule:{email_id}:{folder}:{kw1|kw2|kw3}
-    parts = query.data.split(":", 3)
-    email_id = int(parts[1])
-    folder = parts[2]
+    # Rebuild a rule card from the callback data so the user can use the new flow
+    parts      = query.data.split(":", 3)
+    email_id   = int(parts[1])
+    folder     = parts[2]
     kw_encoded = parts[3] if len(parts) > 3 else ""
-    keywords = [k for k in kw_encoded.split("|") if k] if kw_encoded else []
+    keywords   = [k for k in kw_encoded.split("|") if k] if kw_encoded else []
+    chat_id    = query.message.chat_id
 
     session_factory, _ = get_session_factory()
     async with session_factory() as session:
@@ -1105,37 +1091,17 @@ async def handle_rv_save_rule(update: Update, context: ContextTypes.DEFAULT_TYPE
             select(EmailMessage).where(EmailMessage.id == email_id)
         )).scalar_one_or_none()
 
-    actions = [{"type": "move_folder", "folder": folder}]
     sender_email = (email.from_address or "").lower() if email else ""
-    conditions = [{"type": "sender_email", "value": sender_email}]
-    for kw in keywords:
-        conditions.append({"type": "keyword", "value": kw.lower()})
-    min_match = 1 if not keywords else 2
-
-    saved = await _save_rule(session_factory, email, folder, actions, conditions, min_match)
-
-    if saved:
-        kw_line = f"\n🔑 {', '.join(keywords)}" if keywords else ""
-        await log_audit(
-            session_factory,
-            actor_type="telegram",
-            actor_name=_telegram_actor(query.from_user),
-            action="rule.created",
-            entity_type="rule",
-            entity_id=None,
-            tenant_id=getattr(email, "tenant_id", None),
-            details={"sender": sender_email, "keywords": keywords, "folder": folder},
-        )
-        await query.edit_message_text(
-            f"📚 Rule saved — `{saved}`{kw_line} → *{folder}*.", parse_mode="Markdown"
-        )
-    else:
-        await query.edit_message_text("⚠️ Could not save rule — no sender address found.")
+    await _send_rule_card(query, chat_id, email_id, folder, keywords, sender_email)
 
 
 async def handle_rv_skip_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fallback for old-format rv_skip_rule buttons still in Telegram chat history."""
     query = update.callback_query
     await _safe_answer(query)
+    chat_id = query.message.chat_id
+    _rule_draft.pop(chat_id, None)
+    _rule_input_mode.pop(chat_id, None)
     await query.edit_message_text("👍 Done — no rule saved.")
 
 
