@@ -243,13 +243,17 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🚫 No — just this once",              callback_data=f"skip_learn:{email_id}")],
     ])
 
-    await query.edit_message_text(
-        f"{status_icon} Moved to *{folder}*.\n\n"
-        f"Remember this for future emails from the same sender?"
-        f"{qr_info}",
-        parse_mode="Markdown",
-        reply_markup=keyboard,
-    )
+    try:
+        await query.edit_message_text(
+            f"{status_icon} Moved to *{folder}*.\n\n"
+            f"Remember this for future emails from the same sender?"
+            f"{qr_info}",
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+        )
+    except Exception as _e:
+        if "is not modified" not in str(_e):
+            raise
 
 
 # ------------------------------------------------------------------------------
