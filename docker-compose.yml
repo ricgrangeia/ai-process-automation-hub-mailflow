@@ -92,8 +92,11 @@ services:
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
       TOOL_SERVER_URL: ${TOOL_SERVER_URL}
       TOOL_SERVER_API_KEY: ${TOOL_SERVER_API_KEY}
+      FILES_ROOT: ${FILES_ROOT:-/files}
+      COMPANY_NAME: ${COMPANY_NAME:-Company}
     volumes:
       - mail_storage:/storage
+      - files_storage:/files
     networks:
       - mail
       - database
@@ -115,8 +118,11 @@ services:
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
       TOOL_SERVER_URL: ${TOOL_SERVER_URL}
       TOOL_SERVER_API_KEY: ${TOOL_SERVER_API_KEY}
+      FILES_ROOT: ${FILES_ROOT:-/files}
+      COMPANY_NAME: ${COMPANY_NAME:-Company}
     volumes:
       - mail_storage:/storage
+      - files_storage:/files
     networks:
       - mail
       - database
@@ -206,3 +212,4 @@ services:
 volumes:
   redis_data:
   mail_storage:
+  files_storage:

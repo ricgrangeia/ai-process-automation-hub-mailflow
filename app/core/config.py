@@ -31,6 +31,10 @@ class Settings:
     tool_server_url: str = ""
     tool_server_api_key: str = ""
 
+    # Structured file archive (invoices, attachments)
+    files_root: str = "/files"
+    company_name: str = "Company"
+
     # SMTP — required for query result emails
     smtp_host: str = ""
     smtp_port: int = 587
@@ -63,6 +67,10 @@ def get_settings() -> Settings:
         # AI Tool Server
         tool_server_url=os.environ.get("TOOL_SERVER_URL", ""),
         tool_server_api_key=os.environ.get("TOOL_SERVER_API_KEY", ""),
+
+        # File archive
+        files_root=os.environ.get("FILES_ROOT", "/files"),
+        company_name=os.environ.get("COMPANY_NAME", "Company"),
 
         # Telegram
         telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),

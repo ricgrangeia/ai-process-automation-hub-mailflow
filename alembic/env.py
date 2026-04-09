@@ -18,6 +18,7 @@ import app.accounts.models              # noqa: F401 — EmailAccount
 import app.classification.learned_rules # noqa: F401 — LearnedRule
 import app.folders.models               # noqa: F401 — Folder
 import app.invoices.models              # noqa: F401 — Invoice
+import app.companies.models             # noqa: F401 — Company
 
 # ---------------------------------------------------------------------------
 # Alembic Config object, giving access to alembic.ini values.

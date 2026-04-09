@@ -1205,6 +1205,193 @@ def page_invoices(engine):
                         st.error(f"❌ Delete failed: {e}")
 
 
+def page_settings(engine):
+    st.title("⚙️ Settings")
+
+    try:
+        from app.core.system_settings import (
+            get_setting, set_setting,
+            FOLDER_STRUCTURE_KEY, FOLDER_STRUCTURE_DEFAULT, FOLDER_TOKENS,
+        )
+    except ImportError as e:
+        st.error(f"❌ Could not import system_settings: {e}")
+        return
+
+    # ── Folder Structure ──────────────────────────────────────────────────────
+    st.subheader("📁 Archive Folder Structure")
+    st.caption(
+        "Defines how PDFs are organised under the files root. "
+        "Use the tokens below to build your path."
+    )
+
+    current = get_setting(engine, FOLDER_STRUCTURE_KEY)
+
+    with st.expander("Available tokens", expanded=False):
+        for token, desc in FOLDER_TOKENS:
+            st.markdown(f"- `{token}` — {desc}")
+
+    st.markdown(f"**Files root:** `{os.environ.get('FILES_ROOT', '/files')}`")
+
+    with st.form("folder_structure_form"):
+        new_template = st.text_input(
+            "Path template",
+            value=current,
+            help="Segments separated by /. Example: {company}/{year}/{month}-{month_name}/{category}/{supplier}",
+        )
+
+        col_save, col_reset = st.columns([3, 1])
+        save  = col_save.form_submit_button("💾 Save")
+        reset = col_reset.form_submit_button("↩️ Reset to default")
+
+        if save:
+            val = new_template.strip().strip("/")
+            if not val:
+                st.error("Template cannot be empty.")
+            else:
+                # Validate tokens
+                import string
+                tokens_used = [f[1] for f in string.Formatter().parse(val) if f[1]]
+                valid = {t.strip("{}") for t, _ in FOLDER_TOKENS}
+                bad = [t for t in tokens_used if t not in valid]
+                if bad:
+                    st.error(f"Unknown token(s): {', '.join('{'+t+'}' for t in bad)}")
+                else:
+                    try:
+                        set_setting(engine, FOLDER_STRUCTURE_KEY, val)
+                        st.success("✅ Saved")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+        if reset:
+            try:
+                set_setting(engine, FOLDER_STRUCTURE_KEY, FOLDER_STRUCTURE_DEFAULT)
+                st.success("↩️ Reset to default")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ {e}")
+
+    # Live preview
+    st.markdown("**Preview** (with example values):")
+    preview_tokens = {
+        "company": "Acme Lda",
+        "year": "2025",
+        "month": "04",
+        "month_name": "April",
+        "category": "Faturas",
+        "supplier": "EDP Comercial",
+    }
+    tpl = current.strip("/")
+    try:
+        preview = tpl.format_map(preview_tokens)
+        files_root = os.environ.get("FILES_ROOT", "/files")
+        st.code(f"{files_root}/{preview}/invoice.pdf")
+    except Exception as e:
+        st.warning(f"Preview error: {e}")
+
+
+def page_companies(engine):
+    st.title("🏢 Companies")
+    st.caption("Companies are matched to invoices via NIF (buyer/seller) to route PDFs to the correct archive folder.")
+
+    # ── Add company form ──────────────────────────────────────────────────────
+    with st.expander("➕ Add Company", expanded=False):
+        with st.form("add_company_form", clear_on_submit=True):
+            col_name, col_nif = st.columns([3, 2])
+            new_name  = col_name.text_input("Company Name *", placeholder="Acme Lda")
+            new_nif   = col_nif.text_input("NIF *", placeholder="123456789")
+            new_notes = st.text_input("Notes", placeholder="Optional description")
+            submitted = st.form_submit_button("Add Company")
+            if submitted:
+                if not new_name.strip() or not new_nif.strip():
+                    st.error("Name and NIF are required.")
+                else:
+                    try:
+                        with engine.connect() as conn:
+                            conn.execute(
+                                text("INSERT INTO companies (name, nif, notes) VALUES (:name, :nif, :notes)"),
+                                {"name": new_name.strip(), "nif": new_nif.strip(), "notes": new_notes.strip() or None},
+                            )
+                            conn.commit()
+                        st.success(f"✅ Added {new_name.strip()}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+    # ── Company list ──────────────────────────────────────────────────────────
+    try:
+        df = pd.read_sql(
+            "SELECT id, name, nif, active, notes, created_at FROM companies ORDER BY name",
+            engine,
+        )
+    except Exception as e:
+        st.error(f"❌ Could not load companies: {e}")
+        st.info("Run the latest migrations (alembic upgrade head) to create the companies table.")
+        return
+
+    if df.empty:
+        st.info("No companies yet. Use the form above to add the first one.")
+        return
+
+    st.metric("Total companies", len(df))
+
+    for _, row in df.iterrows():
+        cid   = int(row["id"])
+        name  = row["name"]
+        nif   = row["nif"]
+        active = bool(row["active"])
+        notes = row["notes"] or ""
+
+        status_icon = "🟢" if active else "🔴"
+        with st.expander(f"{status_icon} {name}  —  NIF: {nif}", expanded=False):
+            with st.form(f"edit_company_{cid}"):
+                col_n, col_v = st.columns([3, 2])
+                edit_name  = col_n.text_input("Name", value=name, key=f"en_{cid}")
+                edit_nif   = col_v.text_input("NIF",  value=nif,  key=f"ev_{cid}")
+                edit_notes = st.text_input("Notes", value=notes,  key=f"eno_{cid}")
+                edit_active = st.checkbox("Active", value=active, key=f"ea_{cid}")
+
+                col_save, col_del = st.columns([3, 1])
+                save_clicked   = col_save.form_submit_button("💾 Save changes")
+                delete_clicked = col_del.form_submit_button("🗑️ Delete", type="secondary")
+
+                if save_clicked:
+                    if not edit_name.strip() or not edit_nif.strip():
+                        st.error("Name and NIF are required.")
+                    else:
+                        try:
+                            with engine.connect() as conn:
+                                conn.execute(
+                                    text("""
+                                        UPDATE companies
+                                        SET name=:name, nif=:nif, notes=:notes, active=:active
+                                        WHERE id=:id
+                                    """),
+                                    {
+                                        "name": edit_name.strip(),
+                                        "nif": edit_nif.strip(),
+                                        "notes": edit_notes.strip() or None,
+                                        "active": edit_active,
+                                        "id": cid,
+                                    },
+                                )
+                                conn.commit()
+                            st.success("✅ Saved")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ {e}")
+
+                if delete_clicked:
+                    try:
+                        with engine.connect() as conn:
+                            conn.execute(text("DELETE FROM companies WHERE id=:id"), {"id": cid})
+                            conn.commit()
+                        st.success(f"🗑️ Deleted {name}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+
 def page_audit_log(engine):
     st.title("📋 Audit Log")
 
@@ -1362,7 +1549,7 @@ if login_screen():
 
     st.sidebar.markdown("---")
 
-    page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts", "📚 Learned Rules", "📁 Folders", "🧾 Invoices", "📋 Audit Log"])
+    page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts", "📚 Learned Rules", "📁 Folders", "🏢 Companies", "🧾 Invoices", "📋 Audit Log", "⚙️ Settings"])
 
     if st.sidebar.button("Logout"):
         st.session_state["authenticated"] = False
@@ -1376,7 +1563,11 @@ if login_screen():
         page_learned_rules(engine, settings)
     elif page == "📁 Folders":
         page_folders(engine, settings)
+    elif page == "🏢 Companies":
+        page_companies(engine)
     elif page == "🧾 Invoices":
         page_invoices(engine)
     elif page == "📋 Audit Log":
         page_audit_log(engine)
+    elif page == "⚙️ Settings":
+        page_settings(engine)
