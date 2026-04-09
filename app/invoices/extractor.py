@@ -46,12 +46,16 @@ async def extract_qr_from_pdf(pdf_path: str, tool_server_url: str, api_key: str 
         logger.error(f"Invoice extraction failed for {pdf_path}: {e}")
         return []
 
+    logger.info(f"Tool server response status: {resp.status_code}")
+    logger.debug(f"Tool server raw response: {data}")
+
     invoice = data.get("invoice", {})
     if not invoice or not any(invoice.values()):
-        logger.info(f"No invoice data found in {path.name}")
+        logger.warning(f"No invoice data found in {path.name} — raw response keys: {list(data.keys())}")
         return []
 
-    logger.info(f"Invoice extracted from {path.name}: {list(k for k, v in invoice.items() if v)}")
+    populated = {k: v for k, v in invoice.items() if v is not None}
+    logger.info(f"Invoice extracted from {path.name}: {populated}")
     return [invoice]
 
 
@@ -88,6 +92,12 @@ async def persist_invoice(session_factory, email_id: int, data: dict) -> None:
     nif_seller     = data.get("nif_seller")
     invoice_number = data.get("invoice_number")
 
+    logger.info(
+        f"persist_invoice called — email_id={email_id}, "
+        f"nif_seller={nif_seller!r}, invoice_number={invoice_number!r}"
+    )
+    logger.info(f"Incoming data fields: { {k: v for k, v in data.items() if v is not None} }")
+
     async with session_factory() as session:
         existing = None
 
@@ -99,31 +109,48 @@ async def persist_invoice(session_factory, email_id: int, data: dict) -> None:
                     Invoice.invoice_number == invoice_number,
                 )
             )).scalar_one_or_none()
+            if existing:
+                logger.info(
+                    f"Matched existing invoice id={existing.id} by business key "
+                    f"(nif_seller={nif_seller!r}, invoice_number={invoice_number!r}), "
+                    f"original email_id={existing.email_id}"
+                )
+            else:
+                logger.info(f"No existing invoice found by business key ({nif_seller!r}, {invoice_number!r})")
+        else:
+            logger.info("Business key incomplete — skipping business-key lookup")
 
         # 2 — fallback: same email
         if existing is None:
             existing = (await session.execute(
                 select(Invoice).where(Invoice.email_id == email_id)
             )).scalar_one_or_none()
+            if existing:
+                logger.info(f"Matched existing invoice id={existing.id} by email_id={email_id}")
+            else:
+                logger.info(f"No existing invoice found for email_id={email_id} — will create new")
 
         if existing:
             filled   = []
             updated  = []
+            skipped  = []
 
             for k, v in data.items():
                 if not hasattr(existing, k) or v is None:
                     continue
                 current = getattr(existing, k)
                 if k in PAYMENT_FIELDS:
-                    # Always overwrite payment fields with fresh data
                     if current != v:
                         setattr(existing, k, v)
-                        updated.append(k)
+                        updated.append(f"{k}: {current!r} → {v!r}")
+                    else:
+                        skipped.append(f"{k} (same value)")
                 else:
-                    # Fill-only for identity/QR fields
                     if current is None:
                         setattr(existing, k, v)
-                        filled.append(k)
+                        filled.append(f"{k}={v!r}")
+                    else:
+                        skipped.append(f"{k} (already set: {current!r})")
 
             if filled or updated:
                 await session.commit()
@@ -133,9 +160,12 @@ async def persist_invoice(session_factory, email_id: int, data: dict) -> None:
                     logger.info(f"Invoice {existing.id} — updated payment fields: {updated}")
             else:
                 logger.info(f"Invoice {existing.id} — no changes needed")
+            if skipped:
+                logger.info(f"Invoice {existing.id} — skipped (already set or same): {skipped}")
         else:
-            session.add(Invoice(email_id=email_id, **{
+            new_inv = Invoice(email_id=email_id, **{
                 k: v for k, v in data.items() if hasattr(Invoice, k)
-            }))
+            })
+            session.add(new_inv)
             await session.commit()
             logger.info(f"Invoice created for email {email_id} ({invoice_number or 'no QR'})")
