@@ -39,6 +39,11 @@ def _condition_matches(cond: dict, sender: str, domain: str, subject: str, body:
         return domain == value
     if ctype == "keyword":
         return value in subject or value in body
+    # Legacy types — kept for on-the-fly migration of old rules
+    if ctype == "subject_contains":
+        return value in subject
+    if ctype == "body_contains":
+        return value in body
     return False
 
 
