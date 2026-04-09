@@ -96,10 +96,8 @@ def _build_rule_card(draft: dict) -> tuple[str, InlineKeyboardMarkup]:
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Confirm & Save rule", callback_data="rd_save")],
         [InlineKeyboardButton("📁 Move only (no rule)",  callback_data="rd_move")],
-        [
-            InlineKeyboardButton("✏️ Keywords",     callback_data="rd_kw"),
-            InlineKeyboardButton("📂 Export path",  callback_data="rd_path"),
-        ],
+        [InlineKeyboardButton("✏️ Keywords",     callback_data="rd_kw")],
+        [InlineKeyboardButton("📂 Export path",  callback_data="rd_path")],
         [InlineKeyboardButton("➕ New folder",       callback_data="rd_newfolder")],
     ])
 
@@ -685,6 +683,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [{"text": "✏️ Keywords",  "callback_data": f"rv_edit_kw:{email_id}:{folder}:{new_kw_encoded}"}],
             ]
         }
+        
+
         try:
             await context.bot.edit_message_text(
                 chat_id=chat_id,
