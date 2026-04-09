@@ -55,6 +55,12 @@ async def extract_qr_from_pdf(pdf_path: str, tool_server_url: str, api_key: str 
     return [invoice]
 
 
+PAYMENT_FIELDS = {
+    "payment_method", "mb_entidade", "mb_referencia", "mb_valor",
+    "mb_data_limite", "iban", "mbway_phone",
+}
+
+
 async def persist_invoice(session_factory, email_id: int, data: dict) -> None:
     """
     Upsert an Invoice row.
@@ -65,8 +71,9 @@ async def persist_invoice(session_factory, email_id: int, data: dict) -> None:
       2. email_id fallback — for partial records where QR was not decoded.
 
     Update policy:
-      - Never overwrite fields that already have a value.
-      - Always fill in NULL fields, including MB payment data discovered later.
+      - Identity/QR fields (nif, amounts, dates): fill NULL only, never overwrite.
+      - Payment fields (mb_*, iban, mbway_phone): always overwrite with new non-null
+        value — allows re-processing the same PDF to fix missing payment data.
     """
     from sqlalchemy import select
     from app.invoices.models import Invoice
@@ -100,17 +107,32 @@ async def persist_invoice(session_factory, email_id: int, data: dict) -> None:
             )).scalar_one_or_none()
 
         if existing:
-            filled = [
-                k for k, v in data.items()
-                if hasattr(existing, k) and v is not None and getattr(existing, k) is None
-            ]
-            for k in filled:
-                setattr(existing, k, data[k])
-            if filled:
+            filled   = []
+            updated  = []
+
+            for k, v in data.items():
+                if not hasattr(existing, k) or v is None:
+                    continue
+                current = getattr(existing, k)
+                if k in PAYMENT_FIELDS:
+                    # Always overwrite payment fields with fresh data
+                    if current != v:
+                        setattr(existing, k, v)
+                        updated.append(k)
+                else:
+                    # Fill-only for identity/QR fields
+                    if current is None:
+                        setattr(existing, k, v)
+                        filled.append(k)
+
+            if filled or updated:
                 await session.commit()
-                logger.info(f"Invoice {existing.id} updated — filled: {filled}")
+                if filled:
+                    logger.info(f"Invoice {existing.id} — filled null fields: {filled}")
+                if updated:
+                    logger.info(f"Invoice {existing.id} — updated payment fields: {updated}")
             else:
-                logger.info(f"Invoice {existing.id} already complete, nothing to update")
+                logger.info(f"Invoice {existing.id} — no changes needed")
         else:
             session.add(Invoice(email_id=email_id, **{
                 k: v for k, v in data.items() if hasattr(Invoice, k)
