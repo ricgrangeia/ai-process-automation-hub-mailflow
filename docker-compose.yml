@@ -94,6 +94,7 @@ services:
       TOOL_SERVER_API_KEY: ${TOOL_SERVER_API_KEY}
       FILES_ROOT: ${FILES_ROOT:-/files}
       COMPANY_NAME: ${COMPANY_NAME:-Company}
+      LANGUAGE: ${LANGUAGE:-en}
     volumes:
       - mail_storage:/storage
       - files_storage:/files
@@ -120,6 +121,7 @@ services:
       TOOL_SERVER_API_KEY: ${TOOL_SERVER_API_KEY}
       FILES_ROOT: ${FILES_ROOT:-/files}
       COMPANY_NAME: ${COMPANY_NAME:-Company}
+      LANGUAGE: ${LANGUAGE:-en}
     volumes:
       - mail_storage:/storage
       - files_storage:/files
@@ -142,6 +144,7 @@ services:
       MASTER_KEY: ${MASTER_KEY}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      LANGUAGE: ${LANGUAGE:-en}
     networks:
       - mail
       - database
@@ -169,6 +172,7 @@ services:
       SMTP_USER: ${SMTP_USER}
       SMTP_PASSWORD: ${SMTP_PASSWORD}
       REPORT_RECIPIENT: ${REPORT_RECIPIENT}
+      LANGUAGE: ${LANGUAGE:-en}
     volumes:
       - mail_storage:/storage
     networks:

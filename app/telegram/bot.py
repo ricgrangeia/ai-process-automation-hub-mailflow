@@ -44,6 +44,7 @@ from app.query.queue import QUERY_QUEUE_KEY, RESULT_KEY_PREFIX
 from app.review.queue import REVIEW_QUEUE_KEY, LEARNING_MODE_KEY
 from app.core.audit import log_audit, _telegram_actor
 from app.core.operation_mode import get_mode, MODES
+from app.core.i18n import t
 
 logging.basicConfig(
     level=logging.INFO,
@@ -83,22 +84,23 @@ def _build_rule_card(draft: dict) -> tuple[str, InlineKeyboardMarkup]:
     kw_display   = " · ".join(f"`{k}`" for k in keywords) if keywords else "_none_"
     path_display = f"`{path}`" if path else "_not set_"
 
-    text = (
-        f"✅ Moved to *{folder}*\n\n"
-        f"📋 *Configure rule for future emails:*\n"
-        f"📧 `{sender}`\n"
-        f"📁 Folder: *{folder}*\n"
-        f"🔑 Keywords: {kw_display}\n"
-        f"📂 Export path: {path_display}"
-        f"{qr_info}"
-    )
+    text = "\n".join(filter(None, [
+        t("telegram.rule_card.moved_header",     folder=folder),
+        "",
+        t("telegram.rule_card.configure_header"),
+        t("telegram.rule_card.sender_line",      sender_email=sender),
+        t("telegram.rule_card.folder_line",      folder=folder),
+        t("telegram.rule_card.keywords_line",    keywords=kw_display),
+        t("telegram.rule_card.export_path_line", path=path_display),
+        qr_info,
+    ]))
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Confirm & Save rule", callback_data="rd_save")],
-        [InlineKeyboardButton("📁 Move only (no rule)",  callback_data="rd_move")],
-        [InlineKeyboardButton("✏️ Keywords",     callback_data="rd_kw")],
-        [InlineKeyboardButton("📂 Export path",  callback_data="rd_path")],
-        [InlineKeyboardButton("➕ New folder",       callback_data="rd_newfolder")],
+        [InlineKeyboardButton(t("telegram.buttons.save_rule"),  callback_data="rd_save")],
+        [InlineKeyboardButton(t("telegram.buttons.move_only"),  callback_data="rd_move")],
+        [InlineKeyboardButton(t("telegram.buttons.keywords"),   callback_data="rd_kw")],
+        [InlineKeyboardButton(t("telegram.buttons.export_path"),callback_data="rd_path")],
+        [InlineKeyboardButton(t("telegram.buttons.new_folder"), callback_data="rd_newfolder")],
     ])
 
     return text, keyboard
@@ -652,7 +654,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             new_keywords   = [w.strip().lower() for w in text.replace(",", " ").split() if w.strip()]
             new_kw_encoded = "|".join(new_keywords)
 
-        kw_display   = " · ".join(new_keywords) if new_keywords else "none detected"
+        kw_display = " · ".join(new_keywords) if new_keywords else t("telegram.review.no_keywords")
 
         session_factory, _ = get_session_factory()
         async with session_factory() as session:
@@ -665,22 +667,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sender_name = getattr(email, "sender_name", None) or "?"
         sender_type = getattr(email, "sender_type", None)
         icon = "🏢" if sender_type == "company" else "👤" if sender_type == "person" else "❓"
+        sender_label = f"{icon} {sender_name}"
 
-        new_text = (
-            f"📋 Learning Mode Review\n\n"
-            f"Subject: {subject}\n"
-            f"From: {sender_label_text}\n"
-            f"Sender: {icon} {sender_name}\n\n"
-            f"🔑 Keywords: {kw_display}\n\n"
-            f"What should we do?"
-        )
+        new_text = "\n".join([
+            t("telegram.review.header"),
+            "",
+            t("telegram.review.subject_line", subject=subject),
+            t("telegram.review.from_line",    sender_email=sender_label_text),
+            t("telegram.review.sender_line",  sender_label=sender_label),
+            "",
+            t("telegram.review.keywords_line", keywords=kw_display),
+            "",
+            t("telegram.review.what_to_do"),
+        ])
         new_keyboard = {
             "inline_keyboard": [
-                [{"text": f"✅ Approve → {folder}", "callback_data": f"rv_approve:{email_id}:{folder}:{new_kw_encoded}"}],
-                [{"text": "📁 Change folder", "callback_data": f"rv_folder:{email_id}:{folder}"}],
-                [{"text": "➕ New folder", "callback_data": f"folder_new_request:{email_id}"}],
-                [{"text": "👤 Fix sender",    "callback_data": f"rv_sender:{email_id}"}],
-                [{"text": "✏️ Keywords",  "callback_data": f"rv_edit_kw:{email_id}:{folder}:{new_kw_encoded}"}],
+                [{"text": t("telegram.buttons.approve",       folder=folder),   "callback_data": f"rv_approve:{email_id}:{folder}:{new_kw_encoded}"}],
+                [{"text": t("telegram.buttons.change_folder"),                   "callback_data": f"rv_folder:{email_id}:{folder}"}],
+                [{"text": t("telegram.buttons.new_folder"),                      "callback_data": f"folder_new_request:{email_id}"}],
+                [{"text": t("telegram.buttons.fix_sender"),                      "callback_data": f"rv_sender:{email_id}"}],
+                [{"text": t("telegram.buttons.keywords"),                        "callback_data": f"rv_edit_kw:{email_id}:{folder}:{new_kw_encoded}"}],
             ]
         }
         
@@ -723,7 +729,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if mode == "folder":
             folder_name = text.strip()
             if not folder_name:
-                await update.message.reply_text("⚠️ Folder name cannot be empty.")
+                await update.message.reply_text(t("telegram.folder.empty_name_error"))
                 _rule_input_mode[chat_id] = "folder"  # keep waiting
                 return
 
@@ -806,7 +812,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         email_id = _pending_new_folder.pop(chat_id)
         folder_name = text.strip()
         if not folder_name:
-            await update.message.reply_text("⚠️ Folder name cannot be empty. Tap ➕ New folder again to retry.")
+            await update.message.reply_text(t("telegram.folder.empty_name_error"))
             return
 
         session_factory, settings = get_session_factory()
@@ -893,7 +899,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         imap_summary = " | ".join(imap_results) if imap_results else "no IMAP accounts"
         await update.message.reply_text(
-            f"✅ Folder '{folder_name}' created and email moved.\n\nIMAP: {imap_summary}"
+            t("telegram.folder.created_ok", folder_name=folder_name, imap_summary=imap_summary)
         )
         return
 
@@ -922,7 +928,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tenant_id=getattr(email_row, "tenant_id", None) if email_row else None,
             details={"sender_name": text},
         )
-        await update.message.reply_text(f"✅ Sender name saved: {text}")
+        await update.message.reply_text(t("telegram.sender.name_saved", name=text))
         return
 
     # Treat as email search query — delegate to query-worker via Redis
@@ -1080,7 +1086,7 @@ async def handle_rv_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for f in folder_names
     ]
     await query.edit_message_text(
-        "📁 Choose the correct folder:",
+        t("telegram.folder.choose_folder"),
         reply_markup={"inline_keyboard": keyboard},
     )
 
@@ -1209,7 +1215,7 @@ async def handle_rv_back_kw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _pending_rv_kw.pop(chat_id, None)
 
     keywords   = [k for k in kw_encoded.split("|") if k]
-    kw_display = " · ".join(keywords) if keywords else "none detected"
+    kw_display = " · ".join(keywords) if keywords else t("telegram.review.no_keywords")
 
     session_factory, _ = get_session_factory()
     async with session_factory() as session:
@@ -1221,23 +1227,27 @@ async def handle_rv_back_kw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     subject           = (email.subject or "(no subject)")[:80] if email else ""
     sender_name       = getattr(email, "sender_name", None) or "?"
     sender_type       = getattr(email, "sender_type", None)
-    icon = "🏢" if sender_type == "company" else "👤" if sender_type == "person" else "❓"
+    icon        = "🏢" if sender_type == "company" else "👤" if sender_type == "person" else "❓"
+    sender_label = f"{icon} {sender_name}"
 
-    text = (
-        f"📋 Learning Mode Review\n\n"
-        f"Subject: {subject}\n"
-        f"From: {sender_label_text}\n"
-        f"Sender: {icon} {sender_name}\n\n"
-        f"🔑 Keywords: {kw_display}\n\n"
-        f"What should we do?"
-    )
+    text = "\n".join([
+        t("telegram.review.header"),
+        "",
+        t("telegram.review.subject_line", subject=subject),
+        t("telegram.review.from_line",    sender_email=sender_label_text),
+        t("telegram.review.sender_line",  sender_label=sender_label),
+        "",
+        t("telegram.review.keywords_line", keywords=kw_display),
+        "",
+        t("telegram.review.what_to_do"),
+    ])
     keyboard = {
         "inline_keyboard": [
-            [{"text": f"✅ Approve → {folder}", "callback_data": f"rv_approve:{email_id}:{folder}:{kw_encoded}"}],
-            [{"text": "📁 Change folder",        "callback_data": f"rv_folder:{email_id}:{folder}"}],
-            [{"text": "➕ New folder",            "callback_data": f"folder_new_request:{email_id}"}],
-            [{"text": "👤 Fix sender",            "callback_data": f"rv_sender:{email_id}"}],
-            [{"text": "✏️ Keywords",             "callback_data": f"rv_edit_kw:{email_id}:{folder}:{kw_encoded}"}],
+            [{"text": t("telegram.buttons.approve",       folder=folder), "callback_data": f"rv_approve:{email_id}:{folder}:{kw_encoded}"}],
+            [{"text": t("telegram.buttons.change_folder"),                 "callback_data": f"rv_folder:{email_id}:{folder}"}],
+            [{"text": t("telegram.buttons.new_folder"),                    "callback_data": f"folder_new_request:{email_id}"}],
+            [{"text": t("telegram.buttons.fix_sender"),                    "callback_data": f"rv_sender:{email_id}"}],
+            [{"text": t("telegram.buttons.keywords"),                      "callback_data": f"rv_edit_kw:{email_id}:{folder}:{kw_encoded}"}],
         ]
     }
     await query.edit_message_text(text, reply_markup=keyboard)
@@ -1249,11 +1259,11 @@ async def handle_rv_sender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     email_id = query.data.split(":")[1]
 
     keyboard = [
-        [{"text": "🏢 Company", "callback_data": f"rv_set_sender:{email_id}:company"}],
-        [{"text": "👤 Person",  "callback_data": f"rv_set_sender:{email_id}:person"}],
+        [{"text": t("telegram.buttons.sender_company"), "callback_data": f"rv_set_sender:{email_id}:company"}],
+        [{"text": t("telegram.buttons.sender_person"),  "callback_data": f"rv_set_sender:{email_id}:person"}],
     ]
     await query.edit_message_text(
-        "👤 Is the sender a company or a person?",
+        t("telegram.sender.ask_type"),
         reply_markup={"inline_keyboard": keyboard},
     )
 
@@ -1386,10 +1396,7 @@ async def handle_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
             details={"state": "on"},
         )
         await update.message.reply_text(
-            "🎓 *Learning Mode ON*\n\n"
-            "Every new email (except learned rule matches) will be sent for your review.\n"
-            "You'll see the AI decision, sender identity, and can approve or correct it.\n"
-            "Corrections will prompt to save as a learned rule.",
+            t("telegram.learning_mode.on_message"),
             parse_mode="Markdown",
         )
     elif arg == "off":
@@ -1404,13 +1411,13 @@ async def handle_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
             entity_type="system",
             details={"state": "off"},
         )
-        await update.message.reply_text("✅ *Learning Mode OFF* — running autonomously.", parse_mode="Markdown")
+        await update.message.reply_text(t("telegram.learning_mode.off_message"), parse_mode="Markdown")
     else:
         is_on = await r.exists(LEARNING_MODE_KEY)
         await r.aclose()
         status = "🟢 ON" if is_on else "🔴 OFF"
         await update.message.reply_text(
-            f"🎓 Learning Mode is currently *{status}*.\n\nUse `/learn on` or `/learn off`.",
+            t("telegram.learning_mode.status", status=status),
             parse_mode="Markdown",
         )
 
@@ -1580,7 +1587,7 @@ async def handle_rd_newfolder(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     _rule_input_mode[chat_id] = "folder"
     await query.edit_message_text(
-        "➕ *New folder*\n\nType the folder name to create and move the email to:",
+        t("telegram.folder.new_prompt"),
         parse_mode="Markdown",
     )
 
@@ -1685,7 +1692,7 @@ async def handle_folder_suggest_add(update: Update, context: ContextTypes.DEFAUL
     )
 
     await query.edit_message_text(
-        f"✅ Folder '{folder_name}' created and email moved."
+        t("telegram.folder.created_ok", folder_name=folder_name, imap_summary="")
     )
 
 
