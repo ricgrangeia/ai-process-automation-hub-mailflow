@@ -684,8 +684,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     {"text": "👤 Fix sender",    "callback_data": f"rv_sender:{email_id}"},
                 ],
                 [
-                    {"text": "✏️ Keywords",  "callback_data": f"rv_edit_kw:{email_id}:{folder}:{new_kw_encoded}"},
                     {"text": "➕ New folder", "callback_data": f"folder_new_request:{email_id}"},
+                    {"text": "✏️ Keywords",  "callback_data": f"rv_edit_kw:{email_id}:{folder}:{new_kw_encoded}"},
+                   
                 ],
             ]
         }
