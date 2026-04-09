@@ -84,13 +84,21 @@ async def send_review_request(
             f"Subject: {subject_display}\n\n"
             f"📚 Learned rule says: {rule_folder}\n"
             f"🧠 AI says: {llm_folder} ({confidence_pct}%)\n\n"
-            f"They disagree. Which is correct?"
+            f"Which is correct?"
         )
-        buttons = [
-            {"text": folder, "callback_data": f"classify:{email_id}:{folder}"}
-            for folder in active_folders
+        # Conflicting choices shown prominently as full-width rows at the top
+        conflict_rows = [
+            [{"text": f"✅ {rule_folder}  (rule)", "callback_data": f"classify:{email_id}:{rule_folder}"}],
+            [{"text": f"✅ {llm_folder}  (AI · {confidence_pct}%)", "callback_data": f"classify:{email_id}:{llm_folder}"}],
         ]
-        keyboard = [buttons[i:i+2] for i in range(0, len(buttons), 2)] + [new_folder_row]
+        # Remaining folders in a 2-column grid, excluding the two already shown
+        other_folders = [f for f in active_folders if f not in (rule_folder, llm_folder)]
+        other_buttons = [
+            {"text": f, "callback_data": f"classify:{email_id}:{f}"}
+            for f in other_folders
+        ]
+        other_rows = [other_buttons[i:i+2] for i in range(0, len(other_buttons), 2)]
+        keyboard = conflict_rows + other_rows + [new_folder_row]
 
     else:
         text = (
