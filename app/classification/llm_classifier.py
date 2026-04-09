@@ -3,6 +3,7 @@ import logging
 import time
 import httpx
 from .contracts import ClassificationResult
+from app.core.i18n import t
 
 logger = logging.getLogger("llm-classifier")
 
@@ -23,50 +24,25 @@ class LLMClassifier:
 
         folder_list = ", ".join(folders) if folders else "Invoices, Work, Personal, Marketing, Spam, Other"
 
-        if rule_hint:
-            hint_block = (
-                f"\nA learned rule — based on a previous human-confirmed decision for "
-                f"this sender — suggests this email belongs to: **{rule_hint}**\n"
-                f"Validate this carefully:\n"
-                f"- If the email content matches what you would expect for \"{rule_hint}\", "
-                f"return \"{rule_hint}\" with confidence ≥ 0.90.\n"
-                f"- If the content seems different from what the rule expects "
-                f"(e.g. same sender domain but this email is a newsletter, not an invoice), "
-                f"return the correct folder independently with your honest confidence.\n"
-            )
-        else:
-            hint_block = ""
+        hint_block = t("prompt.classifier.rule_hint", rule_hint=rule_hint) if rule_hint else ""
 
         payload = {
             "model": self.settings.llm_model,
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are a strict email classifier. Return ONLY valid JSON."
+                    "content": t("prompt.classifier.system"),
                 },
                 {
                     "role": "user",
-                    "content": f"""
-Classify into one of:
-{folder_list}
-{hint_block}
-Also identify the sender:
-- sender_type: "company" if sent by a business/organisation, "person" if sent by an individual
-- sender_name: the company name (e.g. "Amazon", "LinkedIn") or person's name (e.g. "João Silva") — NOT the email address
-
-Return exactly:
-{{
-  "folder": "FolderName",
-  "confidence": 0.0-1.0,
-  "sender_type": "company" or "person",
-  "sender_name": "Name or null"
-}}
-
-From: {email.from_address}
-Subject: {email.subject}
-Body:
-{(email.body_text or "")[:1500]}
-"""
+                    "content": t(
+                        "prompt.classifier.user",
+                        folder_list=folder_list,
+                        hint_block=hint_block,
+                        from_address=email.from_address,
+                        subject=email.subject,
+                        body=(email.body_text or "")[:1500],
+                    ),
                 }
             ],
             "temperature": 0.0

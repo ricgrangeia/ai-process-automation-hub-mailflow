@@ -1,0 +1,7 @@
+
+A learned rule — based on a previous human-confirmed decision for this sender — suggests this email belongs to: {rule_hint}
+Validate this carefully:
+- If the email content matches what you would expect for "{rule_hint}", return "{rule_hint}" with confidence >= 0.90.
+- If the content seems different from what the rule expects
+  (e.g. same sender domain but this email is a newsletter, not an invoice),
+  return the correct folder independently with your honest confidence.

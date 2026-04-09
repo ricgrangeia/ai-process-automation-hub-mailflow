@@ -1,0 +1,62 @@
+# ── Etiquetas dos botões do Telegram ─────────────────────────────────────────
+
+[telegram.buttons]
+approve        = "✅ Aprovar → {folder}"
+change_folder  = "📁 Mudar pasta"
+new_folder     = "➕ Nova pasta"
+fix_sender     = "👤 Corrigir remetente"
+keywords       = "✏️ Palavras-chave"
+save_rule      = "✅ Confirmar e guardar regra"
+move_only      = "📁 Só mover (sem regra)"
+export_path    = "📂 Caminho de exportação"
+sender_company = "🏢 Empresa"
+sender_person  = "👤 Pessoa"
+
+# ── Mensagens do cartão de revisão ───────────────────────────────────────────
+
+[telegram.review]
+header         = "📋 Revisão — Modo Aprendizagem"
+subject_line   = "Assunto: {subject}"
+from_line      = "De: {sender_email}"
+sender_line    = "Remetente: {sender_label}"
+ai_decision    = "🧠 Decisão IA: {folder} ({confidence}% · {source})"
+keywords_line  = "🔑 Palavras-chave: {keywords}"
+what_to_do     = "O que fazemos?"
+no_keywords    = "nenhuma detetada"
+
+# ── Mensagens do cartão de regra ─────────────────────────────────────────────
+
+[telegram.rule_card]
+moved_header      = "✅ Movido para *{folder}*"
+configure_header  = "📋 *Configurar regra para emails futuros:*"
+sender_line       = "📧 {sender_email}"
+folder_line       = "📁 Pasta: *{folder}*"
+keywords_line     = "🔑 Palavras-chave: {keywords}"
+export_path_line  = "📂 Caminho de exportação: *{path}*"
+
+# ── Edição de palavras-chave ──────────────────────────────────────────────────
+
+[telegram.keywords]
+edit_prompt       = "✏️ *Editar palavras-chave*\n\nAtuais: {current}\n\nEscreve as novas palavras-chave (separadas por espaços):\nExemplo: `fatura pagamento referencia`"
+type_prompt       = "✏️ Escreve as tuas palavras-chave (separadas por espaços):\n\nExemplo: `fatura referencia pagamento`"
+
+# ── Mensagens de pasta ────────────────────────────────────────────────────────
+
+[telegram.folder]
+new_prompt        = "➕ *Nova pasta*\n\nEscreve o nome da pasta a criar e para onde mover o email:"
+empty_name_error  = "⚠️ O nome da pasta não pode estar vazio. Toca em ➕ Nova pasta para tentar novamente."
+created_ok        = "✅ Pasta '{folder_name}' criada e email movido.\n\nIMAP: {imap_summary}"
+choose_folder     = "📁 Escolhe a pasta correta:"
+
+# ── Mensagens de remetente ────────────────────────────────────────────────────
+
+[telegram.sender]
+ask_type          = "👤 O remetente é uma empresa ou uma pessoa?"
+name_saved        = "✅ Nome do remetente guardado: {name}"
+
+# ── Modo de aprendizagem ──────────────────────────────────────────────────────
+
+[telegram.learning_mode]
+on_message   = "🎓 *Modo Aprendizagem ATIVO*\n\nTodas as classificações da IA serão enviadas aqui para revisão antes de serem aplicadas."
+off_message  = "✅ *Modo Aprendizagem DESATIVO* — a funcionar de forma autónoma."
+status       = "🎓 O Modo Aprendizagem está atualmente *{status}*.\n\nUsa `/learn on` ou `/learn off`."

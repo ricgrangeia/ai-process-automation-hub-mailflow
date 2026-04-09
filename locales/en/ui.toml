@@ -1,0 +1,62 @@
+# ── Telegram button labels ────────────────────────────────────────────────────
+
+[telegram.buttons]
+approve        = "✅ Approve → {folder}"
+change_folder  = "📁 Change folder"
+new_folder     = "➕ New folder"
+fix_sender     = "👤 Fix sender"
+keywords       = "✏️ Keywords"
+save_rule      = "✅ Confirm & Save rule"
+move_only      = "📁 Move only (no rule)"
+export_path    = "📂 Export path"
+sender_company = "🏢 Company"
+sender_person  = "👤 Person"
+
+# ── Review card messages ──────────────────────────────────────────────────────
+
+[telegram.review]
+header         = "📋 Learning Mode Review"
+subject_line   = "Subject: {subject}"
+from_line      = "From: {sender_email}"
+sender_line    = "Sender: {sender_label}"
+ai_decision    = "🧠 AI Decision: {folder} ({confidence}% · {source})"
+keywords_line  = "🔑 Keywords: {keywords}"
+what_to_do     = "What should we do?"
+no_keywords    = "none detected"
+
+# ── Rule card messages ────────────────────────────────────────────────────────
+
+[telegram.rule_card]
+moved_header      = "✅ Moved to *{folder}*"
+configure_header  = "📋 *Configure rule for future emails:*"
+sender_line       = "📧 {sender_email}"
+folder_line       = "📁 Folder: *{folder}*"
+keywords_line     = "🔑 Keywords: {keywords}"
+export_path_line  = "📂 Export path: *{path}*"
+
+# ── Keyword editing ───────────────────────────────────────────────────────────
+
+[telegram.keywords]
+edit_prompt       = "✏️ *Edit keywords*\n\nCurrent: {current}\n\nType new keywords (space-separated):\nExample: `invoice payment reference`"
+type_prompt       = "✏️ Type your keywords (space-separated):\n\nExample: `invoice reference payment`"
+
+# ── Folder messages ───────────────────────────────────────────────────────────
+
+[telegram.folder]
+new_prompt        = "➕ *New folder*\n\nType the folder name to create and move the email to:"
+empty_name_error  = "⚠️ Folder name cannot be empty. Tap ➕ New folder again to retry."
+created_ok        = "✅ Folder '{folder_name}' created and email moved.\n\nIMAP: {imap_summary}"
+choose_folder     = "📁 Choose the correct folder:"
+
+# ── Sender messages ───────────────────────────────────────────────────────────
+
+[telegram.sender]
+ask_type          = "👤 Is the sender a company or a person?"
+name_saved        = "✅ Sender name saved: {name}"
+
+# ── Learning mode ─────────────────────────────────────────────────────────────
+
+[telegram.learning_mode]
+on_message   = "🎓 *Learning Mode ON*\n\nEvery AI classification will be sent here for review before being applied."
+off_message  = "✅ *Learning Mode OFF* — running autonomously."
+status       = "🎓 Learning Mode is currently *{status}*.\n\nUse `/learn on` or `/learn off`."

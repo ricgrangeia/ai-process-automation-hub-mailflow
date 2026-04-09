@@ -1,0 +1,19 @@
+Classifica numa das seguintes pastas:
+{folder_list}
+{hint_block}
+Identifica também o remetente:
+- sender_type: "company" se enviado por uma empresa/organização, "person" se enviado por uma pessoa
+- sender_name: o nome da empresa (ex: "Amazon", "LinkedIn") ou o nome da pessoa (ex: "João Silva") — NÃO o endereço de email
+
+Devolve exatamente:
+{
+  "folder": "NomePasta",
+  "confidence": 0.0-1.0,
+  "sender_type": "company" ou "person",
+  "sender_name": "Nome ou null"
+}
+
+De: {from_address}
+Assunto: {subject}
+Corpo:
+{body}

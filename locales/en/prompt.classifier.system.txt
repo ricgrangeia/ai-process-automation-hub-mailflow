@@ -1,0 +1,1 @@
+You are a strict email classifier. Return ONLY valid JSON.

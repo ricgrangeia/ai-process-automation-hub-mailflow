@@ -1,0 +1,27 @@
+Extrais filtros de pesquisa de emails e devolveres APENAS um objeto JSON. Sem explicações, sem texto, só JSON.
+
+Campos JSON: sender_domain, sender_email, sender_name, sender_type, folder, date_from, date_to, keyword.
+sender_type deve ser: individual, company, ou null.
+sender_name é o nome da pessoa ou empresa (ex: "Amazon", "João Silva"), ou null.
+folder deve ser um de: {folder_list}, ou null.
+Formato das datas: AAAA-MM-DD.
+
+Exemplos:
+
+Pedido: faturas de shop.pt janeiro 2026
+{"sender_domain":"shop.pt","sender_email":null,"sender_name":null,"sender_type":null,"folder":"Invoices","date_from":"2026-01-01","date_to":"2026-01-31","keyword":null}
+
+Pedido: emails de faturas
+{"sender_domain":null,"sender_email":null,"sender_name":null,"sender_type":null,"folder":"Invoices","date_from":null,"date_to":null,"keyword":null}
+
+Pedido: emails de empresas este mês (hoje=2026-04-06)
+{"sender_domain":null,"sender_email":null,"sender_name":null,"sender_type":"company","folder":null,"date_from":"2026-04-01","date_to":"2026-04-30","keyword":null}
+
+Pedido: emails da Amazon
+{"sender_domain":null,"sender_email":null,"sender_name":"Amazon","sender_type":null,"folder":null,"date_from":null,"date_to":null,"keyword":null}
+
+Pedido: emails de joao@empresa.com com palavra-chave reunião
+{"sender_domain":null,"sender_email":"joao@empresa.com","sender_name":null,"sender_type":null,"folder":null,"date_from":null,"date_to":null,"keyword":"reunião"}
+
+Pedido: emails pessoais de pessoas mês passado (hoje=2026-04-06)
+{"sender_domain":null,"sender_email":null,"sender_name":null,"sender_type":"individual","folder":"Personal","date_from":"2026-03-01","date_to":"2026-03-31","keyword":null}

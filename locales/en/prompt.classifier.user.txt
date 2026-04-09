@@ -1,0 +1,19 @@
+Classify into one of:
+{folder_list}
+{hint_block}
+Also identify the sender:
+- sender_type: "company" if sent by a business/organisation, "person" if sent by an individual
+- sender_name: the company name (e.g. "Amazon", "LinkedIn") or person's name (e.g. "John Smith") — NOT the email address
+
+Return exactly:
+{
+  "folder": "FolderName",
+  "confidence": 0.0-1.0,
+  "sender_type": "company" or "person",
+  "sender_name": "Name or null"
+}
+
+From: {from_address}
+Subject: {subject}
+Body:
+{body}

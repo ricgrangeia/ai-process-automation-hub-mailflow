@@ -1,0 +1,1 @@
+És um classificador de emails rigoroso. Devolve APENAS JSON válido.

@@ -36,6 +36,7 @@ from app.messages.models import EmailMessage
 from app.review.queue import REVIEW_QUEUE_KEY
 from app.folders.repository import get_active_folder_names
 from app.folders.models import DEFAULT_FOLDERS
+from app.core.i18n import t
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,26 +81,29 @@ async def _send_review_card(bot_token: str, chat_id: str, email, job: dict, fold
     subject      = (email.subject or "(no subject)")[:80]
     sender_email = (email.from_address or "?").lower()
     keywords     = _extract_keywords_simple(email.subject or "", email.body_text or "")
-    kw_display   = " · ".join(keywords) if keywords else "none detected"
+    kw_display   = " · ".join(keywords) if keywords else t("telegram.review.no_keywords")
 
-    text = (
-        f"📋 Learning Mode Review\n\n"
-        f"Subject: {subject}\n"
-        f"From: {sender_email}\n"
-        f"Sender: {sender_label}\n\n"
-        f"🧠 AI Decision: {folder} ({confidence}% · {source})\n"
-        f"🔑 Keywords: {kw_display}\n\n"
-        f"What should we do?"
-    )
+    text = "\n".join([
+        t("telegram.review.header"),
+        "",
+        t("telegram.review.subject_line", subject=subject),
+        t("telegram.review.from_line", sender_email=sender_email),
+        t("telegram.review.sender_line", sender_label=sender_label),
+        "",
+        t("telegram.review.ai_decision", folder=folder, confidence=confidence, source=source),
+        t("telegram.review.keywords_line", keywords=kw_display),
+        "",
+        t("telegram.review.what_to_do"),
+    ])
 
     kw_encoded = "|".join(keywords)
 
     keyboard = [
-        [{"text": f"✅ Approve → {folder}", "callback_data": f"rv_approve:{email.id}:{folder}:{kw_encoded}"}],
-        [{"text": "📁 Change folder",       "callback_data": f"rv_folder:{email.id}:{folder}"}],
-        [{"text": "➕ New folder",           "callback_data": f"folder_new_request:{email.id}"}],
-        [{"text": "👤 Fix sender",           "callback_data": f"rv_sender:{email.id}"}],
-        [{"text": "✏️ Keywords",             "callback_data": f"rv_edit_kw:{email.id}:{folder}:{kw_encoded}"}],
+        [{"text": t("telegram.buttons.approve", folder=folder), "callback_data": f"rv_approve:{email.id}:{folder}:{kw_encoded}"}],
+        [{"text": t("telegram.buttons.change_folder"),           "callback_data": f"rv_folder:{email.id}:{folder}"}],
+        [{"text": t("telegram.buttons.new_folder"),              "callback_data": f"folder_new_request:{email.id}"}],
+        [{"text": t("telegram.buttons.fix_sender"),              "callback_data": f"rv_sender:{email.id}"}],
+        [{"text": t("telegram.buttons.keywords"),                "callback_data": f"rv_edit_kw:{email.id}:{folder}:{kw_encoded}"}],
     ]
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
