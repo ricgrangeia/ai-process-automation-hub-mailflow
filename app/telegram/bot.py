@@ -679,15 +679,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_keyboard = {
             "inline_keyboard": [
                 [{"text": f"✅ Approve → {folder}", "callback_data": f"rv_approve:{email_id}:{folder}:{new_kw_encoded}"}],
-                [
-                    {"text": "📁 Change folder", "callback_data": f"rv_folder:{email_id}:{folder}"},
-                    {"text": "👤 Fix sender",    "callback_data": f"rv_sender:{email_id}"},
-                ],
-                [
-                    {"text": "➕ New folder", "callback_data": f"folder_new_request:{email_id}"},
-                    {"text": "✏️ Keywords",  "callback_data": f"rv_edit_kw:{email_id}:{folder}:{new_kw_encoded}"},
-                   
-                ],
+                [{"text": "📁 Change folder", "callback_data": f"rv_folder:{email_id}:{folder}"}],
+                [{"text": "➕ New folder", "callback_data": f"folder_new_request:{email_id}"}],
+                [{"text": "👤 Fix sender",    "callback_data": f"rv_sender:{email_id}"}],
+                [{"text": "✏️ Keywords",  "callback_data": f"rv_edit_kw:{email_id}:{folder}:{new_kw_encoded}"}],
             ]
         }
         try:
