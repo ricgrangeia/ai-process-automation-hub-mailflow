@@ -23,6 +23,22 @@ def upgrade() -> None:
     # Remove the old email_id unique constraint (auto-named by PostgreSQL)
     op.drop_constraint("invoices_email_id_key", "invoices", type_="unique")
 
+    # Deduplicate existing rows before adding the constraint.
+    # The DB may already have duplicate (nif_seller, invoice_number) pairs that
+    # were inserted before dedup logic existed.
+    # Keep the row with the highest id (most recent / most complete); delete the rest.
+    op.execute("""
+        DELETE FROM invoices
+        WHERE id NOT IN (
+            SELECT MAX(id)
+            FROM invoices
+            WHERE nif_seller IS NOT NULL AND invoice_number IS NOT NULL
+            GROUP BY nif_seller, invoice_number
+        )
+        AND nif_seller IS NOT NULL
+        AND invoice_number IS NOT NULL
+    """)
+
     # Add business-key uniqueness: same seller + same invoice number = same document
     op.create_unique_constraint(
         "uq_invoices_seller_number", "invoices", ["nif_seller", "invoice_number"]
