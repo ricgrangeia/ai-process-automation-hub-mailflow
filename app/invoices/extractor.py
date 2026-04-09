@@ -5,6 +5,7 @@ Invoice QR extractor — reads PDF attachments, calls the AI Tool Server
 
 import base64
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -69,6 +70,13 @@ async def persist_invoice(session_factory, email_id: int, data: dict) -> None:
     """
     from sqlalchemy import select
     from app.invoices.models import Invoice
+
+    # Coerce invoice_date string → datetime.date (SQLAlchemy DateTime rejects strings)
+    if isinstance(data.get("invoice_date"), str):
+        try:
+            data["invoice_date"] = datetime.strptime(data["invoice_date"], "%Y-%m-%d").date()
+        except ValueError:
+            data["invoice_date"] = None
 
     nif_seller     = data.get("nif_seller")
     invoice_number = data.get("invoice_number")

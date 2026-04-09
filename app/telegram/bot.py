@@ -330,9 +330,9 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💾 Save rule for future emails?\n"
             f"📧 `{sender_email}`\n"
             f"🔑 {kw_display}\n"
-            f"→ *{folder}* \\(email OR 2\\+ keywords\\)"
+            f"→ *{folder}* (email OR 2+ keywords)"
             f"{qr_info}",
-            parse_mode="MarkdownV2",
+            parse_mode="Markdown",
             reply_markup=keyboard,
         )
     except Exception as _e:
@@ -388,10 +388,10 @@ async def handle_learn_move(update: Update, context: ContextTypes.DEFAULT_TYPE):
             details={"sender": sender_email, "keywords": keywords, "folder": folder},
         )
         await query.edit_message_text(
-            f"📚 Rule saved\\!\n"
+            f"📚 Rule saved!\n"
             f"📧 `{saved}`{kw_line}\n"
             f"→ *{folder}*",
-            parse_mode="MarkdownV2",
+            parse_mode="Markdown",
         )
     else:
         await query.edit_message_text("⚠️ Could not save rule — no sender address found.")
@@ -757,12 +757,12 @@ async def handle_rv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [{"text": "🚫 Just this once",          "callback_data": f"rv_skip_rule:{email_id}"}],
     ]
     await query.edit_message_text(
-        f"✅ Approved → *{folder}*\\.\n\n"
+        f"✅ Approved → *{folder}*.\n\n"
         f"💾 Save rule for future emails?\n"
         f"📧 `{sender_email}`\n"
         f"🔑 {kw_display}"
         f"{qr_info}",
-        parse_mode="MarkdownV2",
+        parse_mode="Markdown",
         reply_markup={"inline_keyboard": keyboard},
     )
 
@@ -841,13 +841,13 @@ async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYP
         [{"text": "🚫 Just this once", "callback_data": f"rv_skip_rule:{email_id}"}],
     ]
     await query.edit_message_text(
-        f"📁 Moved to *{folder}*\\.\n\n"
+        f"📁 Moved to *{folder}*.\n\n"
         f"💾 Save rule?\n"
         f"📧 `{sender_email}`\n"
         f"🔑 {kw_display}\n"
         f"→ *{folder}*"
         f"{qr_info}",
-        parse_mode="MarkdownV2",
+        parse_mode="Markdown",
         reply_markup={"inline_keyboard": keyboard},
     )
 
