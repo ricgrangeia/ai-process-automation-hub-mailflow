@@ -52,22 +52,37 @@ def _sender_label(sender_type: str | None, sender_name: str | None) -> str:
 
 
 def _extract_keywords_simple(subject: str, body: str, max_kw: int = 3) -> list[str]:
-    """Lightweight keyword extractor (no NLP — avoids import from bot.py)."""
+    """Lightweight keyword extractor — keeps accented chars, rejects codes."""
     import re, unicodedata
+
     STOPWORDS = {
         "de", "da", "do", "das", "dos", "em", "a", "o", "as", "os", "e", "ou",
-        "um", "uma", "para", "com", "por", "que", "se", "no", "na", "ao", "the",
-        "and", "for", "fwd", "re", "fw", "is", "in", "on", "to", "of", "at",
+        "um", "uma", "para", "com", "por", "que", "se", "no", "na", "ao",
+        "nao", "foi", "ser", "ter", "tem", "mais", "mas", "sao", "ate", "ja",
+        "pelo", "pela", "pelos", "pelas", "como", "fwd", "re", "fw",
+        "the", "and", "for", "is", "in", "on", "to", "of", "at", "or",
     }
-    text = f"{subject} {(body or '')[:300]}"
-    words = re.findall(r"[a-záàãâéêíóôõúüçA-Z]{4,}", text)
-    seen, out = set(), []
-    for w in words:
+
+    def _is_code(w: str) -> bool:
+        if re.search(r"\d", w):
+            return True
+        if w == w.upper() and len(w) <= 4:
+            return True
+        return False
+
+    def _norm(w: str) -> str:
         nf = unicodedata.normalize("NFD", w.lower())
-        nf = "".join(c for c in nf if unicodedata.category(c) != "Mn")
-        if nf not in STOPWORDS and nf not in seen:
-            seen.add(nf)
-            out.append(w.lower())
+        return "".join(c for c in nf if unicodedata.category(c) != "Mn")
+
+    text = f"{subject} {(body or '')[:300]}"
+    words = re.findall(r"[a-záàãâéêíóôõúüçA-ZÁÀÃÂÉÊÍÓÔÕÚÜÇ]{4,}", text)
+    seen, out = set(), []
+    for w in sorted(words, key=len, reverse=True):
+        norm = _norm(w)
+        if norm in STOPWORDS or norm in seen or _is_code(w):
+            continue
+        seen.add(norm)
+        out.append(w.lower())
         if len(out) == max_kw:
             break
     return out

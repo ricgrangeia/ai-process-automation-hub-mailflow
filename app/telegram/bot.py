@@ -202,41 +202,58 @@ def _extract_keywords(subject: str, body: str, max_keywords: int = 3) -> list[st
     Extract up to max_keywords meaningful words from subject + body.
 
     Strategy:
-    - Combine subject + first 500 chars of body
-    - Remove punctuation, lowercase
-    - Filter stopwords (PT + EN)
-    - Pick longest unique words first (longer = more specific)
+    - Keep accented characters (Portuguese words preserved)
+    - Filter stopwords for the active language (PT + EN always included)
+    - Reject words that look like codes (contain digits, all-caps short, slash/dash patterns)
+    - Pick longest unique words first
     """
-    import re
-    import unicodedata
+    import re, os, unicodedata
 
-    _STOPWORDS = {
-        # PT
+    _STOPWORDS_PT = {
         "de", "da", "do", "das", "dos", "a", "o", "as", "os", "e", "em", "para",
-        "por", "com", "se", "no", "na", "nos", "nas", "ao", "à", "um", "uma",
+        "por", "com", "se", "no", "na", "nos", "nas", "ao", "um", "uma",
         "que", "este", "esta", "estes", "estas", "esse", "essa", "seu", "sua",
-        "mais", "mas", "ou", "não", "é", "foi", "ser", "ter", "tem", "seu",
-        "pelo", "pela", "pelos", "pelas", "como", "são", "até", "já", "nos",
-        # EN
-        "the", "a", "an", "and", "or", "in", "on", "at", "to", "for", "of",
+        "mais", "mas", "ou", "nao", "foi", "ser", "ter", "tem",
+        "pelo", "pela", "pelos", "pelas", "como", "sao", "ate", "ja",
+        "fwd", "re", "fw", "encaminhado", "envio",
+    }
+    _STOPWORDS_EN = {
+        "the", "and", "or", "in", "on", "at", "to", "for", "of",
         "is", "it", "be", "as", "by", "we", "you", "this", "that", "with",
         "from", "have", "has", "are", "was", "were", "will", "your", "our",
+        "fwd", "re", "fw",
     }
+    _STOPWORDS = _STOPWORDS_PT | _STOPWORDS_EN
+
+    def _is_code(w: str) -> bool:
+        """Return True if word looks like a code/reference, not a real word."""
+        # Contains digit → code (e.g. FRA2, J66S9FDD, 2209)
+        if re.search(r"\d", w):
+            return True
+        # All uppercase and short → acronym/code (e.g. "FT", "AT", "NIF")
+        if w == w.upper() and len(w) <= 4:
+            return True
+        return False
 
     text = f"{subject} {body[:500]}"
-    # Normalize accents
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(c for c in text if not unicodedata.combining(c))
-    # Remove non-alpha (keep spaces)
-    text = re.sub(r"[^a-zA-Z\s]", " ", text)
-    words = [w.lower() for w in text.split() if len(w) >= 4]
+    # Extract words keeping accented chars (Portuguese letters)
+    raw_words = re.findall(r"[a-záàãâéêíóôõúüçA-ZÁÀÃÂÉÊÍÓÔÕÚÜÇ]{4,}", text)
+
+    # Normalise for stopword comparison (strip accents for lookup only)
+    def _norm(w: str) -> str:
+        nf = unicodedata.normalize("NFD", w.lower())
+        return "".join(c for c in nf if unicodedata.category(c) != "Mn")
 
     seen: set[str] = set()
     candidates: list[str] = []
-    for w in sorted(words, key=len, reverse=True):
-        if w not in _STOPWORDS and w not in seen:
-            seen.add(w)
-            candidates.append(w)
+    for w in sorted(raw_words, key=len, reverse=True):
+        norm = _norm(w)
+        if norm in _STOPWORDS or norm in seen:
+            continue
+        if _is_code(w):
+            continue
+        seen.add(norm)
+        candidates.append(w.lower())
         if len(candidates) == max_keywords:
             break
 

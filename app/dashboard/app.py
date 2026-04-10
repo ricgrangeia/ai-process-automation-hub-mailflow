@@ -634,7 +634,7 @@ def page_learned_rules(engine, settings):
                                 conn.execute(
                                     text(
                                         "UPDATE learned_rules "
-                                        "SET conditions = :cond::jsonb, min_match = :mm, actions = :ac::jsonb "
+                                        "SET conditions = CAST(:cond AS jsonb), min_match = :mm, actions = CAST(:ac AS jsonb) "
                                         "WHERE id = :id"
                                     ),
                                     {
@@ -726,7 +726,7 @@ def page_learned_rules(engine, settings):
                             text(
                                 "INSERT INTO learned_rules "
                                 "(tenant_id, conditions, min_match, actions, active) "
-                                "VALUES (:tid, :cond::jsonb, :mm, :ac::jsonb, true)"
+                                "VALUES (:tid, CAST(:cond AS jsonb), :mm, CAST(:ac AS jsonb), true)"
                             ),
                             {
                                 "tid": int(a_tenant),
