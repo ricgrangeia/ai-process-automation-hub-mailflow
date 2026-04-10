@@ -74,7 +74,7 @@
 
   <!-- ── Title ── -->
   <text x="600" y="46" text-anchor="middle" fill="#ffffff" font-size="24" font-weight="700" filter="url(#glow)" letter-spacing="1">MailFlow Engine</text>
-  <text x="600" y="68" text-anchor="middle" fill="#4a9eff" font-size="12" letter-spacing="3">AI-POWERED EMAIL AUTOMATION · ON-PREMISE</text>
+  <text x="600" y="68" text-anchor="middle" fill="#4a9eff" font-size="12" letter-spacing="3">AI-POWERED EMAIL AUTOMATION · ON-PREMISE · i18n · AT/ATCUD</text>
   <line x1="80" y1="82" x2="1120" y2="82" stroke="#4a9eff" stroke-width="0.5" opacity="0.4"/>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -348,6 +348,6 @@
 
   <!-- ── Footer ── -->
   <line x1="80" y1="1307" x2="1120" y2="1307" stroke="#4a9eff" stroke-width="0.5" opacity="0.3"/>
-  <text x="600" y="1326" text-anchor="middle" fill="#4a6080" font-size="10">Appa8 AI Process Automation Hub · MailFlow Engine v2.4.0 · on-premise · GDPR-friendly</text>
+  <text x="600" y="1326" text-anchor="middle" fill="#4a6080" font-size="10">Appa8 AI Process Automation Hub · MailFlow Engine v2.6.0 · on-premise · GDPR-friendly · i18n</text>
 
 </svg>
