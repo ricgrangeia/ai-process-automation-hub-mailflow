@@ -144,8 +144,10 @@ def login_screen():
     ctrl = _get_cookie_controller()
 
     # ── Restore session from cookie ──────────────────────────────────────────
-    if "authenticated" not in st.session_state:
-        st.session_state["authenticated"] = False
+    # Check on every run while not authenticated — the component needs one render
+    # cycle to load cookies, so checking only when the key is absent misses the
+    # second run (when the value is actually available).
+    if not st.session_state.get("authenticated", False):
         if ctrl is not None:
             try:
                 val = ctrl.get(_AUTH_COOKIE)
@@ -154,7 +156,7 @@ def login_screen():
             except Exception:
                 pass
 
-    if not st.session_state["authenticated"]:
+    if not st.session_state.get("authenticated", False):
         st.markdown("<h1 style='text-align: center; margin-top: 50px;'>🔐 AI Supervisor Login</h1>", unsafe_allow_html=True)
 
         _, col2, _ = st.columns([1, 1, 1])
