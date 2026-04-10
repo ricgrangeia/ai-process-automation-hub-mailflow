@@ -1,3 +1,93 @@
+# ── Ecrã de login ────────────────────────────────────────────────────────────
+
+[login]
+title     = "🔐 AI Supervisor — Acesso"
+username  = "Utilizador"
+password  = "Password"
+submit    = "Entrar"
+success   = "Acesso concedido!"
+error     = "❌ Utilizador ou Password incorretos"
+
+# ── Barra lateral ─────────────────────────────────────────────────────────────
+
+[sidebar]
+title          = "🤖 AI Admin"
+model          = "**Modelo:** {model}"
+inbox          = "**Caixa:** {folder}"
+op_mode        = "**⚙️ Modo de Operação**"
+mode_changed   = "Modo → {mode}"
+mode_error     = "Erro ao definir modo: {error}"
+nav_label      = "Navegação"
+nav_dashboard  = "📊 Dashboard"
+nav_accounts   = "✉️ Contas de E-mail"
+nav_rules      = "📚 Regras Aprendidas"
+nav_folders    = "📁 Pastas"
+nav_companies  = "🏢 Empresas"
+nav_invoices   = "🧾 Faturas"
+nav_audit      = "📋 Registo de Auditoria"
+nav_settings   = "⚙️ Definições"
+logout         = "Sair"
+
+# ── Títulos e cabeçalhos de página ────────────────────────────────────────────
+
+[page.accounts]
+title              = "✉️ Contas de E-mail"
+accounts_header    = "Contas Configuradas"
+no_accounts        = "Nenhuma conta configurada ainda."
+add_header         = "Adicionar Conta"
+active_label       = "Ativa"
+reset_pw_label     = "Nova password"
+save_pw_btn        = "Guardar nova password"
+pw_empty_error     = "A password não pode estar vazia."
+pw_saved           = "Password atualizada e encriptada."
+required_error     = "Todos os campos são obrigatórios."
+email_required     = "O e-mail é obrigatório."
+
+[page.rules]
+title         = "📚 Regras Aprendidas"
+caption       = "As regras são aplicadas antes do classificador IA — custo zero de LLM, decisões instantâneas."
+load_error    = "❌ Não foi possível carregar as regras: {error}"
+no_rules      = "Nenhuma regra aprendida ainda. As regras são criadas quando corrigis um e-mail no Telegram."
+add_header    = "➕ Adicionar Regra Manualmente"
+
+[page.folders]
+title         = "📁 Pastas"
+caption       = "As pastas guiam o prompt da IA, os botões do Telegram e os destinos IMAP. Renomear também renomeia a pasta IMAP em todas as contas ativas."
+load_error    = "❌ Não foi possível carregar as pastas: {error}"
+add_header    = "➕ Adicionar Pasta"
+delete_btn    = "Eliminar"
+rename_label  = "Novo nome da pasta"
+name_empty    = "O nome da pasta não pode estar vazio."
+folder_name   = "Nome da pasta"
+
+[page.companies]
+title          = "🏢 Empresas"
+caption        = "As empresas são relacionadas a faturas via NIF (comprador/vendedor) para encaminhar PDFs para a pasta correta."
+add_header     = "➕ Adicionar Empresa"
+load_error     = "❌ Não foi possível carregar as empresas: {error}"
+no_companies   = "Nenhuma empresa ainda. Usa o formulário acima para adicionar a primeira."
+notes_label    = "Notas"
+active_label   = "Ativa"
+required_error = "Nome e NIF são obrigatórios."
+deleted        = "🗑️ Eliminada {name}"
+
+[page.audit]
+title           = "📋 Registo de Auditoria"
+no_events       = "Nenhum evento encontrado para os filtros selecionados."
+load_error      = "❌ Não foi possível carregar o registo: {error}"
+migrations_hint = "Executa as migrações mais recentes e reinicia o ai-worker para criar a tabela audit_logs."
+
+[page.settings]
+title            = "⚙️ Definições"
+archive_header   = "📁 Estrutura da Pasta de Arquivo"
+tokens_expander  = "Tokens disponíveis"
+preview_label    = "**Pré-visualização** (com valores de exemplo):"
+save_btn         = "Guardar"
+reset_btn        = "Repor predefinição"
+template_empty   = "O template não pode estar vazio."
+saved            = "✅ Guardado"
+reset_done       = "↩️ Reposto para o valor predefinido"
+
 # ── Dashboard — página principal ─────────────────────────────────────────────
 
 [dashboard]

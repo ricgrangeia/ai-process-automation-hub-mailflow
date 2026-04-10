@@ -1,3 +1,93 @@
+# ── Login screen ─────────────────────────────────────────────────────────────
+
+[login]
+title     = "🔐 AI Supervisor Login"
+username  = "Username"
+password  = "Password"
+submit    = "Login"
+success   = "Access granted!"
+error     = "❌ Invalid username or password"
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+
+[sidebar]
+title          = "🤖 AI Admin"
+model          = "**Model:** {model}"
+inbox          = "**Inbox:** {folder}"
+op_mode        = "**⚙️ Operation Mode**"
+mode_changed   = "Mode → {mode}"
+mode_error     = "Failed to set mode: {error}"
+nav_label      = "Navigation"
+nav_dashboard  = "📊 Dashboard"
+nav_accounts   = "✉️ Email Accounts"
+nav_rules      = "📚 Learned Rules"
+nav_folders    = "📁 Folders"
+nav_companies  = "🏢 Companies"
+nav_invoices   = "🧾 Invoices"
+nav_audit      = "📋 Audit Log"
+nav_settings   = "⚙️ Settings"
+logout         = "Logout"
+
+# ── Page titles / captions ────────────────────────────────────────────────────
+
+[page.accounts]
+title              = "✉️ Email Accounts"
+accounts_header    = "Configured Accounts"
+no_accounts        = "No accounts configured yet."
+add_header         = "Add Account"
+active_label       = "Active"
+reset_pw_label     = "New password"
+save_pw_btn        = "Save new password"
+pw_empty_error     = "Password cannot be empty."
+pw_saved           = "Password updated and encrypted."
+required_error     = "All fields are required."
+email_required     = "Email is required."
+
+[page.rules]
+title         = "📚 Learned Rules"
+caption       = "Rules are applied before the AI classifier — zero LLM cost, instant decisions."
+load_error    = "❌ Could not load rules: {error}"
+no_rules      = "No learned rules yet. Rules are created when you correct an email in Telegram."
+add_header    = "➕ Add Rule Manually"
+
+[page.folders]
+title         = "📁 Folders"
+caption       = "Folders drive the AI prompt, Telegram buttons, and IMAP targets. Renaming also renames the IMAP folder on all active accounts."
+load_error    = "❌ Could not load folders: {error}"
+add_header    = "➕ Add Folder"
+delete_btn    = "Delete"
+rename_label  = "New folder name"
+name_empty    = "Folder name cannot be empty."
+folder_name   = "Folder name"
+
+[page.companies]
+title         = "🏢 Companies"
+caption       = "Companies are matched to invoices via NIF (buyer/seller) to route PDFs to the correct archive folder."
+add_header    = "➕ Add Company"
+load_error    = "❌ Could not load companies: {error}"
+no_companies  = "No companies yet. Use the form above to add the first one."
+notes_label   = "Notes"
+active_label  = "Active"
+required_error = "Name and NIF are required."
+deleted       = "🗑️ Deleted {name}"
+
+[page.audit]
+title         = "📋 Audit Log"
+no_events     = "No audit events found for the selected filters."
+load_error    = "❌ Could not load audit log: {error}"
+migrations_hint = "Run the latest migrations and restart ai-worker to create the audit_logs table."
+
+[page.settings]
+title            = "⚙️ Settings"
+archive_header   = "📁 Archive Folder Structure"
+tokens_expander  = "Available tokens"
+preview_label    = "**Preview** (with example values):"
+save_btn         = "Save"
+reset_btn        = "Reset to default"
+template_empty   = "Template cannot be empty."
+saved            = "✅ Saved"
+reset_done       = "↩️ Reset to default"
+
 # ── Dashboard — main page ─────────────────────────────────────────────────────
 
 [dashboard]

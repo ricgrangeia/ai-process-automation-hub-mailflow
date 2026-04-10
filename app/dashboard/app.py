@@ -143,47 +143,45 @@ def _get_cookie_controller():
 def login_screen():
     ctrl = _get_cookie_controller()
     if ctrl is None:
-        st.error("Cookie Controller não disponível.")
         return False
 
-    # 1. Tentar ler o cookie do browser
+    # 1. Attempt to get the cookie
     cookie_val = ctrl.get(_AUTH_COOKIE)
 
-    # 2. Se o cookie existe e a sessão não está autenticada, autentica automaticamente
-    if cookie_val == _AUTH_TOKEN and not st.session_state.get("authenticated"):
-        st.session_state["authenticated"] = True
-        st.rerun()
-
-    # 3. Se não está autenticado (e o cookie falhou ou ainda não carregou)
+    # 2. Logic: If session is not authenticated BUT cookie exists, sync them
     if not st.session_state.get("authenticated", False):
-        # Pequena espera para o componente de JS carregar o cookie no primeiro refresh
-        if cookie_val is None and not st.session_state.get("_init_done"):
-            st.session_state["_init_done"] = True
-            st.rerun() 
+        if cookie_val == _AUTH_TOKEN:
+            st.session_state["authenticated"] = True
+            st.rerun()  # Force rerun to show the app immediately
+        
+        # 3. If cookie is None, it might be because it's still loading.
+        # We give it one "pass" to initialize without showing the login form.
+        elif cookie_val is None and not st.session_state.get("_init_complete", False):
+            st.session_state["_init_complete"] = True
+            st.rerun()
 
-        st.markdown("<h1 style='text-align: center; margin-top: 50px;'>🔐 AI Supervisor Login</h1>", unsafe_allow_html=True)
+    # 4. If after the check we are still not authenticated, show the UI
+    if not st.session_state.get("authenticated", False):
+        st.markdown(f"<h1 style='text-align: center; margin-top: 50px;'>{t('login.title')}</h1>", unsafe_allow_html=True)
 
         _, col2, _ = st.columns([1, 1, 1])
         with col2:
             with st.form("login_form"):
-                user_input = st.text_input("Utilizador")
-                pw_input = st.text_input("Password", type="password")
-                submit = st.form_submit_button("Entrar", use_container_width=True)
+                user_input = st.text_input(t("login.username"), key="input_user")
+                pw_input = st.text_input(t("login.password"), type="password", key="input_pw")
+                submit = st.form_submit_button(t("login.submit"), use_container_width=True)
 
                 if submit:
                     env_user = os.environ.get("DASHBOARD_USER", "admin")
                     env_pw = os.environ.get("DASHBOARD_PASSWORD", "mudar123")
-                    
                     if user_input == env_user and pw_input == env_pw:
                         st.session_state["authenticated"] = True
-                        # Grava o cookie no browser (expira em 1 dia por defeito na maioria das configs)
-                        ctrl.set(_AUTH_COOKIE, _AUTH_TOKEN) 
-                        st.success("Acesso concedido!")
+                        ctrl.set(_AUTH_COOKIE, _AUTH_TOKEN)
+                        st.success(t("login.success"))
                         st.rerun()
                     else:
-                        st.error("❌ Credenciais inválidas")
+                        st.error(t("login.error"))
         return False
-    
     return True
 
 
@@ -286,7 +284,7 @@ def page_dashboard(engine, settings):
 # ---------------------------------------------------------------------------
 
 def page_email_accounts(engine, settings):
-    st.title("✉️ Email Accounts")
+    st.title(t("page.accounts.title"))
 
     # ---- list accounts ----
     def load_accounts():
@@ -298,10 +296,10 @@ def page_email_accounts(engine, settings):
 
     df = load_accounts()
 
-    st.subheader("Configured Accounts")
+    st.subheader(t("page.accounts.accounts_header"))
 
     if df.empty:
-        st.info("No accounts configured yet.")
+        st.info(t("page.accounts.no_accounts"))
     else:
         # Show table with action buttons per row
         for _, row in df.iterrows():
@@ -362,7 +360,7 @@ def page_email_accounts(engine, settings):
     st.divider()
 
     # ---- add account ----
-    st.subheader("Add Account")
+    st.subheader(t("page.accounts.add_header"))
     tab_imap, tab_outlook = st.tabs(["IMAP", "Outlook / Microsoft 365"])
 
     # -- IMAP --
@@ -492,8 +490,8 @@ def _actions_summary(actions: list) -> str:
 
 
 def page_learned_rules(engine, settings):
-    st.title("📚 Learned Rules")
-    st.caption("Rules are applied before the AI classifier — zero LLM cost, instant decisions.")
+    st.title(t("page.rules.title"))
+    st.caption(t("page.rules.caption"))
     FOLDERS = _get_folder_names(engine)
 
     try:
@@ -507,11 +505,11 @@ def page_learned_rules(engine, settings):
             engine,
         )
     except Exception as e:
-        st.error(f"❌ Could not load rules: {e}")
+        st.error(t("page.rules.load_error", error=e))
         return
 
     if df.empty:
-        st.info("No learned rules yet. Rules are created when you correct an email in Telegram.")
+        st.info(t("page.rules.no_rules"))
     else:
         st.metric("Total rules", len(df))
         active_count = df["active"].sum()
@@ -689,7 +687,7 @@ def page_learned_rules(engine, settings):
     st.divider()
 
     # ── Add rule manually ──
-    st.subheader("➕ Add Rule Manually")
+    st.subheader(t("page.rules.add_header"))
     with st.form("add_rule_form"):
         a_tenant = st.number_input("Tenant ID", min_value=1, value=1, step=1)
         st.caption("Conditions — one per line, format `type:value`")
@@ -761,8 +759,8 @@ def page_learned_rules(engine, settings):
 # ---------------------------------------------------------------------------
 
 def page_folders(engine, settings):
-    st.title("📁 Folders")
-    st.caption("Folders drive the AI prompt, Telegram buttons, and IMAP targets. Renaming also renames the IMAP folder on all active accounts.")
+    st.title(t("page.folders.title"))
+    st.caption(t("page.folders.caption"))
 
     # Show IMAP rename feedback persisted across st.rerun()
     if "_folder_imap_msg" in st.session_state:
@@ -778,7 +776,7 @@ def page_folders(engine, settings):
             engine,
         )
     except Exception as e:
-        st.error(f"❌ Could not load folders: {e}")
+        st.error(t("page.folders.load_error", error=e))
         return
 
     st.metric("Total folders", len(df))
@@ -986,9 +984,9 @@ def page_folders(engine, settings):
     st.divider()
 
     # ── Add folder ──
-    st.subheader("➕ Add Folder")
+    st.subheader(t("page.folders.add_header"))
     with st.form("add_folder_form"):
-        new_folder_name = st.text_input("Folder name", placeholder="Legal")
+        new_folder_name = st.text_input(t("page.folders.folder_name"), placeholder="Legal")
         submitted_add = st.form_submit_button("Add Folder", width='stretch')
 
     if submitted_add:
@@ -1282,7 +1280,7 @@ def page_invoices(engine):
 
 
 def page_settings(engine):
-    st.title("⚙️ Settings")
+    st.title(t("page.settings.title"))
 
     try:
         from app.core.system_settings import (
@@ -1294,15 +1292,11 @@ def page_settings(engine):
         return
 
     # ── Folder Structure ──────────────────────────────────────────────────────
-    st.subheader("📁 Archive Folder Structure")
-    st.caption(
-        "Defines how PDFs are organised under the files root. "
-        "Use the tokens below to build your path."
-    )
+    st.subheader(t("page.settings.archive_header"))
 
     current = get_setting(engine, FOLDER_STRUCTURE_KEY)
 
-    with st.expander("Available tokens", expanded=False):
+    with st.expander(t("page.settings.tokens_expander"), expanded=False):
         for token, desc in FOLDER_TOKENS:
             st.markdown(f"- `{token}` — {desc}")
 
@@ -1322,19 +1316,18 @@ def page_settings(engine):
         if save:
             val = new_template.strip().strip("/")
             if not val:
-                st.error("Template cannot be empty.")
+                st.error(t("page.settings.template_empty"))
             else:
-                # Validate tokens
                 import string
                 tokens_used = [f[1] for f in string.Formatter().parse(val) if f[1]]
-                valid = {t.strip("{}") for t, _ in FOLDER_TOKENS}
-                bad = [t for t in tokens_used if t not in valid]
+                valid = {tk.strip("{}") for tk, _ in FOLDER_TOKENS}
+                bad = [tk for tk in tokens_used if tk not in valid]
                 if bad:
-                    st.error(f"Unknown token(s): {', '.join('{'+t+'}' for t in bad)}")
+                    st.error(f"Unknown token(s): {', '.join('{'+tk+'}' for tk in bad)}")
                 else:
                     try:
                         set_setting(engine, FOLDER_STRUCTURE_KEY, val)
-                        st.success("✅ Saved")
+                        st.success(t("page.settings.saved"))
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ {e}")
@@ -1342,13 +1335,12 @@ def page_settings(engine):
         if reset:
             try:
                 set_setting(engine, FOLDER_STRUCTURE_KEY, FOLDER_STRUCTURE_DEFAULT)
-                st.success("↩️ Reset to default")
+                st.success(t("page.settings.reset_done"))
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ {e}")
 
-    # Live preview
-    st.markdown("**Preview** (with example values):")
+    st.markdown(t("page.settings.preview_label"))
     preview_tokens = {
         "company": "Acme Lda",
         "year": "2025",
@@ -1367,20 +1359,20 @@ def page_settings(engine):
 
 
 def page_companies(engine):
-    st.title("🏢 Companies")
-    st.caption("Companies are matched to invoices via NIF (buyer/seller) to route PDFs to the correct archive folder.")
+    st.title(t("page.companies.title"))
+    st.caption(t("page.companies.caption"))
 
     # ── Add company form ──────────────────────────────────────────────────────
-    with st.expander("➕ Add Company", expanded=False):
+    with st.expander(t("page.companies.add_header"), expanded=False):
         with st.form("add_company_form", clear_on_submit=True):
             col_name, col_nif = st.columns([3, 2])
             new_name  = col_name.text_input("Company Name *", placeholder="Acme Lda")
             new_nif   = col_nif.text_input("NIF *", placeholder="123456789")
-            new_notes = st.text_input("Notes", placeholder="Optional description")
+            new_notes = st.text_input(t("page.companies.notes_label"), placeholder="Optional description")
             submitted = st.form_submit_button("Add Company")
             if submitted:
                 if not new_name.strip() or not new_nif.strip():
-                    st.error("Name and NIF are required.")
+                    st.error(t("page.companies.required_error"))
                 else:
                     try:
                         with engine.connect() as conn:
@@ -1401,12 +1393,11 @@ def page_companies(engine):
             engine,
         )
     except Exception as e:
-        st.error(f"❌ Could not load companies: {e}")
-        st.info("Run the latest migrations (alembic upgrade head) to create the companies table.")
+        st.error(t("page.companies.load_error", error=e))
         return
 
     if df.empty:
-        st.info("No companies yet. Use the form above to add the first one.")
+        st.info(t("page.companies.no_companies"))
         return
 
     st.metric("Total companies", len(df))
@@ -1433,7 +1424,7 @@ def page_companies(engine):
 
                 if save_clicked:
                     if not edit_name.strip() or not edit_nif.strip():
-                        st.error("Name and NIF are required.")
+                        st.error(t("page.companies.required_error"))
                     else:
                         try:
                             with engine.connect() as conn:
@@ -1452,7 +1443,7 @@ def page_companies(engine):
                                     },
                                 )
                                 conn.commit()
-                            st.success("✅ Saved")
+                            st.success(t("page.settings.saved"))
                             st.rerun()
                         except Exception as e:
                             st.error(f"❌ {e}")
@@ -1462,14 +1453,14 @@ def page_companies(engine):
                         with engine.connect() as conn:
                             conn.execute(text("DELETE FROM companies WHERE id=:id"), {"id": cid})
                             conn.commit()
-                        st.success(f"🗑️ Deleted {name}")
+                        st.success(t("page.companies.deleted", name=name))
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ {e}")
 
 
 def page_audit_log(engine):
-    st.title("📋 Audit Log")
+    st.title(t("page.audit.title"))
 
     # Filters
     col_actor, col_action, col_days = st.columns(3)
@@ -1517,7 +1508,7 @@ def page_audit_log(engine):
         df = pd.read_sql(query, engine, params=params)
 
         if df.empty:
-            st.info("No audit events found for the selected filters.")
+            st.info(t("page.audit.no_events"))
             return
 
         st.metric("Events shown", len(df))
@@ -1553,8 +1544,8 @@ def page_audit_log(engine):
             },
         )
     except Exception as e:
-        st.error(f"❌ Could not load audit log: {e}")
-        st.info("Run the latest migrations and restart ai-worker to create the audit_logs table.")
+        st.error(t("page.audit.load_error", error=e))
+        st.info(t("page.audit.migrations_hint"))
 
 
 # ---------------------------------------------------------------------------
@@ -1574,13 +1565,13 @@ if login_screen():
         st.stop()
 
     # Sidebar
-    st.sidebar.title("🤖 AI Admin")
-    st.sidebar.info(f"**Model:** {settings.llm_model}")
-    st.sidebar.info(f"**Inbox:** {settings.inbox_folder}")
+    st.sidebar.title(t("sidebar.title"))
+    st.sidebar.info(t("sidebar.model", model=settings.llm_model))
+    st.sidebar.info(t("sidebar.inbox", folder=settings.inbox_folder))
 
     # Operation Mode selector
     st.sidebar.markdown("---")
-    st.sidebar.markdown("**⚙️ Operation Mode**")
+    st.sidebar.markdown(t("sidebar.op_mode"))
     try:
         import redis as _redis_sync
         _r = _redis_sync.from_url(settings.redis_url, decode_responses=True)
@@ -1618,40 +1609,50 @@ if login_screen():
                 entity_type="system",
                 details={"from": _current_mode, "to": _selected_mode},
             )
-            st.sidebar.success(f"Mode → {_selected_mode}")
+            st.sidebar.success(t("sidebar.mode_changed", mode=_selected_mode))
             st.rerun()
         except Exception as _e:
-            st.sidebar.error(f"Failed to set mode: {_e}")
+            st.sidebar.error(t("sidebar.mode_error", error=_e))
 
     st.sidebar.markdown("---")
 
-    page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts", "📚 Learned Rules", "📁 Folders", "🏢 Companies", "🧾 Invoices", "📋 Audit Log", "⚙️ Settings"])
+    _nav_items = [
+        t("sidebar.nav_dashboard"),
+        t("sidebar.nav_accounts"),
+        t("sidebar.nav_rules"),
+        t("sidebar.nav_folders"),
+        t("sidebar.nav_companies"),
+        t("sidebar.nav_invoices"),
+        t("sidebar.nav_audit"),
+        t("sidebar.nav_settings"),
+    ]
+    page = st.sidebar.radio(t("sidebar.nav_label"), _nav_items)
 
-    if st.sidebar.button("Logout"):
-        # Limpa o estado da sessão
-        for key in st.session_state.keys():
-            del st.session_state[key]
-        
-        # Remove o cookie do browser
+    if st.sidebar.button(t("sidebar.logout")):
+        st.session_state["authenticated"] = False
+        if "_init_complete" in st.session_state:
+            del st.session_state["_init_complete"]
         _ctrl = _get_cookie_controller()
-        if _ctrl:
-            _ctrl.remove(_AUTH_COOKIE)
-        
+        if _ctrl is not None:
+            try:
+                _ctrl.remove(_AUTH_COOKIE)
+            except Exception:
+                pass
         st.rerun()
 
-    if page == "📊 Dashboard":
+    if page == t("sidebar.nav_dashboard"):
         page_dashboard(engine, settings)
-    elif page == "✉️ Email Accounts":
+    elif page == t("sidebar.nav_accounts"):
         page_email_accounts(engine, settings)
-    elif page == "📚 Learned Rules":
+    elif page == t("sidebar.nav_rules"):
         page_learned_rules(engine, settings)
-    elif page == "📁 Folders":
+    elif page == t("sidebar.nav_folders"):
         page_folders(engine, settings)
-    elif page == "🏢 Companies":
+    elif page == t("sidebar.nav_companies"):
         page_companies(engine)
-    elif page == "🧾 Invoices":
+    elif page == t("sidebar.nav_invoices"):
         page_invoices(engine)
-    elif page == "📋 Audit Log":
+    elif page == t("sidebar.nav_audit"):
         page_audit_log(engine)
-    elif page == "⚙️ Settings":
+    elif page == t("sidebar.nav_settings"):
         page_settings(engine)
