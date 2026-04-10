@@ -145,22 +145,26 @@ def login_screen():
     if ctrl is None:
         return False
 
-    # 1. Attempt to get the cookie
+    # 1. Tentar ler o valor do cookie do browser
     cookie_val = ctrl.get(_AUTH_COOKIE)
 
-    # 2. Logic: If session is not authenticated BUT cookie exists, sync them
+    # 2. Se o cookie for válido e não estivermos autenticados na sessão, sincroniza
     if not st.session_state.get("authenticated", False):
         if cookie_val == _AUTH_TOKEN:
             st.session_state["authenticated"] = True
-            st.rerun()  # Force rerun to show the app immediately
+            st.rerun()  # Força o rerun para mostrar a app imediatamente
         
-        # 3. If cookie is None, it might be because it's still loading.
-        # We give it one "pass" to initialize without showing the login form.
-        elif cookie_val is None and not st.session_state.get("_init_complete", False):
-            st.session_state["_init_complete"] = True
+        # 3. Lógica Anti-Refresh (Race Condition Fix):
+        # O cookie_val pode vir None nos primeiros milissegundos do refresh.
+        # Damos 2 tentativas ao script para encontrar o cookie antes de mostrar o login.
+        if "retry_count" not in st.session_state:
+            st.session_state["retry_count"] = 0
+
+        if cookie_val is None and st.session_state["retry_count"] < 2:
+            st.session_state["retry_count"] += 1
             st.rerun()
 
-    # 4. If after the check we are still not authenticated, show the UI
+    # 4. Se após as verificações ainda não estiver autenticado, mostra a UI de Login
     if not st.session_state.get("authenticated", False):
         st.markdown(f"<h1 style='text-align: center; margin-top: 50px;'>{t('login.title')}</h1>", unsafe_allow_html=True)
 
@@ -174,14 +178,19 @@ def login_screen():
                 if submit:
                     env_user = os.environ.get("DASHBOARD_USER", "admin")
                     env_pw = os.environ.get("DASHBOARD_PASSWORD", "mudar123")
+                    
                     if user_input == env_user and pw_input == env_pw:
                         st.session_state["authenticated"] = True
+                        st.session_state["retry_count"] = 0 # Reset do contador
+                        
+                        # Grava o cookie de forma persistente no browser
                         ctrl.set(_AUTH_COOKIE, _AUTH_TOKEN)
                         st.success(t("login.success"))
                         st.rerun()
                     else:
                         st.error(t("login.error"))
         return False
+    
     return True
 
 
