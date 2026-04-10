@@ -125,9 +125,34 @@ def _inject_mobile_css():
 # Login
 # ---------------------------------------------------------------------------
 
+_AUTH_COOKIE = "mailai_auth"
+_AUTH_TOKEN  = "ok"   # simple presence check — not a secret, just a marker
+
+
+def _get_cookie_controller():
+    """Lazily import and cache the cookie controller in session state."""
+    if "_cookie_ctrl" not in st.session_state:
+        try:
+            from streamlit_cookies_controller import CookieController
+            st.session_state["_cookie_ctrl"] = CookieController()
+        except ImportError:
+            st.session_state["_cookie_ctrl"] = None
+    return st.session_state["_cookie_ctrl"]
+
+
 def login_screen():
+    ctrl = _get_cookie_controller()
+
+    # ── Restore session from cookie ──────────────────────────────────────────
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
+        if ctrl is not None:
+            try:
+                val = ctrl.get(_AUTH_COOKIE)
+                if val == _AUTH_TOKEN:
+                    st.session_state["authenticated"] = True
+            except Exception:
+                pass
 
     if not st.session_state["authenticated"]:
         st.markdown("<h1 style='text-align: center; margin-top: 50px;'>🔐 AI Supervisor Login</h1>", unsafe_allow_html=True)
@@ -144,6 +169,11 @@ def login_screen():
                     env_pw = os.environ.get("DASHBOARD_PASSWORD", "mudar123")
                     if user_input == env_user and pw_input == env_pw:
                         st.session_state["authenticated"] = True
+                        if ctrl is not None:
+                            try:
+                                ctrl.set(_AUTH_COOKIE, _AUTH_TOKEN)
+                            except Exception:
+                                pass
                         st.success("Acesso concedido!")
                         st.rerun()
                     else:
@@ -1590,6 +1620,12 @@ if login_screen():
 
     if st.sidebar.button("Logout"):
         st.session_state["authenticated"] = False
+        _ctrl = _get_cookie_controller()
+        if _ctrl is not None:
+            try:
+                _ctrl.remove(_AUTH_COOKIE)
+            except Exception:
+                pass
         st.rerun()
 
     if page == "📊 Dashboard":
