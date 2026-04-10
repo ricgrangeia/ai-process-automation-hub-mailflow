@@ -144,15 +144,19 @@ def login_screen():
     ctrl = _get_cookie_controller()
 
     # ── Restore session from cookie ──────────────────────────────────────────
-    # Check on every run while not authenticated — the component needs one render
-    # cycle to load cookies, so checking only when the key is absent misses the
-    # second run (when the value is actually available).
+    # The cookie controller needs one render cycle to read browser cookies.
+    # On the first run after refresh, ctrl.get() returns None (not yet loaded).
+    # We stop rendering here to let the component initialize; on the next
+    # automatic rerun the cookie value will be available.
     if not st.session_state.get("authenticated", False):
         if ctrl is not None:
             try:
                 val = ctrl.get(_AUTH_COOKIE)
                 if val == _AUTH_TOKEN:
                     st.session_state["authenticated"] = True
+                elif val is None and not st.session_state.get("_cookie_init", False):
+                    st.session_state["_cookie_init"] = True
+                    st.stop()   # wait for component to initialize — no login flash
             except Exception:
                 pass
 
@@ -164,7 +168,7 @@ def login_screen():
             with st.form("login_form", clear_on_submit=False):
                 user_input = st.text_input("Utilizador", key="input_user")
                 pw_input = st.text_input("Password", type="password", key="input_pw")
-                submit = st.form_submit_button("Entrar", width='stretch')
+                submit = st.form_submit_button("Entrar", use_container_width=True)
 
                 if submit:
                     env_user = os.environ.get("DASHBOARD_USER", "admin")
