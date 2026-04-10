@@ -198,6 +198,7 @@ services:
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_MODEL=${LLM_MODEL}
       - MASTER_KEY=${MASTER_KEY}
+      - LANGUAGE=${LANGUAGE:-en}
     networks:
       - mail
       - database
