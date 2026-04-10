@@ -36,6 +36,7 @@ try:
     from app.core.config import get_settings
     from app.core.crypto import encrypt_secret, decrypt_secret
     from app.core.operation_mode import MODES, OPERATION_MODE_KEY
+    from app.core.i18n import t
 except ImportError:
     st.error("❌ Erro: Módulo 'app.core.config' não encontrado. Corre da raiz do projeto.")
     st.stop()
@@ -166,22 +167,22 @@ def get_db_engine(db_url):
 # ---------------------------------------------------------------------------
 
 def page_dashboard(engine, settings):
-    st.title("📊 Painel de Supervisão")
+    st.title(t("dashboard.title"))
 
     def load_data():
-        query = """
+        query = f"""
             SELECT
-                subject        AS "Assunto",
-                classification_label AS "Categoria",
+                subject        AS "{t('dashboard.col_subject')}",
+                classification_label AS "{t('dashboard.col_category')}",
                 CASE
                     WHEN sender_type = 'company' THEN '🏢 ' || COALESCE(sender_name, from_address)
                     WHEN sender_type = 'person'  THEN '👤 ' || COALESCE(sender_name, from_address)
                     ELSE COALESCE(sender_name, from_address)
-                END            AS "Remetente",
-                ai_confidence  AS "Confiança",
-                ai_source      AS "Origem",
-                processing_time_seconds AS "Tempo(s)",
-                processed_at   AS "Data"
+                END            AS "{t('dashboard.col_sender')}",
+                ai_confidence  AS "{t('dashboard.col_confidence')}",
+                ai_source      AS "{t('dashboard.col_source')}",
+                processing_time_seconds AS "{t('dashboard.col_time')}",
+                processed_at   AS "{t('dashboard.col_date')}"
             FROM emails
             WHERE status = 'moved'
             ORDER BY processed_at DESC LIMIT 200
@@ -191,35 +192,44 @@ def page_dashboard(engine, settings):
     try:
         df = load_data()
 
+        col_confidence = t("dashboard.col_confidence")
+        col_time       = t("dashboard.col_time")
+
         if df.empty:
-            st.warning("⚠️ O AI Worker ainda não processou e-mails suficientes.")
+            st.warning(t("dashboard.warning_no_emails"))
             return
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("Total de E-mails", len(df))
-        c2.metric("Confiança Média", f"{df['Confiança'].mean()*100:.1f}%")
-        _raw_times = pd.to_numeric(df['Tempo(s)'], errors='coerce')
+        c1.metric(t("dashboard.metric_total_emails"), len(df))
+        c2.metric(t("dashboard.metric_avg_confidence"), f"{df[col_confidence].mean()*100:.1f}%")
+        _raw_times = pd.to_numeric(df[col_time], errors='coerce')
         avg_time = _raw_times.dropna().mean()
-        c3.metric("Tempo Médio vLLM", f"{avg_time:.2f}s" if pd.notna(avg_time) else "—")
+        c3.metric(t("dashboard.metric_avg_time"), f"{avg_time:.2f}s" if pd.notna(avg_time) else "—")
 
         st.divider()
+
+        col_category = t("dashboard.col_category")
+        col_source   = t("dashboard.col_source")
 
         g1, g2 = st.columns(2)
         with g1:
             st.plotly_chart(
-                px.pie(df, names="Categoria", hole=0.4, title="Distribuição de Pastas"),
+                px.pie(df, names=col_category, hole=0.4, title=t("dashboard.chart_folder_dist")),
                 width='stretch',
             )
         with g2:
             st.plotly_chart(
-                px.histogram(df, x="Origem", color="Origem", title="Decisões: Regras vs IA"),
+                px.histogram(df, x=col_source, color=col_source, title=t("dashboard.chart_decisions")),
                 width='stretch',
             )
 
-        st.subheader("📋 Registos Recentes")
-        df["Assunto"] = df["Assunto"].apply(_decode_mime_header)
-        df["Confiança"] = (df["Confiança"] * 100).round(0).astype(int)
-        df["Tempo(s)"] = df["Tempo(s)"].apply(
+        st.subheader(t("dashboard.recent_records"))
+        col_subject    = t("dashboard.col_subject")
+        col_confidence = t("dashboard.col_confidence")
+        col_time       = t("dashboard.col_time")
+        df[col_subject]    = df[col_subject].apply(_decode_mime_header)
+        df[col_confidence] = (df[col_confidence] * 100).round(0).astype(int)
+        df[col_time]       = df[col_time].apply(
             lambda v: f"{float(v):.2f}s" if pd.notna(v) else "—"
         )
         st.dataframe(
@@ -227,13 +237,13 @@ def page_dashboard(engine, settings):
             width='stretch',
             hide_index=True,
             column_config={
-                "Confiança": st.column_config.NumberColumn(format="%d%%"),
+                col_confidence: st.column_config.NumberColumn(format="%d%%"),
             },
         )
 
     except Exception as e:
-        st.error(f"❌ Erro na Base de Dados: {e}")
-        st.info("Dica: Confirme se as colunas de telemetria foram criadas no PostgreSQL.")
+        st.error(t("dashboard.error_db", error=e))
+        st.info(t("dashboard.error_db_hint"))
 
 
 # ---------------------------------------------------------------------------
@@ -1021,16 +1031,16 @@ def page_folders(engine, settings):
 # ---------------------------------------------------------------------------
 
 def page_invoices(engine):
-    st.title("🧾 Invoices")
-    st.caption("Invoice data extracted from PDF QR codes (Portuguese AT/ATCUD format).")
+    st.title(t("dashboard.invoices.title"))
+    st.caption(t("dashboard.invoices.caption"))
 
     from datetime import datetime, timezone, timedelta
 
     # ── Filters ──
     col_months, col_nif, col_search = st.columns([1, 2, 2])
-    months_back = col_months.number_input("Last N months", min_value=1, max_value=24, value=3)
-    nif_filter = col_nif.text_input("NIF seller contains", placeholder="123456789")
-    search_filter = col_search.text_input("Invoice # / ATCUD contains", placeholder="FT 2026/1")
+    months_back = col_months.number_input(t("dashboard.invoices.filter_months"), min_value=1, max_value=24, value=3)
+    nif_filter = col_nif.text_input(t("dashboard.invoices.filter_nif"), placeholder="123456789")
+    search_filter = col_search.text_input(t("dashboard.invoices.filter_search"), placeholder="FT 2026/1")
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=int(months_back) * 30)
 
@@ -1077,47 +1087,74 @@ def page_invoices(engine):
             params=params,
         )
     except Exception as e:
-        st.error(f"❌ Could not load invoices: {e}")
+        st.error(t("dashboard.invoices.error_load", error=e))
         return
 
     if df.empty:
-        st.info("No invoices found for the selected period.")
+        st.info(t("dashboard.invoices.empty"))
         return
 
     # ── KPI row ──
-    total_gross = pd.to_numeric(df["total_amount"], errors="coerce").sum()
-    total_vat = pd.to_numeric(df["vat_amount"], errors="coerce").sum()
-    total_taxable = pd.to_numeric(df["taxable_amount"], errors="coerce").sum()
+    total_gross    = pd.to_numeric(df["total_amount"],   errors="coerce").sum()
+    total_vat      = pd.to_numeric(df["vat_amount"],     errors="coerce").sum()
+    total_taxable  = pd.to_numeric(df["taxable_amount"], errors="coerce").sum()
     unique_sellers = df["nif_seller"].nunique()
 
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Total (gross)", f"€ {total_gross:,.2f}")
-    k2.metric("Total VAT", f"€ {total_vat:,.2f}")
-    k3.metric("Taxable base", f"€ {total_taxable:,.2f}")
-    k4.metric("Unique sellers", unique_sellers)
+    k1.metric(t("dashboard.invoices.metric_total_gross"),  f"€ {total_gross:,.2f}")
+    k2.metric(t("dashboard.invoices.metric_total_vat"),    f"€ {total_vat:,.2f}")
+    k3.metric(t("dashboard.invoices.metric_taxable"),      f"€ {total_taxable:,.2f}")
+    k4.metric(t("dashboard.invoices.metric_sellers"),      unique_sellers)
 
     st.divider()
 
-    # ── Per-seller breakdown chart ──
-    if not df["nif_seller"].isna().all():
-        seller_totals = (
-            df.groupby("nif_seller")["total_amount"]
-            .apply(lambda x: pd.to_numeric(x, errors="coerce").sum())
-            .reset_index()
-            .rename(columns={"total_amount": "Total (€)"})
-            .sort_values("Total (€)", ascending=False)
-            .head(10)
-        )
-        if not seller_totals.empty:
-            fig = px.bar(
-                seller_totals,
-                x="nif_seller",
-                y="Total (€)",
-                title="Top sellers by gross amount",
-                labels={"nif_seller": "NIF Seller"},
-                color_discrete_sequence=["#4a9eff"],
+    # ── Option B: Total card (left) + Top 5 + Others bar chart (right) ──
+    chart_left, chart_right = st.columns([1, 2])
+
+    with chart_left:
+        st.metric(t("dashboard.invoices.chart_grand_total"), f"€ {total_gross:,.2f}")
+        st.caption(t("dashboard.invoices.chart_sellers_count", count=unique_sellers))
+
+    with chart_right:
+        if not df["nif_seller"].isna().all():
+            seller_amounts = (
+                df.groupby("nif_seller")["total_amount"]
+                .apply(lambda x: pd.to_numeric(x, errors="coerce").sum())
+                .sort_values(ascending=False)
             )
-            fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            top5      = seller_amounts.head(5)
+            others    = seller_amounts.iloc[5:].sum()
+            labels    = list(top5.index)
+            values    = list(top5.values)
+            colors    = ["#4a9eff"] * len(top5)
+            if others > 0:
+                labels.append(t("dashboard.invoices.others_label"))
+                values.append(others)
+                colors.append("#888888")
+
+            chart_df = pd.DataFrame({
+                "nif_seller": labels,
+                "total_col":  values,
+                "color":      colors,
+            })
+
+            fig = px.bar(
+                chart_df,
+                x="nif_seller",
+                y="total_col",
+                title=t("dashboard.invoices.chart_title"),
+                labels={
+                    "nif_seller": t("dashboard.invoices.chart_x_label"),
+                    "total_col":  "Total (€)",
+                },
+                color="color",
+                color_discrete_map="identity",
+            )
+            fig.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                showlegend=False,
+            )
             st.plotly_chart(fig, use_container_width=True)
 
     # ── Table ──
@@ -1140,20 +1177,20 @@ def page_invoices(engine):
 
     st.dataframe(
         display.rename(columns={
-            "invoice_date": "Date",
-            "invoice_number": "Invoice #",
-            "atcud": "ATCUD",
-            "nif_seller": "NIF Seller",
-            "nif_buyer": "NIF Buyer",
-            "taxable_amount": "Taxable",
-            "vat_amount": "VAT",
-            "total_amount": "Total",
-            "mb_entidade": "MB Entity",
-            "mb_referencia": "MB Ref",
-            "mb_valor": "MB Amount",
-            "mb_data_limite": "MB Due",
-            "subject": "Subject",
-            "email_id": "Email ID",
+            "invoice_date":   t("dashboard.invoices.col_date"),
+            "invoice_number": t("dashboard.invoices.col_invoice_num"),
+            "atcud":          "ATCUD",
+            "nif_seller":     t("dashboard.invoices.col_nif_seller"),
+            "nif_buyer":      t("dashboard.invoices.col_nif_buyer"),
+            "taxable_amount": t("dashboard.invoices.col_taxable"),
+            "vat_amount":     t("dashboard.invoices.col_vat"),
+            "total_amount":   t("dashboard.invoices.col_total"),
+            "mb_entidade":    t("dashboard.invoices.col_mb_entity"),
+            "mb_referencia":  t("dashboard.invoices.col_mb_ref"),
+            "mb_valor":       t("dashboard.invoices.col_mb_amount"),
+            "mb_data_limite": t("dashboard.invoices.col_mb_due"),
+            "subject":        t("dashboard.invoices.col_subject"),
+            "email_id":       "Email ID",
         }),
         use_container_width=True,
         hide_index=True,

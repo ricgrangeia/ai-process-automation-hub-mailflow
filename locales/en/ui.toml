@@ -1,3 +1,56 @@
+# ── Dashboard — main page ─────────────────────────────────────────────────────
+
+[dashboard]
+title                  = "📊 Supervision Panel"
+warning_no_emails      = "⚠️ The AI Worker hasn't processed enough emails yet."
+error_db               = "❌ Database Error: {error}"
+error_db_hint          = "Tip: Confirm that the telemetry columns were created in PostgreSQL."
+recent_records         = "📋 Recent Records"
+metric_total_emails    = "Total Emails"
+metric_avg_confidence  = "Avg Confidence"
+metric_avg_time        = "Avg vLLM Time"
+chart_folder_dist      = "Folder Distribution"
+chart_decisions        = "Decisions: Rules vs AI"
+col_subject            = "Subject"
+col_category           = "Category"
+col_sender             = "Sender"
+col_confidence         = "Confidence"
+col_source             = "Source"
+col_time               = "Time(s)"
+col_date               = "Date"
+
+# ── Dashboard — invoices page ─────────────────────────────────────────────────
+
+[dashboard.invoices]
+title                  = "🧾 Invoices"
+caption                = "Invoice data extracted from PDF QR codes (Portuguese AT/ATCUD format)."
+filter_months          = "Last N months"
+filter_nif             = "NIF seller contains"
+filter_search          = "Invoice # / ATCUD contains"
+error_load             = "❌ Could not load invoices: {error}"
+empty                  = "No invoices found for the selected period."
+metric_total_gross     = "Total (gross)"
+metric_total_vat       = "Total VAT"
+metric_taxable         = "Taxable base"
+metric_sellers         = "Unique sellers"
+chart_grand_total      = "Grand Total"
+chart_sellers_count    = "{count} unique seller(s)"
+chart_title            = "Top 5 sellers + Others"
+chart_x_label          = "NIF Seller"
+others_label           = "Others"
+col_date               = "Date"
+col_invoice_num        = "Invoice #"
+col_nif_seller         = "NIF Seller"
+col_nif_buyer          = "NIF Buyer"
+col_taxable            = "Taxable"
+col_vat                = "VAT"
+col_total              = "Total"
+col_mb_entity          = "MB Entity"
+col_mb_ref             = "MB Ref"
+col_mb_amount          = "MB Amount"
+col_mb_due             = "MB Due"
+col_subject            = "Subject"
+
 # ── Telegram button labels ────────────────────────────────────────────────────
 
 [telegram.buttons]

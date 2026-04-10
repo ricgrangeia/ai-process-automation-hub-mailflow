@@ -1,3 +1,56 @@
+# ── Dashboard — página principal ─────────────────────────────────────────────
+
+[dashboard]
+title                  = "📊 Painel de Supervisão"
+warning_no_emails      = "⚠️ O AI Worker ainda não processou e-mails suficientes."
+error_db               = "❌ Erro na Base de Dados: {error}"
+error_db_hint          = "Dica: Confirme se as colunas de telemetria foram criadas no PostgreSQL."
+recent_records         = "📋 Registos Recentes"
+metric_total_emails    = "Total de E-mails"
+metric_avg_confidence  = "Confiança Média"
+metric_avg_time        = "Tempo Médio vLLM"
+chart_folder_dist      = "Distribuição de Pastas"
+chart_decisions        = "Decisões: Regras vs IA"
+col_subject            = "Assunto"
+col_category           = "Categoria"
+col_sender             = "Remetente"
+col_confidence         = "Confiança"
+col_source             = "Origem"
+col_time               = "Tempo(s)"
+col_date               = "Data"
+
+# ── Dashboard — página de faturas ─────────────────────────────────────────────
+
+[dashboard.invoices]
+title                  = "🧾 Faturas"
+caption                = "Dados de faturas extraídos de QR codes em PDFs (formato AT/ATCUD português)."
+filter_months          = "Últimos N meses"
+filter_nif             = "NIF do vendedor contém"
+filter_search          = "Nº Fatura / ATCUD contém"
+error_load             = "❌ Não foi possível carregar as faturas: {error}"
+empty                  = "Nenhuma fatura encontrada para o período selecionado."
+metric_total_gross     = "Total (bruto)"
+metric_total_vat       = "Total IVA"
+metric_taxable         = "Base tributável"
+metric_sellers         = "Vendedores únicos"
+chart_grand_total      = "Total Geral"
+chart_sellers_count    = "{count} vendedor(es) único(s)"
+chart_title            = "Top 5 vendedores + Outros"
+chart_x_label          = "NIF Vendedor"
+others_label           = "Outros"
+col_date               = "Data"
+col_invoice_num        = "Nº Fatura"
+col_nif_seller         = "NIF Vendedor"
+col_nif_buyer          = "NIF Comprador"
+col_taxable            = "Base Trib."
+col_vat                = "IVA"
+col_total              = "Total"
+col_mb_entity          = "MB Entidade"
+col_mb_ref             = "MB Referência"
+col_mb_amount          = "MB Valor"
+col_mb_due             = "MB Prazo"
+col_subject            = "Assunto"
+
 # ── Etiquetas dos botões do Telegram ─────────────────────────────────────────
 
 [telegram.buttons]
