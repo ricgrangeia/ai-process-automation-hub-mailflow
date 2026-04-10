@@ -1095,6 +1095,7 @@ def page_invoices(engine):
                 i.email_id,
                 e.subject,
                 e.from_address,
+                i.document_type,
                 i.nif_seller,
                 i.nif_buyer,
                 i.invoice_number,
@@ -1189,11 +1190,13 @@ def page_invoices(engine):
 
     # ── Table ──
     display = df[[
-        "invoice_date", "invoice_number", "atcud",
-        "nif_seller", "nif_buyer",
-        "taxable_amount", "vat_amount", "total_amount",
-        "mb_entidade", "mb_referencia", "mb_valor", "mb_data_limite",
-        "subject", "email_id",
+        c for c in [
+            "invoice_date", "document_type", "invoice_number", "atcud",
+            "nif_seller", "nif_buyer",
+            "taxable_amount", "vat_amount", "total_amount",
+            "mb_entidade", "mb_referencia", "mb_valor", "mb_data_limite",
+            "subject", "email_id",
+        ] if c in df.columns
     ]].copy()
 
     for col in ["taxable_amount", "vat_amount", "total_amount"]:
@@ -1208,6 +1211,7 @@ def page_invoices(engine):
     st.dataframe(
         display.rename(columns={
             "invoice_date":   t("dashboard.invoices.col_date"),
+            "document_type":  t("dashboard.invoices.col_doc_type"),
             "invoice_number": t("dashboard.invoices.col_invoice_num"),
             "atcud":          "ATCUD",
             "nif_seller":     t("dashboard.invoices.col_nif_seller"),
