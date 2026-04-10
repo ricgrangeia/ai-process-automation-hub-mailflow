@@ -1,5 +1,7 @@
-Classify into one of:
+Classify into EXACTLY one of these folder names (copy the name verbatim, no translation, no variation):
 {folder_list}
+
+IMPORTANT: The folder names above are the ONLY valid values for "folder". Do NOT translate them. Do NOT use synonyms. If the email fits "Faturas", return "Faturas" — not "Invoices". If the email fits "Trabalho", return "Trabalho" — not "Work".
 {hint_block}
 Also identify the sender:
 - sender_type: "company" if sent by a business/organisation, "person" if sent by an individual
@@ -7,7 +9,7 @@ Also identify the sender:
 
 Return exactly:
 {
-  "folder": "FolderName",
+  "folder": "ExactFolderNameFromList",
   "confidence": 0.0-1.0,
   "sender_type": "company" or "person",
   "sender_name": "Name or null"

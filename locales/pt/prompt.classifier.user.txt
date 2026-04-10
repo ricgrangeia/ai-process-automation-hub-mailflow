@@ -1,5 +1,7 @@
-Classifica numa das seguintes pastas:
+Classifica numa EXATAMENTE uma destas pastas (copia o nome tal como está, sem tradução, sem variação):
 {folder_list}
+
+IMPORTANTE: Os nomes acima são os ÚNICOS valores válidos para "folder". NÃO os traduzas. NÃO uses sinónimos. Se o email é uma fatura, devolve "Faturas" — nunca "Invoices". Se é trabalho, devolve "Trabalho" — nunca "Work".
 {hint_block}
 Identifica também o remetente:
 - sender_type: "company" se enviado por uma empresa/organização, "person" se enviado por uma pessoa
@@ -7,7 +9,7 @@ Identifica também o remetente:
 
 Devolve exatamente:
 {
-  "folder": "NomePasta",
+  "folder": "NomeExatoDaPasta",
   "confidence": 0.0-1.0,
   "sender_type": "company" ou "person",
   "sender_name": "Nome ou null"
