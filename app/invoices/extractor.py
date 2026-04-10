@@ -98,10 +98,12 @@ async def persist_invoice(session_factory, email_id: int, data: dict) -> None:
     )
     logger.info(f"Incoming data fields: { {k: v for k, v in data.items() if v is not None} }")
 
+    atcud = data.get("atcud")
+
     async with session_factory() as session:
         existing = None
 
-        # 1 — match by business key
+        # 1 — match by business key (nif_seller + invoice_number)
         if nif_seller and invoice_number:
             existing = (await session.execute(
                 select(Invoice).where(
@@ -119,6 +121,16 @@ async def persist_invoice(session_factory, email_id: int, data: dict) -> None:
                 logger.info(f"No existing invoice found by business key ({nif_seller!r}, {invoice_number!r})")
         else:
             logger.info("Business key incomplete — skipping business-key lookup")
+
+        # 1b — match by ATCUD (unique PT invoice identifier)
+        if existing is None and atcud:
+            existing = (await session.execute(
+                select(Invoice).where(Invoice.atcud == atcud)
+            )).scalar_one_or_none()
+            if existing:
+                logger.info(f"Matched existing invoice id={existing.id} by atcud={atcud!r}")
+            else:
+                logger.info(f"No existing invoice found by atcud={atcud!r}")
 
         # 2 — fallback: same email
         if existing is None:

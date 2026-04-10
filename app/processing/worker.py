@@ -458,10 +458,8 @@ async def ai_worker_loop():
                             "sender_name": sender_name,
                         },
                     )
-                    # 7️⃣ Invoice QR extraction (fire and forget)
-                    if new_status == "moved" and (
-                        "invoice" in folder.lower() or "fatura" in folder.lower()
-                    ):
+                    # 7️⃣ Invoice QR extraction (fire and forget, any moved email with PDFs)
+                    if new_status == "moved":
                         await _try_invoice_qr(email, settings, session_factory)
 
                     # 8️⃣ Auto-learn: save high-confidence LLM decisions as rules
