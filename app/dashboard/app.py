@@ -142,49 +142,48 @@ def _get_cookie_controller():
 
 def login_screen():
     ctrl = _get_cookie_controller()
+    if ctrl is None:
+        st.error("Cookie Controller não disponível.")
+        return False
 
-    # ── Restore session from cookie ──────────────────────────────────────────
-    # The cookie controller needs one render cycle to read browser cookies.
-    # On the first run after refresh, ctrl.get() returns None (not yet loaded).
-    # We stop rendering here to let the component initialize; on the next
-    # automatic rerun the cookie value will be available.
-    if not st.session_state.get("authenticated", False):
-        if ctrl is not None:
-            try:
-                val = ctrl.get(_AUTH_COOKIE)
-                if val == _AUTH_TOKEN:
-                    st.session_state["authenticated"] = True
-                elif val is None and not st.session_state.get("_cookie_init", False):
-                    st.session_state["_cookie_init"] = True
-                    st.stop()   # wait for component to initialize — no login flash
-            except Exception:
-                pass
+    # 1. Tentar ler o cookie do browser
+    cookie_val = ctrl.get(_AUTH_COOKIE)
 
+    # 2. Se o cookie existe e a sessão não está autenticada, autentica automaticamente
+    if cookie_val == _AUTH_TOKEN and not st.session_state.get("authenticated"):
+        st.session_state["authenticated"] = True
+        st.rerun()
+
+    # 3. Se não está autenticado (e o cookie falhou ou ainda não carregou)
     if not st.session_state.get("authenticated", False):
+        # Pequena espera para o componente de JS carregar o cookie no primeiro refresh
+        if cookie_val is None and not st.session_state.get("_init_done"):
+            st.session_state["_init_done"] = True
+            st.rerun() 
+
         st.markdown("<h1 style='text-align: center; margin-top: 50px;'>🔐 AI Supervisor Login</h1>", unsafe_allow_html=True)
 
         _, col2, _ = st.columns([1, 1, 1])
         with col2:
-            with st.form("login_form", clear_on_submit=False):
-                user_input = st.text_input("Utilizador", key="input_user")
-                pw_input = st.text_input("Password", type="password", key="input_pw")
+            with st.form("login_form"):
+                user_input = st.text_input("Utilizador")
+                pw_input = st.text_input("Password", type="password")
                 submit = st.form_submit_button("Entrar", use_container_width=True)
 
                 if submit:
                     env_user = os.environ.get("DASHBOARD_USER", "admin")
                     env_pw = os.environ.get("DASHBOARD_PASSWORD", "mudar123")
+                    
                     if user_input == env_user and pw_input == env_pw:
                         st.session_state["authenticated"] = True
-                        if ctrl is not None:
-                            try:
-                                ctrl.set(_AUTH_COOKIE, _AUTH_TOKEN)
-                            except Exception:
-                                pass
+                        # Grava o cookie no browser (expira em 1 dia por defeito na maioria das configs)
+                        ctrl.set(_AUTH_COOKIE, _AUTH_TOKEN) 
                         st.success("Acesso concedido!")
                         st.rerun()
                     else:
-                        st.error("❌ Utilizador ou Password incorretos")
+                        st.error("❌ Credenciais inválidas")
         return False
+    
     return True
 
 
@@ -1629,13 +1628,15 @@ if login_screen():
     page = st.sidebar.radio("Navigation", ["📊 Dashboard", "✉️ Email Accounts", "📚 Learned Rules", "📁 Folders", "🏢 Companies", "🧾 Invoices", "📋 Audit Log", "⚙️ Settings"])
 
     if st.sidebar.button("Logout"):
-        st.session_state["authenticated"] = False
+        # Limpa o estado da sessão
+        for key in st.session_state.keys():
+            del st.session_state[key]
+        
+        # Remove o cookie do browser
         _ctrl = _get_cookie_controller()
-        if _ctrl is not None:
-            try:
-                _ctrl.remove(_AUTH_COOKIE)
-            except Exception:
-                pass
+        if _ctrl:
+            _ctrl.remove(_AUTH_COOKIE)
+        
         st.rerun()
 
     if page == "📊 Dashboard":
