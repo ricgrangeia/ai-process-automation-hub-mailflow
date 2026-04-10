@@ -34,6 +34,7 @@ if _project_root not in sys.path:
 
 from app.core.config import get_settings
 from app.core.database.engine import make_engine, make_session_factory
+from app.core.i18n import t
 from app.query.queue import QUERY_QUEUE_KEY, RESULT_KEY_PREFIX, RESULT_TTL_SECONDS
 from app.query.parser import parse_query
 from app.query.repository import search_emails
@@ -60,15 +61,15 @@ async def _telegram_send(bot_token: str, chat_id: str, text: str, keyboard=None)
 
 
 def _build_inline_summary(emails: list) -> str:
-    lines = [f"📬 Found *{len(emails)}* email(s):\n"]
+    lines = [t("telegram.query.found_header", count=len(emails))]
     for i, email in enumerate(emails[:10], 1):
         received = email.received_at.strftime("%Y-%m-%d") if email.received_at else "?"
         lines.append(
-            f"{i}. *{(email.subject or '(no subject)')[:60]}*\n"
+            f"{i}. *{(email.subject or t('telegram.query.no_subject'))[:60]}*\n"
             f"   {email.from_address or '?'} | {received} | {email.classification_label or '?'}"
         )
     if len(emails) > 10:
-        lines.append(f"\n_…and {len(emails) - 10} more._")
+        lines.append(t("telegram.query.more", count=len(emails) - 10))
     return "\n".join(lines)
 
 
@@ -90,20 +91,20 @@ async def _handle_search(job: dict, settings, session_factory, r) -> None:
     if filters is None:
         await _telegram_send(
             settings.telegram_bot_token, chat_id,
-            "⚠️ Search service is unavailable right now. Check that the LLM is running and reachable."
+            t("telegram.query.unavailable"),
         )
         return
 
     logger.info(f"Extracted filters: {filters}")
 
     active = {k: v for k, v in filters.items() if v}
-    filter_summary = " | ".join(f"{k}={v}" for k, v in active.items()) if active else "no filters"
+    filter_summary = " | ".join(f"{k}={v}" for k, v in active.items()) if active else t("telegram.query.no_filters")
 
     emails = await search_emails(session_factory, tenant_id=tenant_id, filters=filters)
     if not emails:
         await _telegram_send(
             settings.telegram_bot_token, chat_id,
-            f"📭 No emails found matching your query.\nFilters used: {filter_summary}"
+            t("telegram.query.no_results", filters=filter_summary),
         )
         return
 
@@ -134,14 +135,14 @@ async def _handle_search(job: dict, settings, session_factory, r) -> None:
     # Ask the user how they want the results
     keyboard = [
         [
-            {"text": "📱 Show here", "callback_data": f"query_show:{result_id}"},
-            {"text": "📧 Send by email", "callback_data": f"query_email:{result_id}"},
+            {"text": t("telegram.query.btn_show_here"),   "callback_data": f"query_show:{result_id}"},
+            {"text": t("telegram.query.btn_send_email"),  "callback_data": f"query_email:{result_id}"},
         ]
     ]
-    smtp_note = "" if settings.smtp_host else "\nSMTP not configured — only inline available."
+    smtp_note = "" if settings.smtp_host else t("telegram.query.smtp_not_configured")
     await _telegram_send(
         settings.telegram_bot_token, chat_id,
-        f"✅ Found *{len(emails)}* email(s).\nFilters: {filter_summary}\n\nHow would you like the results?{smtp_note}",
+        t("telegram.query.results_ready", count=len(emails), filters=filter_summary, smtp_note=smtp_note),
         keyboard=keyboard,
     )
 
@@ -156,7 +157,7 @@ async def _handle_deliver(job: dict, settings, r) -> None:
     if not raw:
         await _telegram_send(
             settings.telegram_bot_token, chat_id,
-            "⚠️ Results expired. Please search again."
+            t("telegram.query.results_expired"),
         )
         return
 
@@ -171,7 +172,7 @@ async def _handle_deliver(job: dict, settings, r) -> None:
         if not settings.smtp_host:
             await _telegram_send(
                 settings.telegram_bot_token, chat_id,
-                "⚠️ SMTP is not configured. Showing results here instead.\n\n"
+                t("telegram.query.smtp_fallback") + "\n\n"
                 + _build_inline_summary_from_dicts(emails_data)
             )
             return
@@ -182,12 +183,12 @@ async def _handle_deliver(job: dict, settings, r) -> None:
         if sent:
             await _telegram_send(
                 settings.telegram_bot_token, chat_id,
-                f"📧 Results sent to `{settings.report_recipient}`.",
+                t("telegram.query.email_sent", recipient=settings.report_recipient),
             )
         else:
             await _telegram_send(
                 settings.telegram_bot_token, chat_id,
-                "⚠️ Failed to send email. Check SMTP settings."
+                t("telegram.query.email_failed"),
             )
     else:
         await _telegram_send(
@@ -206,7 +207,7 @@ def _decode_subject(subject: str) -> str:
 
 
 def _build_inline_summary_from_dicts(emails_data: list) -> str:
-    lines = [f"📬 Found *{len(emails_data)}* email(s):\n"]
+    lines = [t("telegram.query.found_header", count=len(emails_data))]
     for i, e in enumerate(emails_data[:10], 1):
         received = e["received_at"][:10] if e.get("received_at") else "?"
         subject = _decode_subject(e.get("subject") or "")[:60]
@@ -218,7 +219,7 @@ def _build_inline_summary_from_dicts(emails_data: list) -> str:
             f"   {sender}{type_tag} | {received} | {e.get('classification_label') or '?'}"
         )
     if len(emails_data) > 10:
-        lines.append(f"\n_…and {len(emails_data) - 10} more._")
+        lines.append(t("telegram.query.more", count=len(emails_data) - 10))
     return "\n".join(lines)
 
 

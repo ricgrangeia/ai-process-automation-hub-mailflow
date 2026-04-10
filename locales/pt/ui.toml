@@ -51,6 +51,35 @@ col_mb_amount          = "MB Valor"
 col_mb_due             = "MB Prazo"
 col_subject            = "Assunto"
 
+# ── Mensagens do query worker (Telegram) ─────────────────────────────────────
+
+[telegram.query]
+unavailable          = "⚠️ O serviço de pesquisa está indisponível. Verifica se o LLM está a correr e acessível."
+no_filters           = "sem filtros"
+no_results           = "📭 Nenhum e-mail encontrado para a tua pesquisa.\nFiltros usados: {filters}"
+results_ready        = "✅ Encontrei *{count}* e-mail(s).\nFiltros: {filters}\n\nComo queres receber os resultados?{smtp_note}"
+results_expired      = "⚠️ Resultados expirados. Faz a pesquisa novamente."
+smtp_not_configured  = "\nSMTP não configurado — só disponível inline."
+smtp_fallback        = "⚠️ SMTP não configurado. A mostrar os resultados aqui."
+email_sent           = "📧 Resultados enviados para `{recipient}`."
+email_failed         = "⚠️ Falha ao enviar e-mail. Verifica as definições SMTP."
+btn_show_here        = "📱 Mostrar aqui"
+btn_send_email       = "📧 Enviar por e-mail"
+found_header         = "📬 Encontrei *{count}* e-mail(s):\n"
+no_subject           = "(sem assunto)"
+more                 = "\n_…e mais {count}._"
+
+# ── Notificações Telegram (worker → utilizador) ───────────────────────────────
+
+[telegram.notifications]
+worker_started        = "🚀 AI Worker ativo — a aguardar tarefas."
+needs_review          = "🤔 Revisão necessária — confiança da IA: {confidence}%\n\nDe: {sender}\nAssunto: {subject}\n\nClassifica este e-mail:"
+suggested_folder      = "🆕 A IA sugere uma nova pasta\n\nDe: {sender}\nAssunto: {subject}\n\n🧠 A IA classificou como: {folder} ({confidence}%)\nEsta pasta ainda não existe.\n\nCria-a e move para lá, ou escolhe uma pasta existente:"
+add_and_move          = "➕ Adicionar '{folder}' e mover"
+rule_conflict         = "⚠️ Conflito de regra — intervenção humana necessária\n\nDe: {sender}\nAssunto: {subject}\n\n📚 Regra aprendida diz: {rule_folder}\n🧠 IA diz: {llm_folder} ({confidence}%)\n\nQual é o correto?"
+conflict_rule_btn     = "✅ {folder}  (regra)"
+conflict_ai_btn       = "✅ {folder}  (IA · {confidence}%)"
+
 # ── Etiquetas dos botões do Telegram ─────────────────────────────────────────
 
 [telegram.buttons]

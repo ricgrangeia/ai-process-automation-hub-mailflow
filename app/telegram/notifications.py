@@ -6,6 +6,8 @@ Called by processing/worker.py — fire and forget, no bot polling needed here.
 import logging
 import httpx
 
+from app.core.i18n import t
+
 logger = logging.getLogger("telegram-notifications")
 
 _DEFAULT_FOLDERS = ["Invoices", "Work", "Personal", "Marketing", "Spam", "Other"]
@@ -15,7 +17,7 @@ async def send_worker_started(bot_token: str, chat_id: str) -> None:
     """Sends a startup notification when the AI worker comes online."""
     payload = {
         "chat_id": chat_id,
-        "text": "🚀 AI Worker is active — listening for jobs.",
+        "text": t("telegram.notifications.worker_started"),
     }
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
@@ -55,20 +57,19 @@ async def send_review_request(
     active_folders = folders if folders else _DEFAULT_FOLDERS
 
     new_folder_row = [
-        {"text": "➕ New folder", "callback_data": f"folder_new_request:{email_id}"}
+        {"text": t("telegram.buttons.new_folder"), "callback_data": f"folder_new_request:{email_id}"}
     ]
 
     if suggested_folder:
-        text = (
-            f"🆕 AI suggests a new folder\n\n"
-            f"From: {sender}\n"
-            f"Subject: {subject_display}\n\n"
-            f"🧠 AI classified as: {suggested_folder} ({confidence_pct}%)\n"
-            f"This folder does not exist yet.\n\n"
-            f"Create it and move there, or pick an existing folder:"
+        text = t(
+            "telegram.notifications.suggested_folder",
+            sender=sender,
+            subject=subject_display,
+            folder=suggested_folder,
+            confidence=confidence_pct,
         )
         suggest_row = [
-            {"text": f"➕ Add '{suggested_folder}' & move",
+            {"text": t("telegram.notifications.add_and_move", folder=suggested_folder),
              "callback_data": f"folder_suggest_add:{email_id}:{suggested_folder}"}
         ]
         existing_buttons = [
@@ -78,20 +79,18 @@ async def send_review_request(
         keyboard = [suggest_row] + [existing_buttons[i:i+2] for i in range(0, len(existing_buttons), 2)] + [new_folder_row]
 
     elif source == "rule_conflict" and rule_folder and llm_folder:
-        text = (
-            f"⚠️ Rule Conflict — human input needed\n\n"
-            f"From: {sender}\n"
-            f"Subject: {subject_display}\n\n"
-            f"📚 Learned rule says: {rule_folder}\n"
-            f"🧠 AI says: {llm_folder} ({confidence_pct}%)\n\n"
-            f"Which is correct?"
+        text = t(
+            "telegram.notifications.rule_conflict",
+            sender=sender,
+            subject=subject_display,
+            rule_folder=rule_folder,
+            llm_folder=llm_folder,
+            confidence=confidence_pct,
         )
-        # Conflicting choices shown prominently as full-width rows at the top
         conflict_rows = [
-            [{"text": f"✅ {rule_folder}  (rule)", "callback_data": f"classify:{email_id}:{rule_folder}"}],
-            [{"text": f"✅ {llm_folder}  (AI · {confidence_pct}%)", "callback_data": f"classify:{email_id}:{llm_folder}"}],
+            [{"text": t("telegram.notifications.conflict_rule_btn", folder=rule_folder),   "callback_data": f"classify:{email_id}:{rule_folder}"}],
+            [{"text": t("telegram.notifications.conflict_ai_btn",   folder=llm_folder, confidence=confidence_pct), "callback_data": f"classify:{email_id}:{llm_folder}"}],
         ]
-        # Remaining folders in a 2-column grid, excluding the two already shown
         other_folders = [f for f in active_folders if f not in (rule_folder, llm_folder)]
         other_buttons = [
             {"text": f, "callback_data": f"classify:{email_id}:{f}"}
@@ -101,11 +100,11 @@ async def send_review_request(
         keyboard = conflict_rows + other_rows + [new_folder_row]
 
     else:
-        text = (
-            f"🤔 NeedsReview — AI confidence: {confidence_pct}%\n\n"
-            f"From: {sender}\n"
-            f"Subject: {subject_display}\n\n"
-            f"Please classify this email:"
+        text = t(
+            "telegram.notifications.needs_review",
+            sender=sender,
+            subject=subject_display,
+            confidence=confidence_pct,
         )
         buttons = [
             {"text": folder, "callback_data": f"classify:{email_id}:{folder}"}

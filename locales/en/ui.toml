@@ -51,6 +51,35 @@ col_mb_amount          = "MB Amount"
 col_mb_due             = "MB Due"
 col_subject            = "Subject"
 
+# ── Telegram query worker messages ───────────────────────────────────────────
+
+[telegram.query]
+unavailable          = "⚠️ Search service is unavailable right now. Check that the LLM is running and reachable."
+no_filters           = "no filters"
+no_results           = "📭 No emails found matching your query.\nFilters used: {filters}"
+results_ready        = "✅ Found *{count}* email(s).\nFilters: {filters}\n\nHow would you like the results?{smtp_note}"
+results_expired      = "⚠️ Results expired. Please search again."
+smtp_not_configured  = "\nSMTP not configured — only inline available."
+smtp_fallback        = "⚠️ SMTP is not configured. Showing results here instead."
+email_sent           = "📧 Results sent to `{recipient}`."
+email_failed         = "⚠️ Failed to send email. Check SMTP settings."
+btn_show_here        = "📱 Show here"
+btn_send_email       = "📧 Send by email"
+found_header         = "📬 Found *{count}* email(s):\n"
+no_subject           = "(no subject)"
+more                 = "\n_…and {count} more._"
+
+# ── Telegram notifications (worker → user) ────────────────────────────────────
+
+[telegram.notifications]
+worker_started        = "🚀 AI Worker is active — listening for jobs."
+needs_review          = "🤔 NeedsReview — AI confidence: {confidence}%\n\nFrom: {sender}\nSubject: {subject}\n\nPlease classify this email:"
+suggested_folder      = "🆕 AI suggests a new folder\n\nFrom: {sender}\nSubject: {subject}\n\n🧠 AI classified as: {folder} ({confidence}%)\nThis folder does not exist yet.\n\nCreate it and move there, or pick an existing folder:"
+add_and_move          = "➕ Add '{folder}' & move"
+rule_conflict         = "⚠️ Rule Conflict — human input needed\n\nFrom: {sender}\nSubject: {subject}\n\n📚 Learned rule says: {rule_folder}\n🧠 AI says: {llm_folder} ({confidence}%)\n\nWhich is correct?"
+conflict_rule_btn     = "✅ {folder}  (rule)"
+conflict_ai_btn       = "✅ {folder}  (AI · {confidence}%)"
+
 # ── Telegram button labels ────────────────────────────────────────────────────
 
 [telegram.buttons]
