@@ -24,7 +24,7 @@ from app.classification.hybrid_classifier import HybridClassifier
 from app.classification.learned_rules import LearnedRule
 from app.processing.queue import QUEUE_KEY
 from app.processing.actions.base import get_action
-from app.telegram.notifications import send_review_request, send_worker_started
+from app.telegram.notifications import send_review_request, send_worker_started, send_sender_identification
 from app.review.queue import REVIEW_QUEUE_KEY, LEARNING_MODE_KEY
 from app.core.migrations import run_migrations
 from app.core.audit import log_audit
@@ -431,6 +431,25 @@ async def ai_worker_loop():
 
                 if result.rowcount > 0:
                     logger.info(f"✅ DB Updated: ID {email_id} -> {folder} ({source})")
+
+                    # If sender identity is still unknown after a successful move,
+                    # ask via Telegram so the dashboard never shows unknown senders.
+                    if (
+                        new_status == "moved"
+                        and sender_type is None
+                        and settings.telegram_bot_token
+                        and settings.telegram_chat_id
+                    ):
+                        await send_sender_identification(
+                            bot_token=settings.telegram_bot_token,
+                            chat_id=settings.telegram_chat_id,
+                            email_id=email_id,
+                            subject=email.subject,
+                            sender=email.from_address,
+                            folder=folder,
+                        )
+                        logger.info(f"❓ Sent sender-id request for email {email_id}")
+
                     await log_audit(
                         session_factory,
                         actor_type="system",

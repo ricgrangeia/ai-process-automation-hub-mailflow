@@ -155,6 +155,47 @@ async def _move_email(email_row: EmailMessage, acc: EmailAccount, settings, targ
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Finalize email record — status, sender identity, telemetry
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _finalize_email(
+    session_factory,
+    email_id: int,
+    folder: str,
+    invoice_data: dict | None,
+) -> None:
+    """
+    Write status=moved + sender identity derived from invoice data.
+    Invoices always come from companies; seller_name/nif_seller are used as the
+    sender name so the dashboard never shows an unknown/raw email address.
+    """
+    from datetime import datetime, timezone
+
+    sender_name = None
+    if invoice_data:
+        sender_name = (
+            invoice_data.get("seller_name")
+            or invoice_data.get("nif_seller")
+        )
+
+    async with session_factory() as session:
+        row = await session.get(EmailMessage, email_id)
+        if row:
+            row.status = "moved"
+            row.classification_label = folder
+            row.processed_at = datetime.now(timezone.utc)
+            row.ai_source = "invoice_worker"
+            row.sender_type = "company"  # invoices are always from companies
+            if sender_name and not row.sender_name:
+                row.sender_name = sender_name
+            await session.commit()
+            logger.info(
+                f"Finalized email {email_id} → {folder} "
+                f"(sender: company / {sender_name or '?'})"
+            )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Process a single email
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -241,16 +282,11 @@ async def _process_email(
         target = _DEFAULT_INVOICE_FOLDER
         await _move_email(email_row, acc, settings, target)
 
-        async with session_factory() as session:
-            row = await session.get(EmailMessage, email_row.id)
-            if row:
-                row.status = "moved"
-                row.classification_label = target
-                await session.commit()
-
         if invoice_data:
             msg = _build_invoice_message(email_row, invoice_data, invoice_data.get("invoice_origin", "pt_at"))
             await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
+
+        await _finalize_email(session_factory, email_row.id, target, invoice_data)
 
     # ── Financial body path ──────────────────────────────────────────────────
     elif classification == "financial_body":
@@ -267,18 +303,14 @@ async def _process_email(
             target = _DEFAULT_INVOICE_FOLDER
             await _move_email(email_row, acc, settings, target)
 
-            async with session_factory() as session:
-                row = await session.get(EmailMessage, email_row.id)
-                if row:
-                    row.status = "moved"
-                    row.classification_label = target
-                    await session.commit()
-
             msg = _build_invoice_message(email_row, invoice_data, invoice_data.get("invoice_origin", "payment_confirmation"))
             await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
         else:
             logger.warning(f"LLM body extraction returned nothing for email {email_row.id}")
             # Leave email unread/unmoved — human will deal with it
+
+        if invoice_data:
+            await _finalize_email(session_factory, email_row.id, target, invoice_data)
 
     # Mark seen after successful processing
     if settings.mark_seen_after_store:

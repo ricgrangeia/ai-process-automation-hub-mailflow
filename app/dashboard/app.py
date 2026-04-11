@@ -263,7 +263,36 @@ def login_screen():
 @st.cache_resource
 def get_db_engine(db_url):
     sync_url = db_url.replace("+asyncpg", "")
-    return create_engine(sync_url)
+    engine = create_engine(sync_url)
+    _backfill_invoice_sender_identity(engine)
+    return engine
+
+
+def _backfill_invoice_sender_identity(engine) -> None:
+    """
+    One-time backfill: emails that were processed by the invoice-worker before
+    sender identity tracking was added end up with sender_type=NULL.
+    For any such email that has an invoice record, set sender_type='company'
+    and sender_name from the invoice's seller_name or nif_seller.
+    Safe to run repeatedly — only updates rows where sender_type IS NULL.
+    """
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE emails e
+                SET
+                    sender_type = 'company',
+                    sender_name = COALESCE(
+                        NULLIF(i.seller_name, ''),
+                        NULLIF(i.nif_seller, ''),
+                        e.sender_name
+                    )
+                FROM invoices i
+                WHERE i.email_id = e.id
+                  AND e.sender_type IS NULL
+            """))
+    except Exception:
+        pass  # table may not exist yet during first boot
 
 
 # ---------------------------------------------------------------------------

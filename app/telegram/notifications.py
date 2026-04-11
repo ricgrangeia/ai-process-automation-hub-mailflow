@@ -128,3 +128,46 @@ async def send_review_request(
     except Exception as e:
         logger.error(f"Failed to send Telegram notification for email {email_id}: {e}")
         return False
+
+
+async def send_sender_identification(
+    bot_token: str,
+    chat_id: str,
+    email_id: int,
+    subject: str,
+    sender: str,
+    folder: str,
+) -> bool:
+    """
+    Sent after an email is moved when the sender identity (company/person) is unknown.
+    Uses the existing rv_set_sender callback so the bot handles the response normally.
+    """
+    subject_display = (subject or "(no subject)")[:80]
+    text = (
+        f"❓ *Sender not identified*\n\n"
+        f"From: `{sender}`\n"
+        f"Subject: {subject_display}\n"
+        f"Moved to: *{folder}*\n\n"
+        f"{t('telegram.sender.ask_type')}"
+    )
+    keyboard = [
+        [
+            {"text": t("telegram.buttons.sender_company"), "callback_data": f"rv_set_sender:{email_id}:company"},
+            {"text": t("telegram.buttons.sender_person"),  "callback_data": f"rv_set_sender:{email_id}:person"},
+        ]
+    ]
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown",
+        "reply_markup": {"inline_keyboard": keyboard},
+    }
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(url, json=payload)
+            r.raise_for_status()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to send sender-id request for email {email_id}: {e}")
+        return False
