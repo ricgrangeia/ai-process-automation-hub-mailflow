@@ -173,7 +173,7 @@ def login_screen():
             with st.form("login_form"):
                 user_input = st.text_input(t("login.username"), key="input_user")
                 pw_input = st.text_input(t("login.password"), type="password", key="input_pw")
-                submit = st.form_submit_button(t("login.submit"), use_container_width=True)
+                submit = st.form_submit_button(t("login.submit"), width='stretch')
 
                 if submit:
                     env_user = os.environ.get("DASHBOARD_USER", "admin")
@@ -1256,7 +1256,7 @@ def page_invoices(engine):
                         color="color", color_discrete_map="identity",
                     )
                     fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
 
             # Table
             display_at = df_at[[c for c in [
@@ -1295,7 +1295,7 @@ def page_invoices(engine):
                     "subject":        t("dashboard.invoices.col_subject"),
                     "email_id":       "Email ID",
                 }),
-                use_container_width=True, hide_index=True,
+                width='stretch', hide_index=True,
             )
             csv_at = df_at.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Export CSV", csv_at, "invoices_at.csv", "text/csv", key="csv_at")
@@ -1351,7 +1351,7 @@ def page_invoices(engine):
                     "subject":        t("dashboard.invoices.col_subject"),
                     "email_id":       "Email ID",
                 }),
-                use_container_width=True, hide_index=True,
+                width='stretch', hide_index=True,
             )
             csv_intl = df_intl.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Export CSV", csv_intl, "invoices_international.csv", "text/csv", key="csv_intl")

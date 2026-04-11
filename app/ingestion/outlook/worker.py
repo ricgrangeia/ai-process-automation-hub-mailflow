@@ -146,6 +146,7 @@ async def api_worker_loop():
                     select(EmailAccount).where(
                         EmailAccount.active == True,
                         EmailAccount.provider == "outlook",
+                        (EmailAccount.managed_by == "ai_worker") | (EmailAccount.managed_by == None),
                     )
                 )
                 accounts = list(res.scalars().all())
