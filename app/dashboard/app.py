@@ -1432,20 +1432,8 @@ def page_invoices(engine):
     df_at   = df[df["invoice_origin"].isin(["pt_at", None, ""]) | df["invoice_origin"].isna()].copy()
     df_intl = df[df["invoice_origin"] == "international"].copy()
 
-    # ── KPI row (all invoices combined) ──
-    total_gross    = pd.to_numeric(df["total_amount"],   errors="coerce").sum()
-    total_vat      = pd.to_numeric(df["vat_amount"],     errors="coerce").sum()
-    total_taxable  = pd.to_numeric(df["taxable_amount"], errors="coerce").sum()
-    unique_sellers = df["nif_seller"].nunique()
-
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric(t("dashboard.invoices.metric_total_gross"),  f"€ {total_gross:,.2f}")
-    k2.metric(t("dashboard.invoices.metric_total_vat"),    f"€ {total_vat:,.2f}")
-    k3.metric(t("dashboard.invoices.metric_taxable"),      f"€ {total_taxable:,.2f}")
-    k4.metric(t("dashboard.invoices.metric_sellers"),      unique_sellers)
-
-    # ── Monthly totals chart ──────────────────────────────────────────────────
-    df_monthly = df.copy()
+    # ── Monthly totals chart (AT invoices only — matches the AT tab below) ────
+    df_monthly = df_at.copy()
     df_monthly["_date"] = pd.to_datetime(df_monthly["invoice_date"], errors="coerce")
     df_monthly = df_monthly.dropna(subset=["_date"])
 
@@ -1507,15 +1495,19 @@ def page_invoices(engine):
         if df_at.empty:
             st.info(t("dashboard.invoices.empty"))
         else:
-            # Chart
-            chart_left, chart_right = st.columns([1, 2])
-            with chart_left:
-                at_gross = pd.to_numeric(df_at["total_amount"], errors="coerce").sum()
-                at_sellers = df_at["nif_seller"].nunique()
-                st.metric(t("dashboard.invoices.chart_grand_total"), f"€ {at_gross:,.2f}")
-                st.caption(t("dashboard.invoices.chart_sellers_count", count=at_sellers))
+            # ── KPI row — computed from the same df_at that the table shows ──
+            at_gross   = pd.to_numeric(df_at["total_amount"],   errors="coerce").sum()
+            at_vat     = pd.to_numeric(df_at["vat_amount"],     errors="coerce").sum()
+            at_taxable = pd.to_numeric(df_at["taxable_amount"], errors="coerce").sum()
+            at_sellers = df_at["nif_seller"].nunique()
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric(t("dashboard.invoices.metric_total_gross"), f"€ {at_gross:,.2f}")
+            k2.metric(t("dashboard.invoices.metric_total_vat"),   f"€ {at_vat:,.2f}")
+            k3.metric(t("dashboard.invoices.metric_taxable"),     f"€ {at_taxable:,.2f}")
+            k4.metric(t("dashboard.invoices.metric_sellers"),     at_sellers)
 
-            with chart_right:
+            # ── Top 5 sellers chart ──
+            with st.container():
                 if not df_at["nif_seller"].isna().all():
                     # Build NIF → name map for readable labels
                     nif_name = (
@@ -1630,11 +1622,15 @@ def page_invoices(engine):
         if df_intl.empty:
             st.info(t("dashboard.invoices.intl_empty"))
         else:
-            intl_gross = pd.to_numeric(df_intl["total_amount"], errors="coerce").sum()
-            intl_count = len(df_intl)
-            ci1, ci2 = st.columns(2)
+            intl_gross   = pd.to_numeric(df_intl["total_amount"],   errors="coerce").sum()
+            intl_vat     = pd.to_numeric(df_intl["vat_amount"],     errors="coerce").sum()
+            intl_taxable = pd.to_numeric(df_intl["taxable_amount"], errors="coerce").sum()
+            intl_count   = len(df_intl)
+            ci1, ci2, ci3, ci4 = st.columns(4)
             ci1.metric(t("dashboard.invoices.metric_total_gross"), f"€ {intl_gross:,.2f}")
-            ci2.metric(t("dashboard.invoices.intl_count"), intl_count)
+            ci2.metric(t("dashboard.invoices.metric_total_vat"),   f"€ {intl_vat:,.2f}")
+            ci3.metric(t("dashboard.invoices.metric_taxable"),     f"€ {intl_taxable:,.2f}")
+            ci4.metric(t("dashboard.invoices.intl_count"),         intl_count)
 
             # Table — paginated with inline delete
             _fhash_intl = hashlib.md5(
