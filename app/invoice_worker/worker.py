@@ -27,9 +27,8 @@ from app.messages.models import EmailMessage, Attachment
 from app.messages.storage import save_raw_email, save_attachment
 from app.ingestion.parser import parse_email
 from app.ingestion.imap.client import connect_imap, fetch_unseen_raw_messages, mark_seen, move_message
-from app.invoices.extractor import extract_qr_from_pdf, persist_invoice
+from app.invoices.service import save_invoice_from_pdf, save_invoice_from_body
 from app.invoice_worker.detector import classify_email
-from app.invoice_worker.body_extractor import extract_financial_from_body
 
 logging.basicConfig(
     level=logging.INFO,
@@ -223,33 +222,25 @@ async def _process_email(
 
     # ── PDF invoice path ─────────────────────────────────────────────────────
     if classification == "pdf_invoice":
-        invoice_data = {}
-        # Find stored PDF paths for this email
         from app.processing.actions.export_pdf import _fetch_pdf_attachments
         att_files = await asyncio.to_thread(_fetch_pdf_attachments, email_row.id)
-        for att_path, att_name in att_files:
-            results = await extract_qr_from_pdf(
-                str(att_path),
-                settings.tool_server_url,
-                settings.tool_server_api_key,
+
+        invoice_data = None
+        for att_path, _ in att_files:
+            invoice_data = await save_invoice_from_pdf(
+                session_factory, email_row.id, att_path, settings
             )
-            if results:
-                invoice_data = results[0]
-                await persist_invoice(session_factory, email_row.id, invoice_data)
-                logger.info(f"Persisted invoice for email {email_row.id}")
+            if invoice_data:
                 break
 
         if not invoice_data:
             logger.warning(f"No invoice data extracted from PDF(s) in email {email_row.id}")
 
-        # Archive PDFs regardless of extraction success
-        await _archive_pdfs(email_row, settings, invoice_data)
+        await _archive_pdfs(email_row, settings, invoice_data or {})
 
-        # Move email
         target = _DEFAULT_INVOICE_FOLDER
         await _move_email(email_row, acc, settings, target)
 
-        # Mark stored email status
         async with session_factory() as session:
             row = await session.get(EmailMessage, email_row.id)
             if row:
@@ -257,7 +248,6 @@ async def _process_email(
                 row.classification_label = target
                 await session.commit()
 
-        # Notify Telegram
         if invoice_data:
             msg = _build_invoice_message(email_row, invoice_data, invoice_data.get("invoice_origin", "pt_at"))
             await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
@@ -265,22 +255,15 @@ async def _process_email(
     # ── Financial body path ──────────────────────────────────────────────────
     elif classification == "financial_body":
         import os
-        lang = os.environ.get("LANGUAGE", "en")
-        result = await extract_financial_from_body(
+        invoice_data = await save_invoice_from_body(
+            session_factory, email_row.id,
             subject=parsed.get("subject", ""),
             body_text=parsed.get("body_text", ""),
-            llm_base_url=settings.llm_base_url,
-            llm_api_key=settings.llm_api_key,
-            llm_model=settings.llm_model,
-            language=lang,
+            settings=settings,
+            language=os.environ.get("LANGUAGE", "en"),
         )
 
-        if result:
-            origin = result.get("invoice_origin") or "payment_confirmation"
-            result["invoice_origin"] = origin
-            await persist_invoice(session_factory, email_row.id, result)
-            logger.info(f"Persisted financial body data for email {email_row.id} (origin={origin})")
-
+        if invoice_data:
             target = _DEFAULT_INVOICE_FOLDER
             await _move_email(email_row, acc, settings, target)
 
@@ -291,7 +274,7 @@ async def _process_email(
                     row.classification_label = target
                     await session.commit()
 
-            msg = _build_invoice_message(email_row, result, origin)
+            msg = _build_invoice_message(email_row, invoice_data, invoice_data.get("invoice_origin", "payment_confirmation"))
             await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
         else:
             logger.warning(f"LLM body extraction returned nothing for email {email_row.id}")

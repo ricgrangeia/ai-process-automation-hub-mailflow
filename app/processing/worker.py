@@ -146,13 +146,13 @@ async def _try_invoice_qr(email, settings, session_factory) -> None:
     If TOOL_SERVER_URL is configured, try to extract invoice QR data from any
     PDF attachments stored for this email. Runs fire-and-forget; never raises.
     """
-    if not settings.tool_server_url:
+    if not getattr(settings, "tool_server_url", None):
         return
     if not email.raw_path:
         return
 
     from pathlib import Path as _Path
-    from app.invoices.extractor import extract_qr_from_pdf, persist_invoice
+    from app.invoices.service import save_invoice_from_pdf
 
     att_dir = _Path(email.raw_path).parent / "attachments"
     pdfs = list(att_dir.glob("*.pdf")) if att_dir.exists() else []
@@ -161,19 +161,10 @@ async def _try_invoice_qr(email, settings, session_factory) -> None:
         return
 
     for pdf in pdfs:
-        try:
-            results = await extract_qr_from_pdf(
-                str(pdf),
-                settings.tool_server_url,
-                settings.tool_server_api_key,
-            )
-            for invoice_data in results:
-                await persist_invoice(session_factory, email.id, invoice_data)
-            if results:
-                logger.info(f"Invoice QR extracted for email {email.id} from {pdf.name}")
-                break
-        except Exception as e:
-            logger.warning(f"Invoice QR extraction error for email {email.id}: {e}")
+        result = await save_invoice_from_pdf(session_factory, email.id, pdf, settings)
+        if result:
+            logger.info(f"Invoice QR extracted for email {email.id} from {pdf.name}")
+            break
 
 
 async def _auto_save_rule(session_factory, email, folder: str, confidence: float) -> None:
