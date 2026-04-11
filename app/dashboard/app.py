@@ -1506,28 +1506,44 @@ def page_invoices(engine):
 
             with chart_right:
                 if not df_at["nif_seller"].isna().all():
+                    # Build NIF → name map for readable labels
+                    nif_name = (
+                        df_at.dropna(subset=["nif_seller"])
+                        .drop_duplicates("nif_seller")
+                        .set_index("nif_seller")["seller_name"]
+                    )
                     seller_amounts = (
                         df_at.groupby("nif_seller")["total_amount"]
                         .apply(lambda x: pd.to_numeric(x, errors="coerce").sum())
                         .sort_values(ascending=False)
                     )
                     top5   = seller_amounts.head(5)
-                    others = seller_amounts.iloc[5:].sum()
-                    labels = list(top5.index)
+                    # Label = "Name (NIF)" if name known, else just NIF — always str
+                    def _seller_label(nif):
+                        name = nif_name.get(nif)
+                        return f"{name}\n({nif})" if name else str(nif)
+                    labels = [_seller_label(nif) for nif in top5.index]
                     values = list(top5.values)
                     colors = ["#4a9eff"] * len(top5)
-                    if others > 0:
-                        labels.append(t("dashboard.invoices.others_label"))
-                        values.append(others)
-                        colors.append("#888888")
-                    chart_df = pd.DataFrame({"nif_seller": labels, "total_col": values, "color": colors})
+                    chart_df = pd.DataFrame({
+                        "seller": labels,
+                        "total_col": values,
+                        "color": colors,
+                    })
+                    # category_orders keeps bars in sorted order without Plotly re-sorting
                     fig = px.bar(
-                        chart_df, x="nif_seller", y="total_col",
+                        chart_df, x="seller", y="total_col",
                         title=t("dashboard.invoices.chart_title"),
-                        labels={"nif_seller": t("dashboard.invoices.chart_x_label"), "total_col": "Total (€)"},
+                        labels={"seller": t("dashboard.invoices.chart_x_label"), "total_col": "Total (€)"},
                         color="color", color_discrete_map="identity",
+                        category_orders={"seller": labels},
                     )
-                    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False)
+                    fig.update_layout(
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        showlegend=False,
+                        xaxis_type="category",  # force string axis — prevents numeric abbreviation
+                    )
                     st.plotly_chart(fig, width='stretch')
 
             # Table — paginated with inline delete
