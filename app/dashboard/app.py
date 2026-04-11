@@ -1798,12 +1798,15 @@ def page_settings(engine):
             LEFT JOIN email_accounts a ON a.id = e.account_id
         """
 
+        def _sql(sql: str, params: dict | None = None) -> pd.DataFrame:
+            """Execute raw SQL and return a DataFrame. Avoids pd.read_sql param issues."""
+            with engine.connect() as _conn:
+                result = _conn.execute(text(sql), params or {})
+                return pd.DataFrame(result.fetchall(), columns=list(result.keys()))
+
         # Status summary
         try:
-            status_df = pd.read_sql(
-                "SELECT status, COUNT(*) AS n FROM emails GROUP BY status ORDER BY n DESC",
-                engine,
-            )
+            status_df = _sql("SELECT status, COUNT(*) AS n FROM emails GROUP BY status ORDER BY n DESC")
             status_summary = "  ·  ".join(
                 f"`{r['status']}` **{r['n']}**" for _, r in status_df.iterrows()
             )
@@ -1827,18 +1830,19 @@ def page_settings(engine):
 
         if scope == "Last N emails (any status)":
             n = st.number_input("Number of emails", min_value=1, max_value=500, value=10, step=1)
-            rows = pd.read_sql(_BASE_Q + f"ORDER BY e.id DESC LIMIT {int(n)}", engine)
+            rows = _sql(_BASE_Q + f"ORDER BY e.id DESC LIMIT {int(n)}")
             moved = int((rows["status"] == "moved").sum())
             st.caption(f"{len(rows)} email(s) — {moved} already in folders.")
 
         elif scope == "Already in folders (status=moved)":
             folder_filter = st.text_input("Filter by folder name (blank = all)", placeholder="Faturas")
-            q = _BASE_Q + "WHERE e.status = 'moved'"
             if folder_filter.strip():
-                rows = pd.read_sql(q + " AND e.classification_label ILIKE :f ORDER BY e.id DESC",
-                                   engine, params={"f": f"%{folder_filter.strip()}%"})
+                rows = _sql(
+                    _BASE_Q + "WHERE e.status = 'moved' AND e.classification_label ILIKE :f ORDER BY e.id DESC",
+                    {"f": f"%{folder_filter.strip()}%"},
+                )
             else:
-                rows = pd.read_sql(q + " ORDER BY e.id DESC", engine)
+                rows = _sql(_BASE_Q + "WHERE e.status = 'moved' ORDER BY e.id DESC")
             folder_counts = rows["classification_label"].value_counts().to_dict()
             summary = "  ·  ".join(f"{k}: **{v}**" for k, v in list(folder_counts.items())[:6])
             st.caption(f"{len(rows)} email(s) — {summary}")
@@ -1848,8 +1852,9 @@ def page_settings(engine):
             if raw.strip():
                 try:
                     parsed_ids = [int(x.strip()) for x in raw.split(",") if x.strip()]
-                    rows = pd.read_sql(_BASE_Q + "WHERE e.id = ANY(:ids)", engine,
-                                       params={"ids": parsed_ids})
+                    # IDs are validated ints — safe to interpolate directly
+                    id_list = ",".join(str(i) for i in parsed_ids)
+                    rows = _sql(_BASE_Q + f"WHERE e.id = ANY(ARRAY[{id_list}])")
                     st.caption(f"{len(rows)} email(s) found: " +
                                ", ".join(f"#{r['id']} [{r['status']}] ({r['managed_by']})"
                                          for _, r in rows.iterrows()))
@@ -1857,7 +1862,7 @@ def page_settings(engine):
                     st.error("Invalid IDs — use comma-separated numbers.")
 
         else:  # All emails
-            rows = pd.read_sql(_BASE_Q + "ORDER BY e.id DESC", engine)
+            rows = _sql(_BASE_Q + "ORDER BY e.id DESC")
             st.caption(f"{len(rows)} email(s) total.")
 
         # Show worker split before confirming
