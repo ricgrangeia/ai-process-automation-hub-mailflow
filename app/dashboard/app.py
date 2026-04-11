@@ -1919,6 +1919,98 @@ def page_settings(engine):
                 st.error(f"❌ Re-process failed: {e}")
 
 
+def page_sellers(engine, settings):
+    st.title(t("page.sellers.title"))
+    st.caption(t("page.sellers.caption"))
+    _show_flash()
+
+    # ── Lookup button ─────────────────────────────────────────────────────────
+    with st.expander(t("page.sellers.lookup_header"), expanded=False):
+        st.markdown(t("page.sellers.lookup_help"))
+        col_nif, col_btn = st.columns([3, 1])
+        lookup_nif = col_nif.text_input("NIF", placeholder="508517592", label_visibility="collapsed")
+        if col_btn.button(t("page.sellers.lookup_btn"), type="primary") and lookup_nif.strip():
+            nif = lookup_nif.strip()
+            tool_server_url = getattr(settings, "tool_server_url", None)
+            api_key = getattr(settings, "tool_server_api_key", "") or ""
+            if not tool_server_url:
+                st.error(t("page.sellers.no_tool_server"))
+            else:
+                import asyncio, os
+                from app.invoices.nif_lookup import resolve_seller_name
+                db_url = os.environ.get("DATABASE_URL", "").replace("+asyncpg", "")
+                with st.spinner(t("page.sellers.looking_up")):
+                    name = asyncio.run(resolve_seller_name(nif, db_url, tool_server_url, api_key))
+                if name:
+                    _set_flash("success", t("page.sellers.lookup_found", nif=nif, name=name))
+                else:
+                    _set_flash("warning", t("page.sellers.lookup_not_found", nif=nif))
+                st.rerun()
+
+    # ── Sellers table ─────────────────────────────────────────────────────────
+    try:
+        df = pd.read_sql(
+            """
+            SELECT
+                s.nif, s.name, s.activity, s.cae, s.address, s.situation,
+                COUNT(i.id) AS invoice_count,
+                MAX(i.invoice_date) AS last_invoice
+            FROM sellers s
+            LEFT JOIN invoices i ON i.nif_seller = s.nif
+            GROUP BY s.id, s.nif, s.name, s.activity, s.cae, s.address, s.situation
+            ORDER BY invoice_count DESC, s.name
+            """,
+            engine,
+        )
+    except Exception as e:
+        st.error(t("page.sellers.load_error", error=e))
+        return
+
+    if df.empty:
+        st.info(t("page.sellers.empty"))
+        return
+
+    st.caption(f"{len(df)} {t('page.sellers.count_label')}")
+
+    # ── Search filter ─────────────────────────────────────────────────────────
+    search = st.text_input(t("page.sellers.search"), placeholder="NIF or name…", label_visibility="collapsed")
+    if search.strip():
+        mask = (
+            df["nif"].str.contains(search.strip(), case=False, na=False) |
+            df["name"].str.contains(search.strip(), case=False, na=False) |
+            df["activity"].str.contains(search.strip(), case=False, na=False)
+        )
+        df = df[mask]
+
+    # ── Display ───────────────────────────────────────────────────────────────
+    st.dataframe(
+        df.rename(columns={
+            "nif":           t("page.sellers.col_nif"),
+            "name":          t("page.sellers.col_name"),
+            "activity":      t("page.sellers.col_activity"),
+            "cae":           t("page.sellers.col_cae"),
+            "address":       t("page.sellers.col_address"),
+            "situation":     t("page.sellers.col_situation"),
+            "invoice_count": t("page.sellers.col_invoices"),
+            "last_invoice":  t("page.sellers.col_last_invoice"),
+        }),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    # ── Delete ────────────────────────────────────────────────────────────────
+    with st.expander(t("page.sellers.delete_header"), expanded=False):
+        del_nif = st.text_input(t("page.sellers.delete_nif"), placeholder="508517592")
+        if st.button(t("page.sellers.delete_btn"), type="secondary") and del_nif.strip():
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text("DELETE FROM sellers WHERE nif = :nif"), {"nif": del_nif.strip()})
+                _set_flash("success", t("page.sellers.deleted", nif=del_nif.strip()))
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ {e}")
+
+
 def page_companies(engine):
     st.title(t("page.companies.title"))
     st.caption(t("page.companies.caption"))
@@ -2207,6 +2299,7 @@ if login_screen():
         t("sidebar.nav_rules"),
         t("sidebar.nav_folders"),
         t("sidebar.nav_companies"),
+        t("sidebar.nav_sellers"),
         t("sidebar.nav_invoices"),
         t("sidebar.nav_audit"),
         t("sidebar.nav_settings"),
@@ -2235,6 +2328,8 @@ if login_screen():
         page_folders(engine, settings)
     elif page == t("sidebar.nav_companies"):
         page_companies(engine)
+    elif page == t("sidebar.nav_sellers"):
+        page_sellers(engine, settings)
     elif page == t("sidebar.nav_invoices"):
         page_invoices(engine)
     elif page == t("sidebar.nav_audit"):

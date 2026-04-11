@@ -15,9 +15,37 @@ save_invoice_from_body(session_factory, email_id, subject, body_text, settings, 
 """
 
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger("invoices.service")
+
+
+async def _enrich_seller_name(invoice_data: dict, settings) -> None:
+    """
+    If seller_name is missing, call the ai-api NIF lookup tool and patch
+    invoice_data in place. Fire-and-forget — errors never propagate.
+    """
+    if invoice_data.get("seller_name"):
+        return
+    nif = invoice_data.get("nif_seller")
+    if not nif:
+        return
+
+    db_url          = os.environ.get("DATABASE_URL", "").replace("+asyncpg", "")
+    tool_server_url = getattr(settings, "tool_server_url", None)
+    api_key         = getattr(settings, "tool_server_api_key", "") or ""
+
+    if not db_url or not tool_server_url:
+        return
+
+    try:
+        from app.invoices.nif_lookup import resolve_seller_name
+        name = await resolve_seller_name(nif, db_url, tool_server_url, api_key)
+        if name:
+            invoice_data["seller_name"] = name
+    except Exception as e:
+        logger.warning(f"NIF enrichment failed for {nif}: {e}")
 
 
 async def save_invoice_from_pdf(
@@ -64,6 +92,7 @@ async def save_invoice_from_pdf(
         logger.error(f"persist_invoice failed for email {email_id}: {e}")
         return None
 
+    await _enrich_seller_name(invoice_data, settings)
     return invoice_data
 
 
@@ -112,4 +141,5 @@ async def save_invoice_from_body(
         logger.error(f"persist_invoice failed for email {email_id}: {e}")
         return None
 
+    await _enrich_seller_name(result, settings)
     return result
