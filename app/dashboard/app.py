@@ -1471,7 +1471,7 @@ def page_invoices(engine):
                     fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False)
                     st.plotly_chart(fig, width='stretch')
 
-            # Table — paginated
+            # Table — paginated with inline delete
             _fhash_at = hashlib.md5(
                 str((months_back, nif_filter, search_filter, "at")).encode()
             ).hexdigest()[:8]
@@ -1479,7 +1479,7 @@ def page_invoices(engine):
             df_at_page = df_at.iloc[_at_offset : _at_offset + _PAGE_SIZE].copy()
 
             display_at = df_at_page[[c for c in [
-                "invoice_date", "document_type", "document_type_description",
+                "id", "invoice_date", "document_type", "document_type_description",
                 "invoice_number", "atcud", "nif_seller", "nif_buyer",
                 "taxable_amount", "vat_amount", "total_amount",
                 "mb_entidade", "mb_referencia", "mb_valor", "mb_data_limite",
@@ -1494,8 +1494,9 @@ def page_invoices(engine):
                 lambda v: f"€ {v:,.2f}" if pd.notna(v) else "—"
             )
             display_at["invoice_date"] = pd.to_datetime(display_at["invoice_date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
+            display_at.insert(0, "🗑️", False)
 
-            st.dataframe(
+            edited_at = st.data_editor(
                 display_at.rename(columns={
                     "invoice_date":              t("dashboard.invoices.col_date"),
                     "document_type":             t("dashboard.invoices.col_doc_type"),
@@ -1514,8 +1515,24 @@ def page_invoices(engine):
                     "subject":        t("dashboard.invoices.col_subject"),
                     "email_id":       "Email ID",
                 }),
-                width='stretch', hide_index=True,
+                column_config={
+                    "🗑️": st.column_config.CheckboxColumn("🗑️", help="Select to delete", width="small"),
+                    "id": st.column_config.NumberColumn("ID", width="small"),
+                },
+                disabled=[c for c in display_at.columns if c != "🗑️"],
+                width='stretch',
+                hide_index=True,
+                key="editor_at",
             )
+            to_delete_at = display_at.loc[edited_at["🗑️"].values, "id"].tolist() if "🗑️" in edited_at.columns else []
+            if to_delete_at:
+                st.warning(f"⚠️ {len(to_delete_at)} invoice(s) selected. This does **not** delete the original email.")
+                if st.button("🗑️ Delete selected", type="primary", key="del_at"):
+                    with engine.begin() as conn:
+                        conn.execute(text("DELETE FROM invoices WHERE id = ANY(:ids)"), {"ids": to_delete_at})
+                    _set_flash("success", f"✅ Deleted {len(to_delete_at)} invoice(s).")
+                    st.rerun()
+
             csv_at = df_at.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Export CSV", csv_at, "invoices_at.csv", "text/csv", key="csv_at")
 
@@ -1532,7 +1549,7 @@ def page_invoices(engine):
             ci1.metric(t("dashboard.invoices.metric_total_gross"), f"€ {intl_gross:,.2f}")
             ci2.metric(t("dashboard.invoices.intl_count"), intl_count)
 
-            # Table — paginated
+            # Table — paginated with inline delete
             _fhash_intl = hashlib.md5(
                 str((months_back, nif_filter, search_filter, "intl")).encode()
             ).hexdigest()[:8]
@@ -1540,7 +1557,7 @@ def page_invoices(engine):
             df_intl_page = df_intl.iloc[_intl_offset : _intl_offset + _PAGE_SIZE].copy()
 
             display_intl = df_intl_page[[c for c in [
-                "invoice_date", "seller_name", "seller_country",
+                "id", "invoice_date", "seller_name", "seller_country",
                 "invoice_number", "receipt_number",
                 "taxable_amount", "vat_amount", "vat_rate", "total_amount", "currency",
                 "payment_method", "card_last4",
@@ -1549,7 +1566,6 @@ def page_invoices(engine):
 
             display_intl["invoice_date"] = pd.to_datetime(display_intl["invoice_date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
 
-            # Format amounts with their own currency
             for amt_col in ["taxable_amount", "vat_amount", "total_amount"]:
                 display_intl[amt_col] = display_intl.apply(
                     lambda row, c=amt_col: _fmt_amount(row[c], row.get("currency", "€")),
@@ -1559,8 +1575,9 @@ def page_invoices(engine):
                 display_intl["vat_rate"] = pd.to_numeric(display_intl["vat_rate"], errors="coerce").apply(
                     lambda v: f"{v*100:.0f}%" if pd.notna(v) else "—"
                 )
+            display_intl.insert(0, "🗑️", False)
 
-            st.dataframe(
+            edited_intl = st.data_editor(
                 display_intl.rename(columns={
                     "invoice_date":   t("dashboard.invoices.col_date"),
                     "seller_name":    t("dashboard.invoices.col_seller_name"),
@@ -1577,50 +1594,27 @@ def page_invoices(engine):
                     "subject":        t("dashboard.invoices.col_subject"),
                     "email_id":       "Email ID",
                 }),
-                width='stretch', hide_index=True,
+                column_config={
+                    "🗑️": st.column_config.CheckboxColumn("🗑️", help="Select to delete", width="small"),
+                    "id": st.column_config.NumberColumn("ID", width="small"),
+                },
+                disabled=[c for c in display_intl.columns if c != "🗑️"],
+                width='stretch',
+                hide_index=True,
+                key="editor_intl",
             )
+            to_delete_intl = display_intl.loc[edited_intl["🗑️"].values, "id"].tolist() if "🗑️" in edited_intl.columns else []
+            if to_delete_intl:
+                st.warning(f"⚠️ {len(to_delete_intl)} invoice(s) selected. This does **not** delete the original email.")
+                if st.button("🗑️ Delete selected", type="primary", key="del_intl"):
+                    with engine.begin() as conn:
+                        conn.execute(text("DELETE FROM invoices WHERE id = ANY(:ids)"), {"ids": to_delete_intl})
+                    _set_flash("success", f"✅ Deleted {len(to_delete_intl)} invoice(s).")
+                    st.rerun()
+
             csv_intl = df_intl.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Export CSV", csv_intl, "invoices_international.csv", "text/csv", key="csv_intl")
 
-    # ── Delete (works across both tabs — uses full df) ──
-    st.divider()
-    with st.expander("🗑️ Delete invoices"):
-        def _row_label(row) -> str:
-            num  = row.get("invoice_number") or row.get("receipt_number") or row.get("atcud") or f"ID {row['id']}"
-            date = str(row.get("invoice_date") or "?")[:10]
-            who  = row.get("seller_name") or row.get("nif_seller") or "?"
-            return f"{num}  ·  {date}  ·  {who}"
-
-        options: dict[str, int] = {
-            _row_label(row): int(row["id"])
-            for _, row in df.iterrows()
-        }
-
-        selected_labels = st.multiselect(
-            "Select invoices to delete",
-            options=list(options.keys()),
-            placeholder="Choose one or more invoices…",
-        )
-
-        if selected_labels:
-            ids_to_delete = [options[label] for label in selected_labels]
-            st.warning(
-                f"⚠️ {len(ids_to_delete)} invoice record(s) will be permanently deleted. "
-                "This does **not** delete the original email."
-            )
-            confirmed = st.checkbox("Yes, I want to delete these records")
-            if confirmed:
-                if st.button("🗑️ Delete selected", type="primary"):
-                    try:
-                        with engine.begin() as conn:
-                            conn.execute(
-                                text("DELETE FROM invoices WHERE id = ANY(:ids)"),
-                                {"ids": ids_to_delete},
-                            )
-                        _set_flash("success", f"✅ Deleted {len(ids_to_delete)} invoice(s).")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Delete failed: {e}")
 
 
 def page_settings(engine):
