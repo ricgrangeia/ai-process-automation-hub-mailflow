@@ -264,3 +264,130 @@ name_saved        = "✅ Nome do remetente guardado: {name}"
 on_message   = "🎓 *Modo Aprendizagem ATIVO*\n\nTodas as classificações da IA serão enviadas aqui para revisão antes de serem aplicadas."
 off_message  = "✅ *Modo Aprendizagem DESATIVO* — a funcionar de forma autónoma."
 status       = "🎓 O Modo Aprendizagem está atualmente *{status}*.\n\nUsa `/learn on` ou `/learn off`."
+
+# ── Texto de ajuda in-app ─────────────────────────────────────────────────────
+
+[help]
+_label = "Como funciona"
+
+dashboard = """
+**O que vês aqui**
+Os últimos 200 e-mails classificados e movidos pelo AI Worker.
+
+**Métricas**
+- **Total de E-mails** — e-mails processados desde que o sistema iniciou
+- **Confiança Média** — certeza média da IA (mais alto = melhor)
+- **Tempo Médio vLLM** — tempo médio de resposta do LLM em segundos
+
+**Gráficos**
+- **Distribuição de Pastas** — quais as pastas que receberam mais e-mails
+- **Decisões: Regras vs IA** — quantas decisões vieram de regras aprendidas vs o modelo de IA
+
+**Tabela**
+Clica no cabeçalho de qualquer coluna para ordenar. A confiança é mostrada em percentagem.
+"""
+
+accounts = """
+**O que podes fazer aqui**
+- **Ativar / Desativar** — iniciar ou parar o worker de verificar uma caixa de correio
+- **Modo de Worker** — controla qual worker gere esta conta:
+  - 🤖 *AI Worker* — pipeline completo: classifica, verifica regras, move, revisão no Telegram
+  - 🧾 *Invoice Worker* — processa apenas e-mails financeiros (faturas, recibos); ignora o resto (fica não lido, sem mover)
+- **Redefinir password** — atualiza a password IMAP/Outlook encriptada
+
+**Adicionar Conta**
+Usa os separadores IMAP ou Outlook abaixo para configurar uma nova caixa.
+"""
+
+rules = """
+**O que são regras aprendidas?**
+Regras são padrões guardados quando corrigis um e-mail no Telegram. Disparam **antes** da IA — custo zero de LLM, decisões instantâneas.
+
+**Tipos de condição**
+- `sender_email` — correspondência exata de endereço de e-mail
+- `sender_domain` — correspondência de domínio (ex: `empresa.pt`)
+- `keyword` — palavra encontrada no assunto ou corpo
+
+**O que podes fazer**
+- **Barra de filtros** — pesquisa por palavra-chave, remetente, pasta ou estado
+- **Ativar/Desativar** — desativa uma regra sem a eliminar
+- **Editar** — altera condições, min-match ou pasta de destino
+- **Eliminar** — remove uma regra permanentemente
+- **Adicionar manualmente** — cria regras sem passar pelo Telegram
+"""
+
+folders = """
+**Para que servem as pastas**
+As pastas são as categorias de classificação usadas no prompt da IA, botões do Telegram e destinos IMAP.
+
+**O que podes fazer**
+- As pastas ativas aparecem nas escolhas da IA ao classificar e-mails
+- **Desativar** — oculta uma pasta da IA sem apagar o histórico
+- **Renomear** — também renomeia a pasta IMAP em **todas as contas ativas**
+- **Eliminar** — só funciona se nenhum e-mail referenciar a pasta (desativa em vez de eliminar)
+
+**Adicionar Pasta**
+As novas pastas são criadas na base de dados e como caixas IMAP em todas as contas ativas.
+"""
+
+companies = """
+**Para que servem as empresas**
+As empresas são relacionadas a faturas via NIF. Quando o NIF vendedor ou comprador de uma fatura coincide com uma empresa registada, o PDF é encaminhado para a pasta de arquivo dessa empresa.
+
+**O que podes fazer**
+- **Adicionar** — regista uma empresa com nome + NIF
+- **Editar** — atualiza nome, NIF ou notas
+- **Inativa** — exclui do matching sem eliminar
+- **Eliminar** — remove permanentemente (não afeta faturas existentes)
+"""
+
+invoices = """
+**O que vês aqui**
+Dados de faturas extraídos de QR codes em PDFs (formato AT/ATCUD português) e corpos de e-mail.
+
+**Separadores**
+- 🇵🇹 **Faturas AT** — faturas portuguesas com ATCUD, NIF, referência de pagamento MB
+- 🌍 **Estrangeiro** — recibos internacionais, subscrições SaaS, transferências bancárias
+
+**Filtros**
+- *Últimos N meses* — intervalo de datas
+- *NIF do vendedor contém* — filtra por NIF do vendedor
+- *Nº Fatura / ATCUD contém* — pesquisa por número de documento
+
+**Exportar**
+Usa o botão **⬇️ Export CSV** para descarregar todas as linhas visíveis.
+"""
+
+audit = """
+**O que o registo de auditoria acompanha**
+Todas as ações do dashboard e dos workers são registadas aqui de forma permanente.
+
+**Tipos de actor**
+- `dashboard` — ações que fazes nesta interface
+- `ai-worker` — classificação e movimento de e-mails
+- `invoice-worker` — processamento de e-mails financeiros
+- `telegram` — aprovações e correções via Telegram
+
+**Filtros**
+Filtra por nome do actor, tipo de ação ou quantos dias mostrar.
+São apresentados no máximo 500 eventos de cada vez.
+"""
+
+settings = """
+**Estrutura da pasta de arquivo**
+Define o caminho de subpasta onde os PDFs de faturas exportados são guardados dentro de `FILES_ROOT`.
+
+**Tokens disponíveis**
+Usa `{token}` como marcadores para construir caminhos dinâmicos. Exemplo:
+`{company}/{year}/{month}-{month_name}/{category}/{supplier}`
+→ `Acme Lda/2025/04-April/Faturas/EDP Comercial/invoice.pdf`
+
+**Guardar**
+As alterações ficam ativas imediatamente — não é necessário reiniciar. Usa **↩️ Repor** para voltar ao valor predefinido.
+"""
+
+[help.sidebar]
+hybrid     = "As regras disparam primeiro; e-mails incertos vão para o LLM. Melhor equilíbrio entre custo e precisão."
+rules_only = "Só as regras aprendidas são executadas. E-mails sem correspondência vão para o Telegram. Custo zero de LLM."
+llm_only   = "Todos os e-mails vão para o LLM, ignorando as regras. Útil para auditar a qualidade do modelo."
+auto_learn = "Modo híbrido + decisões LLM com alta confiança são guardadas automaticamente como novas regras."

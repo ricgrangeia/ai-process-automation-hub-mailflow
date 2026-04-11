@@ -44,6 +44,14 @@ def _show_flash() -> None:
     level, msg = flash
     {"success": st.success, "error": st.error, "warning": st.warning}.get(level, st.info)(msg)
 
+
+def _page_help(section: str) -> None:
+    """Render a collapsible ℹ️ help panel for the given page section."""
+    content = t(f"help.{section}")
+    label = t("help._label")
+    with st.expander(f"ℹ️ {label}", expanded=False):
+        st.markdown(content)
+
 # Ensure project root (parent of app/) is first in sys.path so `app.*` imports resolve
 # regardless of where Streamlit is launched from.
 _project_root = str(Path(__file__).resolve().parent.parent.parent)
@@ -228,6 +236,7 @@ def get_db_engine(db_url):
 
 def page_dashboard(engine, settings):
     st.title(t("dashboard.title"))
+    _page_help("dashboard")
 
     def load_data():
         query = f"""
@@ -313,6 +322,7 @@ def page_dashboard(engine, settings):
 def page_email_accounts(engine, settings):
     st.title(t("page.accounts.title"))
     _show_flash()
+    _page_help("accounts")
 
     # ---- list accounts ----
     def load_accounts():
@@ -573,6 +583,7 @@ def page_learned_rules(engine, settings):
     st.title(t("page.rules.title"))
     st.caption(t("page.rules.caption"))
     _show_flash()
+    _page_help("rules")
     FOLDERS = _get_folder_names(engine)
 
     try:
@@ -906,6 +917,7 @@ def page_learned_rules(engine, settings):
 def page_folders(engine, settings):
     st.title(t("page.folders.title"))
     st.caption(t("page.folders.caption"))
+    _page_help("folders")
 
     # Show IMAP rename feedback persisted across st.rerun()
     if "_folder_imap_msg" in st.session_state:
@@ -1211,6 +1223,7 @@ def page_folders(engine, settings):
 def page_invoices(engine):
     st.title(t("dashboard.invoices.title"))
     _show_flash()
+    _page_help("invoices")
     st.caption(t("dashboard.invoices.caption"))
 
     from datetime import datetime, timezone, timedelta
@@ -1497,6 +1510,7 @@ def page_invoices(engine):
 def page_settings(engine):
     st.title(t("page.settings.title"))
     _show_flash()
+    _page_help("settings")
 
     try:
         from app.core.system_settings import (
@@ -1578,6 +1592,7 @@ def page_companies(engine):
     st.title(t("page.companies.title"))
     st.caption(t("page.companies.caption"))
     _show_flash()
+    _page_help("companies")
 
     # ── Add company form ──────────────────────────────────────────────────────
     with st.expander(t("page.companies.add_header"), expanded=False):
@@ -1678,6 +1693,7 @@ def page_companies(engine):
 
 def page_audit_log(engine):
     st.title(t("page.audit.title"))
+    _page_help("audit")
 
     # Filters
     col_actor, col_action, col_days = st.columns(3)
@@ -1808,6 +1824,10 @@ if login_screen():
         label_visibility="collapsed",
     )
     _selected_mode = _mode_keys[_mode_labels.index(_selected_label)]
+
+    _mode_desc = t(f"help.sidebar.{_selected_mode}")
+    if _mode_desc and _mode_desc != f"help.sidebar.{_selected_mode}":
+        st.sidebar.caption(_mode_desc)
 
     if _selected_mode != _current_mode:
         try:

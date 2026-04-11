@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 2.6.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 2.7.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -28,7 +28,7 @@ for supervision and account management.
 | ROI telemetry — token counts, processing time | ✅ |
 | Fernet encryption for stored credentials | ✅ |
 | Streamlit dashboard — KPIs, charts, audit log | ✅ |
-| Email Accounts UI — add / toggle / delete | ✅ |
+| Email Accounts UI — add / toggle / reset password / worker mode | ✅ |
 | Docker Compose — dev + production (Traefik/HTTPS) | ✅ |
 | GitHub Actions → Portainer auto-deploy | ✅ |
 | Telegram bot — NeedsReview inline review + reply | ✅ |
@@ -47,7 +47,7 @@ for supervision and account management.
 | Alembic migrations — auto-applied on ai-worker startup, schema always up to date | ✅ |
 | Audit log — every action recorded with actor, timestamp, details | ✅ |
 | Dashboard Audit Log page — filterable by actor, action type, date range | ✅ |
-| Dashboard Learned Rules page — view, enable/disable, edit, delete, add manually | ✅ |
+| Dashboard Learned Rules page — search/filter by keyword, folder, status; edit, delete, add | ✅ |
 | Operation Mode system — hybrid / rules_only / llm_only / auto_learn | ✅ |
 | Auto-learn — high-confidence LLM decisions auto-saved as `ai_auto` learned rules | ✅ |
 | Dashboard operation mode selector — live switch without restart | ✅ |
@@ -62,19 +62,26 @@ for supervision and account management.
 | Telegram "➕ New folder" on every NeedsReview card — type a name, creates in DB + IMAP + moves | ✅ |
 | Query search by sender_name and sender_type (individual / company) | ✅ |
 | LLM time tracking — dashboard Tempo(s) shows LLM inference time for all email paths | ✅ |
-| Invoice QR extraction — PDF attachments on any classified folder decoded via AI Tool Server | ✅ |
+| Invoice QR extraction — PDF attachments decoded via AI Tool Server | ✅ |
 | Invoice payment data — Multibanco entity, reference, amount and due date extracted via LLM | ✅ |
 | Invoice deduplication — (nif_seller, invoice_number) → ATCUD → email_id, three-level dedup | ✅ |
 | Invoice document_type — AT field D parsed and stored (FT, FS, FR, ND, NC, GR, GT…) | ✅ |
+| Invoice document_type_description — human-readable label derived from document_type code | ✅ |
 | Payment extraction gate — payment step skipped for non-payment doc types (ND, NC, GR, etc.) | ✅ |
 | ATCUD QR selection — picks first QR with field H; skips decorative/tracking QR codes | ✅ |
-| Invoices dashboard page — KPIs (gross, VAT, taxable), seller chart, filterable table, CSV export | ✅ |
-| Invoices dashboard delete — select and permanently remove invoice records with confirmation | ✅ |
+| International invoice support — non-PT-AT PDFs extracted via LLM (seller_name, country, currency, VAT rate…) | ✅ |
+| Invoice origin tracking — pt_at / international / payment_confirmation / bank_transfer / receipt | ✅ |
+| Invoice dashboard — two tabs: 🇵🇹 AT Invoices + 🌍 Foreign; KPIs, charts, CSV export, delete | ✅ |
+| Invoice Worker — dedicated service for invoice-only managed accounts | ✅ |
+| Per-account worker mode — ai_worker (full AI) or invoice_worker (invoices only) | ✅ |
+| Invoice Worker body detection — keyword scan + LLM extraction for emails without PDF | ✅ |
+| Payment method field — card / bank_transfer / mbway / multibanco / paypal | ✅ |
 | LLM routing via AI API — mailflow routes LLM calls through ai-api instead of vLLM directly | ✅ |
 | Full i18n — dashboard, Telegram notifications, query worker; `LANGUAGE=pt` env var | ✅ |
 | Dashboard login persistence — cookie-based session, survives page refresh without re-login | ✅ |
 | Keyword extractor — real words only: preserves accented chars, rejects codes and digit strings | ✅ |
 | LLM folder names — prompts enforce exact folder names, no translation to English | ✅ |
+| Dashboard flash feedback — all save/delete actions show success or error after rerun | ✅ |
 
 ---
 
@@ -84,9 +91,15 @@ for supervision and account management.
 IMAP / Outlook
       │
       ▼
- email-worker / api-worker
- (fetch unseen messages, parse RFC822)
-      │
+ email-worker / api-worker           invoice-worker
+ (managed_by = ai_worker)        (managed_by = invoice_worker)
+ fetch unseen → parse RFC822         fetch unseen → keyword scan
+      │                                    │
+      │                           PDF? ────┤
+      │                           ├─ yes → AI Tool Server → QR/LLM extract
+      │                           │        → save DB + archive PDF + move
+      │                           └─ body keywords → LLM body extract
+      │                                    → save DB + move
       ▼
   Redis  mailai:jobs:email
       │
@@ -146,15 +159,27 @@ IMAP / Outlook
 
 | Service | Role |
 |---|---|
-| `email-worker` | Polls IMAP, parses emails, enqueues jobs |
-| `api-worker` | Polls Microsoft Graph (Outlook), enqueues jobs |
+| `email-worker` | Polls IMAP accounts (`managed_by = ai_worker`), parses emails, enqueues jobs |
+| `api-worker` | Polls Microsoft Graph accounts (`managed_by = ai_worker`), enqueues jobs |
 | `ai-worker` | Classifies emails, executes actions, runs DB migrations on startup |
+| `invoice-worker` | Polls IMAP accounts (`managed_by = invoice_worker`); PDF extract + body keyword detect; saves invoices + archives PDFs + moves emails |
 | `telegram-bot` | Thin UI layer — user input, NeedsReview callbacks, admin commands |
 | `review-worker` | Learning Mode — sends review cards, handles Approve / Change / Fix sender |
 | `query-worker` | Natural language search — LLM parse → DB search → deliver results |
-| `dashboard` | Streamlit UI — supervision + account management |
+| `dashboard` | Streamlit UI — supervision + account management (port 8501, Traefik-proxied) |
 | `redis` | Job queues (AOF persistent) — `jobs:email`, `jobs:query`, `jobs:review` |
 | `postgres` | Persistence (external, via `database-network`) |
+
+### Invoice Worker — Collaborative Mode
+
+The `invoice-worker` lets you use one mailbox for both human email and automated invoice management:
+
+- Set `managed_by = invoice_worker` on any account from the dashboard
+- The ai-worker and api-worker ignore those accounts entirely
+- The invoice-worker scans only those accounts and acts on financial emails only:
+  - **PDF emails** → tool server QR decode → LLM merge → save DB → archive PDF → move to `Invoices` folder → Telegram notification
+  - **Body-only financial emails** (payment confirmations, bank transfers, receipts) → keyword scan (free, zero LLM) → if matched: LLM body extraction → save DB → move
+  - **Everything else** → left completely untouched (unread, unmoved)
 
 ### Code Structure
 
@@ -171,8 +196,8 @@ app/
 ├── folders/                # Dynamic folder registry — DB-backed, drives LLM prompt + Telegram UI
 ├── ingestion/
 │   ├── parser.py           # RFC822 email parser (shared by all sources)
-│   ├── imap/               # IMAP client + polling worker
-│   └── outlook/            # Microsoft Graph client + polling worker
+│   ├── imap/               # IMAP client + polling worker (filters managed_by = ai_worker)
+│   └── outlook/            # Microsoft Graph client + polling worker (filters managed_by = ai_worker)
 ├── processing/             # Redis queue interface + AI worker loop
 │   └── actions/            # Pluggable actions: move_folder, export_pdf
 ├── review/                 # Learning Mode review domain
@@ -184,28 +209,53 @@ app/
 │   ├── repository.py       # Dynamic SQLAlchemy query against emails table
 │   ├── exporter.py         # SMTP email with .eml + PDF attachments
 │   └── worker.py           # Redis consumer — processes search + deliver jobs
-├── invoices/               # Invoice QR extraction domain
-│   ├── models.py           # Invoice ORM model (nif_seller, amounts, ATCUD, MB payment fields, raw_qr)
+├── invoices/               # Invoice extraction domain
+│   ├── models.py           # Invoice ORM model — nif_seller/buyer, amounts, ATCUD, MB payment,
+│   │                       #   document_type, document_type_description, invoice_origin,
+│   │                       #   seller_name, seller_country, currency, vat_rate, receipt_number,
+│   │                       #   card_last4, payment_method, raw_qr
+│   ├── document_types.py   # DOCUMENT_TYPES dict — AT code → human label (FT→"Fatura", etc.)
 │   ├── qr_parser.py        # Portuguese AT/ATCUD QR string parser
-│   └── extractor.py        # Calls AI Tool Server combined endpoint, deduplicates by seller+number, persists
+│   └── extractor.py        # Calls AI Tool Server, deduplicates by seller+number, persists
+├── invoice_worker/         # Invoice Worker — collaborative mode for financial-only accounts
+│   ├── detector.py         # Two-stage: PDF check → body keyword scan (PAYMENT_KEYWORDS regex)
+│   ├── body_extractor.py   # LLM extraction from email body (payment_confirmation, bank_transfer…)
+│   └── worker.py           # Poll loop — filters managed_by = invoice_worker; full pipeline
 ├── telegram/               # Telegram bot — thin UI layer, pushes jobs to Redis
 └── dashboard/              # Streamlit UI
+    └── app.py              # All pages: dashboard, accounts, rules, folders, companies, invoices,
+                            #   settings, audit log; flash feedback, i18n, cookie login
 
-alembic/                    # Database migration scripts
+alembic/                    # Database migration scripts (auto-run on ai-worker startup)
 ├── env.py                  # Async engine setup, all models imported
 └── versions/
-    ├── 001_baseline.py              # No-op — marks existing schema
-    ├── 002_add_sender_fields.py     # Adds sender_name + sender_type to emails
-    ├── 003_add_audit_logs.py        # Creates audit_logs table
-    ├── 004_add_learned_rules_source.py  # Adds source column (human | ai_auto)
-    ├── 005_add_folders.py               # Creates folders table, seeds defaults
-    ├── 006_add_invoices.py              # Creates invoices table
-    ├── 007_add_mb_payment_to_invoices.py    # Adds Multibanco payment columns to invoices
-    ├── 008_invoice_dedup_by_seller_number.py  # Changes unique key from email_id to (nif_seller, invoice_number)
-    ├── 009_learned_rules_conditions.py      # Adds conditions column to learned_rules
-    ├── 010_add_companies.py                 # Creates companies table
-    ├── 011_add_system_settings.py           # Creates system_settings table
-    └── 012_add_invoice_document_type.py     # Adds document_type column (AT QR field D)
+    ├── 001_baseline.py                          # No-op — marks existing schema
+    ├── 002_add_sender_fields.py                 # sender_name + sender_type on emails
+    ├── 003_add_audit_logs.py                    # audit_logs table
+    ├── 004_add_learned_rules_source.py          # source column (human | ai_auto)
+    ├── 005_add_folders.py                       # folders table + defaults
+    ├── 006_add_invoices.py                      # invoices table
+    ├── 007_add_mb_payment_to_invoices.py        # Multibanco payment columns
+    ├── 008_invoice_dedup_by_seller_number.py    # unique key (nif_seller, invoice_number)
+    ├── 009_learned_rules_conditions.py          # conditions jsonb column on learned_rules
+    ├── 010_add_companies.py                     # companies table
+    ├── 011_add_system_settings.py               # system_settings table
+    ├── 012_add_invoice_document_type.py         # document_type (AT QR field D)
+    ├── 013_add_invoice_document_type_description.py  # document_type_description String(60)
+    ├── 014_add_invoice_international_fields.py  # invoice_origin, seller_country, currency,
+    │                                            #   vat_rate, receipt_number, card_last4,
+    │                                            #   payment_method
+    └── 015_add_managed_by_to_email_accounts.py  # managed_by on email_accounts (ai_worker | invoice_worker)
+
+locales/
+├── en/                     # English (default fallback)
+│   ├── ui.toml             # Dashboard + Telegram UI strings
+│   ├── prompt.classifier.system.txt    # LLM classifier system prompt
+│   ├── prompt.classifier.user.txt      # LLM classifier user template
+│   ├── prompt.classifier.rule_hint.txt # Rule hint formatting
+│   ├── prompt.invoice.body.txt         # Invoice body extraction prompt
+│   └── prompt.query.parser.txt         # NL query parser prompt
+└── pt/                     # Portuguese (same file set; missing keys fall back to en)
 
 tests/
 ├── conftest.py             # Shared fixtures: FakeEmail, FakeSettings
@@ -220,14 +270,15 @@ tests/
 
 **Dependency rule:** arrows flow inward toward `core/`. No domain imports another domain's internals — only its public `__init__.py` or `contracts.py`.
 
-| To add... | You only touch... |
+| To add… | You only touch… |
 |---|---|
 | New email source (e.g. Gmail) | `ingestion/gmail/` |
 | New classifier | `classification/` |
 | New processing action (webhook, forward, ticket) | `processing/actions/` |
 | New query output (Slack, webhook, PDF report) | `query/exporter.py` |
-| New dashboard page | `dashboard/` |
+| New dashboard page | `dashboard/app.py` |
 | New account type | `accounts/` |
+| New invoice origin / body type | `invoice_worker/detector.py` + `locales/*/prompt.invoice.body.txt` |
 
 ---
 
@@ -247,6 +298,20 @@ tests/
 Folders are stored in the `folders` DB table and managed from the **📁 Folders** dashboard page.
 Renaming a folder updates all existing emails and renames the IMAP folder on every active account.
 When the LLM suggests a folder name that doesn't exist yet, a Telegram card lets you create it with one tap.
+
+---
+
+## Invoice Origins
+
+The `invoice_origin` field classifies the type of financial document found:
+
+| Value | Source | How detected |
+|---|---|---|
+| `pt_at` | Portuguese AT invoice with ATCUD | QR code field H present |
+| `international` | Foreign invoice without ATCUD | PDF with no ATCUD found → LLM extraction |
+| `payment_confirmation` | Card / PayPal / MBWay confirmation | Email body keyword → LLM extraction |
+| `bank_transfer` | Bank transfer statement | Email body keyword → LLM extraction |
+| `receipt` | Store / online receipt | Email body keyword → LLM extraction |
 
 ---
 
@@ -298,7 +363,7 @@ MASTER_KEY=change-me-to-a-random-secret
 # LLM — route through ai-api (recommended) or point directly at vLLM
 # Using ai-api gives LangGraph tool routing + full message history support
 LLM_BASE_URL=http://ai-api:8000/v1
-LLM_API_KEY=your-api-api-key
+LLM_API_KEY=your-api-key
 LLM_MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ
 
 # Worker behaviour (optional)
@@ -327,6 +392,10 @@ REPORT_RECIPIENT=recipient@email.com
 TOOL_SERVER_URL=http://192.168.1.x:8000
 TOOL_SERVER_API_KEY=your-tool-server-key
 
+# File archive root (for PDF export action and invoice-worker archiving)
+FILES_ROOT=/files
+COMPANY_NAME=MyCompany
+
 # Language — controls UI language for Telegram messages, dashboard, LLM prompts
 # Supported: en (default), pt
 LANGUAGE=pt
@@ -336,54 +405,97 @@ LANGUAGE=pt
 
 ## Dashboard
 
-After login, two pages are available from the sidebar:
+After login (cookie-persisted across page refreshes), the following pages are available:
 
-**📊 Dashboard**
+### 📊 Dashboard
 
-- Total emails processed, average AI confidence, average processing time
-- Pie chart — classification distribution
-- Bar chart — rule vs LLM decisions
-- Audit table — last 200 processed emails with sender identity
+- Total emails processed, average AI confidence, average vLLM processing time
+- Pie chart — classification distribution across folders
+- Bar chart — rule vs LLM decisions (source breakdown)
+- Table — last 200 processed emails with subject, sender identity, confidence, source, time
 
-**✉️ Email Accounts**
+### ✉️ Email Accounts
 
-- List all configured accounts with active/inactive status
-- Add IMAP account (password encrypted at rest with Fernet)
-- Add Outlook / Microsoft 365 account
-- Activate / deactivate / reset password
+- List all configured accounts with active/inactive status and assigned worker mode
+- Per-account **Settings** expander:
+  - **Worker Mode** — toggle between `🤖 Full AI Worker` and `🧾 Invoice Worker`; change takes effect immediately on next poll cycle
+  - **Password reset** — update IMAP credential (re-encrypted with Fernet at rest)
+- Add IMAP account (host, port, username, password encrypted at rest)
+- Add Outlook / Microsoft 365 account (Graph UPN)
+- Activate / deactivate accounts without deleting them
 
-**📚 Learned Rules**
+### 📚 Learned Rules
 
-- View all learned rules with hit count, match condition, and action summary
-- Enable / disable rules without deleting them
-- Edit match field, match value, target folder, and PDF path inline
-- Delete rules permanently
-- Add rules manually without going through Telegram
+- **Filter bar** — search by keyword/sender value, filter by target folder, filter by Active/Disabled
+- Live counter: `Showing N / total — M active · K disabled`
+- Per-rule card: conditions, hit count, tenant, created date, active status
+- Enable / disable individual rules without deleting
+- **Edit** expander — change conditions, min-match threshold, target folder, PDF export path
+- **Delete** button (outside form) — with success confirmation flash
+- **Add Rule Manually** form — create rules without going through Telegram
 
-**📁 Folders**
+### 📁 Folders
 
-- List all classification folders with active/disabled status
-- Add new folders — immediately available to the LLM prompt and Telegram buttons
-- Rename folders — updates DB, all email records, and IMAP folder on every active account
-- Enable / disable without deleting
-- Delete folders — blocked if any emails still reference them
+- List all classification folders with active/disabled status and creation date
+- **Add** — creates in DB and on every active IMAP account simultaneously
+- **Rename** — updates DB, all email records (`classification_label`), and IMAP folder on every active account
+- **Enable / Disable** — without deleting
+- **Delete** — blocked if any emails still reference the folder; removes from DB and IMAP
 
-**🧾 Invoices**
+### 🏢 Companies
 
-- Automatically populated when PDF attachments on Invoices-classified emails are decoded via the AI Tool Server
-- QR code data (AT/ATCUD): NIF seller/buyer, invoice number, date, taxable amount, VAT, gross total
-- Payment data (extracted from PDF text via LLM): Multibanco entity, reference, amount, due date
-- Deduplication: same invoice number + seller = one record, even if received in multiple emails
-- KPI row: gross total, total VAT, taxable base, unique sellers
-- Bar chart: top 10 sellers by gross amount
-- Filterable table: by date range, NIF seller, invoice number / ATCUD code
-- CSV export
-- Delete: select one or multiple records with confirmation, removes only the invoice data (original email kept)
+- Match companies to invoices via NIF (buyer/seller) for PDF archive routing
+- Add / edit / delete companies with Name, NIF, Notes, Active flag
+- Used by `ExportPdfAction` to route PDFs under the correct company folder
 
-**📋 Audit Log**
+### 🧾 Invoices
+
+Automatically populated when PDF attachments are decoded or financial emails are processed by the invoice-worker.
+
+**🇵🇹 AT Invoices tab**
+
+- QR code data (AT/ATCUD): NIF seller/buyer, invoice number, ATCUD, date, taxable amount, VAT, gross total
+- Document type (AT field D) with human-readable description (Fatura, Fatura Simplificada, Recibo…)
+- Payment data: Multibanco entity, reference, amount, due date
+- KPIs: gross total, total VAT, taxable base, unique sellers
+- Bar chart: top 5 sellers + Others
+- Filter: last N months, NIF seller contains, invoice # / ATCUD contains
+
+**🌍 Foreign tab**
+
+- International invoices: seller name, country, currency, VAT rate, payment method, card last 4 digits
+- Invoices extracted from non-PT-AT PDFs and body-based financial emails
+
+**Common features**
+
+- CSV export per tab
+- Delete: select one or multiple records with confirmation — removes invoice data only (original email kept)
+
+### ⚙️ Settings
+
+- **Archive Folder Structure** — customise the path template for PDF export:
+  `{company}/{year}/{month}-{month_name}/{category}/{supplier}`
+- Live preview with example values
+- Save / Reset to default
+
+### 📋 Audit Log
 
 - Filterable by actor name, action type, and date range
-- Covers all system actions: AI classifications, human corrections, rule changes, account management, admin commands, DB migrations
+- Covers: AI classifications, human corrections, rule changes, account management, admin commands, DB migrations
+
+---
+
+## Telegram Commands
+
+| Command | Description |
+|---|---|
+| `/start` | Show help menu |
+| `/status` | Current operation mode, LLM model, inbox folder, learning mode status |
+| `/learn on` | Activate Learning Mode — every LLM decision goes to human review before applying |
+| `/learn off` | Deactivate Learning Mode — run autonomously |
+| `/recover` | Re-queue all `needs_review` emails stuck in the pipeline |
+| `/restart` | Gracefully restart the ai-worker |
+| Any free text | Natural language query — "show me invoices from EDP last month" |
 
 ---
 
@@ -398,19 +510,28 @@ pytest tests/unit/      # unit tests only
 pytest -v               # verbose output
 ```
 
-Run workers individually:
+**Run workers individually**
 
 ```bash
 python -m app.ingestion.imap.worker      # email-worker (IMAP)
 python -m app.ingestion.outlook.worker   # api-worker (Outlook)
 python -m app.processing.worker          # ai-worker (classification + migrations)
+python -m app.invoice_worker.worker      # invoice-worker (financial-only accounts)
 python -m app.review.worker              # review-worker (Learning Mode review cards)
 python -m app.telegram.bot               # telegram-bot (callbacks + admin commands)
 python -m app.query.worker               # query-worker (NL search jobs)
 streamlit run app/dashboard/app.py       # dashboard
 ```
 
-Useful Makefile commands:
+**Local Docker Desktop (Windows dev)**
+
+```bash
+docker compose -f docker-compose.local.yml up -d
+```
+
+Uses `env_file: .env` — production reads vars from Portainer (no env_file).
+
+**Useful Makefile commands**
 
 ```bash
 make up             # Start all services
@@ -434,6 +555,15 @@ make shell          # Shell into ai-worker container
 - [ ] Webhook notifications on classification events
 - [ ] Docker health check endpoints
 - [ ] PostgreSQL full-text search (GIN index on subject + body)
+- [x] Invoice Worker — dedicated service for invoice-only managed accounts (managed_by column)
+- [x] International invoice support — non-PT-AT PDFs extracted via LLM
+- [x] Body-based financial detection — keyword scan + LLM for emails without PDF
+- [x] Invoice origin tracking — pt_at / international / payment_confirmation / bank_transfer / receipt
+- [x] Invoice dashboard two-tab layout — 🇵🇹 AT + 🌍 Foreign with separate columns and CSV
+- [x] document_type_description — human-readable AT document type label
+- [x] payment_method field — card / bank_transfer / mbway / multibanco / paypal
+- [x] Rules page search filter — by keyword/sender, folder, active/disabled status
+- [x] Dashboard flash feedback — all save/delete actions survive st.rerun() via session_state
 - [x] Alembic database migrations — auto-applied on startup
 - [x] Redis queue durability on reboot / restart (AOF persistence)
 - [x] Telegram bot — NeedsReview review, learned rules, PDF export actions
@@ -469,17 +599,18 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 - **Python 3.12** — AsyncIO, SQLAlchemy 2.0, httpx, tenacity
 - **PostgreSQL** — asyncpg (workers) + psycopg2 (dashboard)
-- **Redis** — job queue
+- **Redis** — job queue (AOF persistent)
 - **Streamlit** + Plotly + Pandas — dashboard
-- **Cryptography (Fernet)** — credential encryption
+- **Cryptography (Fernet)** — credential encryption at rest
 - **Docker Compose** + Traefik — deployment
 - **GitHub Actions** + Portainer — CI/CD
+- **Alembic** — schema migrations (auto-applied on ai-worker startup)
 
 ---
 
 ## Author
 
-Ricardo Grangeia — Software Engineer — Portugal
+Ricardo Grangeia — Software Engineer — Portugal  
 <https://ricardo.grangeia.pt>
 
 ---

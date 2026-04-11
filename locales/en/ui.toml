@@ -264,3 +264,130 @@ name_saved        = "✅ Sender name saved: {name}"
 on_message   = "🎓 *Learning Mode ON*\n\nEvery AI classification will be sent here for review before being applied."
 off_message  = "✅ *Learning Mode OFF* — running autonomously."
 status       = "🎓 Learning Mode is currently *{status}*.\n\nUse `/learn on` or `/learn off`."
+
+# ── In-app help text ──────────────────────────────────────────────────────────
+
+[help]
+_label = "How this works"
+
+dashboard = """
+**What you see here**
+The last 200 emails classified and moved by the AI worker.
+
+**Metrics**
+- **Total Emails** — emails processed since the system started
+- **Avg Confidence** — how certain the AI was (higher = better)
+- **Avg vLLM Time** — average LLM response time in seconds
+
+**Charts**
+- **Folder Distribution** — which folders received the most emails
+- **Decisions: Rules vs AI** — how many decisions came from learned rules vs the AI model
+
+**Table**
+Click any column header to sort. Confidence is shown as a percentage.
+"""
+
+accounts = """
+**What you can do here**
+- **Activate / Deactivate** — start or stop the worker from polling a mailbox
+- **Worker Mode** — controls which worker handles this account:
+  - 🤖 *AI Worker* — full pipeline: classify, rule-match, move, Telegram review
+  - 🧾 *Invoice Worker* — only processes financial emails (invoices, receipts); ignores everything else (stays unread, unmoved)
+- **Reset password** — update the encrypted IMAP/Outlook password
+
+**Add Account**
+Use the IMAP or Outlook tabs below to configure a new mailbox.
+"""
+
+rules = """
+**What are learned rules?**
+Rules are patterns saved when you correct an email via Telegram. They fire **before** the AI — zero LLM cost, instant decisions.
+
+**Condition types**
+- `sender_email` — exact email address match
+- `sender_domain` — domain match (e.g. `company.pt`)
+- `keyword` — word found in subject or body
+
+**What you can do**
+- **Filter bar** — search by keyword, sender, folder, or active/disabled status
+- **Toggle** — disable a rule without deleting it
+- **Edit** — change conditions, min-match count, or target folder
+- **Delete** — permanently remove a rule
+- **Add manually** — create rules without going through Telegram
+"""
+
+folders = """
+**What folders do**
+Folders are the classification categories used by the AI prompt, Telegram buttons, and IMAP destinations.
+
+**What you can do**
+- Active folders appear in the AI's choices when classifying emails
+- **Disable** — hides a folder from the AI without deleting its history
+- **Rename** — also renames the IMAP folder on **all active accounts**
+- **Delete** — only works if no emails reference the folder (disable instead)
+
+**Add Folder**
+New folders are created both in the database and as IMAP mailboxes on all active accounts.
+"""
+
+companies = """
+**What companies are for**
+Companies are matched to invoices via NIF (Portuguese tax ID). When an invoice's seller or buyer NIF matches a registered company, the PDF is routed to that company's archive folder.
+
+**What you can do**
+- **Add** — register a company with name + NIF
+- **Edit** — update name, NIF, or notes
+- **Inactive** — exclude from matching without deleting
+- **Delete** — permanently remove (does not affect existing invoices)
+"""
+
+invoices = """
+**What you see here**
+Invoice data extracted from PDF QR codes (Portuguese AT/ATCUD format) and email bodies.
+
+**Tabs**
+- 🇵🇹 **AT Invoices** — Portuguese invoices with ATCUD, NIF, MB payment reference
+- 🌍 **Foreign** — international receipts, SaaS subscriptions, bank transfers
+
+**Filters**
+- *Last N months* — date range
+- *NIF seller contains* — filter by seller tax ID
+- *Invoice # / ATCUD contains* — search by document number
+
+**Export**
+Use the **⬇️ Export CSV** button to download all visible rows.
+"""
+
+audit = """
+**What the audit log tracks**
+Every action by dashboard users and workers is recorded here permanently.
+
+**Actor types**
+- `dashboard` — actions you take in this UI
+- `ai-worker` — email classification and moves
+- `invoice-worker` — financial email processing
+- `telegram` — approvals and corrections via Telegram
+
+**Filters**
+Filter by actor name, action type, or how many days back to look.
+Up to 500 events are shown at a time.
+"""
+
+settings = """
+**Archive folder structure**
+Defines the subfolder path where exported invoice PDFs are saved inside `FILES_ROOT`.
+
+**Available tokens**
+Use `{token}` placeholders to build dynamic paths. Example:
+`{company}/{year}/{month}-{month_name}/{category}/{supplier}`
+→ `Acme Lda/2025/04-April/Faturas/EDP Comercial/invoice.pdf`
+
+**Saving**
+Changes take effect immediately — no restart needed. Use **↩️ Reset** to go back to the default.
+"""
+
+[help.sidebar]
+hybrid     = "Rules fire first; uncertain emails go to LLM. Best balance of cost and accuracy."
+rules_only = "Only learned rules run. Unmatched emails go to Telegram for manual review. Zero LLM cost."
+llm_only   = "Every email goes to the LLM, skipping rules. Useful for auditing model quality."
+auto_learn = "Hybrid mode + high-confidence LLM decisions are automatically saved as new rules."
