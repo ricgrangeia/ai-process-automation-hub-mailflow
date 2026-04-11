@@ -1,0 +1,393 @@
+# ── Anmeldebildschirm ────────────────────────────────────────────────────────
+
+[login]
+title     = "🔐 AI Supervisor — Anmeldung"
+username  = "Benutzername"
+password  = "Passwort"
+submit    = "Anmelden"
+success   = "Zugang gewährt!"
+error     = "❌ Ungültiger Benutzername oder Passwort"
+
+# ── Seitenleiste ──────────────────────────────────────────────────────────────
+
+[sidebar]
+title          = "🤖 AI Admin"
+model          = "**Modell:** {model}"
+inbox          = "**Posteingang:** {folder}"
+op_mode        = "**⚙️ Betriebsmodus**"
+mode_changed   = "Modus → {mode}"
+mode_error     = "Fehler beim Setzen des Modus: {error}"
+nav_label      = "Navigation"
+nav_dashboard  = "📊 Dashboard"
+nav_accounts   = "✉️ E-Mail-Konten"
+nav_rules      = "📚 Gelernte Regeln"
+nav_folders    = "📁 Ordner"
+nav_companies  = "🏢 Unternehmen"
+nav_invoices   = "🧾 Rechnungen"
+nav_audit      = "📋 Prüfprotokoll"
+nav_settings   = "⚙️ Einstellungen"
+logout         = "Abmelden"
+
+# ── Seitentitel und Beschriftungen ────────────────────────────────────────────
+
+[page.accounts]
+title              = "✉️ E-Mail-Konten"
+accounts_header    = "Konfigurierte Konten"
+no_accounts        = "Noch keine Konten konfiguriert."
+add_header         = "Konto hinzufügen"
+active_label       = "Aktiv"
+deactivate         = "Deaktivieren"
+activate           = "Aktivieren"
+settings_label     = "Einstellungen"
+reset_pw_label     = "Neues Passwort"
+save_pw_btn        = "Neues Passwort speichern"
+pw_empty_error     = "Das Passwort darf nicht leer sein."
+pw_saved           = "Passwort aktualisiert und verschlüsselt."
+required_error     = "Alle Felder sind erforderlich."
+email_required     = "E-Mail ist erforderlich."
+worker_mode_label  = "Worker-Modus"
+mode_ai            = "KI-Worker"
+mode_invoice       = "Rechnungs-Worker"
+mode_ai_full       = "🤖 Vollständiger KI-Worker"
+mode_invoice_full  = "🧾 Rechnungs-Worker"
+save_mode_btn      = "Modus speichern"
+mode_saved         = "✅ Worker-Modus gespeichert."
+
+[page.rules]
+title                = "📚 Gelernte Regeln"
+caption              = "Regeln werden vor dem KI-Klassifikator angewendet — keine LLM-Kosten, sofortige Entscheidungen."
+load_error           = "❌ Regeln konnten nicht geladen werden: {error}"
+no_rules             = "Noch keine gelernten Regeln. Regeln werden erstellt, wenn Sie eine E-Mail in Telegram korrigieren."
+add_header           = "➕ Regel manuell hinzufügen"
+filter_search        = "Nach Schlüsselwort / Absender suchen"
+filter_search_hint   = "🔍 Schlüsselwort, E-Mail, Domain suchen…"
+filter_folder        = "Nach Ordner filtern"
+filter_status        = "Status"
+filter_all_folders   = "Alle Ordner"
+filter_all_status    = "Alle Status"
+filter_active        = "Aktiv"
+filter_disabled      = "Deaktiviert"
+showing              = "Anzeigen"
+
+[page.folders]
+title         = "📁 Ordner"
+caption       = "Ordner steuern den KI-Prompt, Telegram-Buttons und IMAP-Ziele. Umbenennen benennt auch den IMAP-Ordner auf allen aktiven Konten um."
+load_error    = "❌ Ordner konnten nicht geladen werden: {error}"
+add_header    = "➕ Ordner hinzufügen"
+delete_btn    = "Löschen"
+rename_label  = "Neuer Ordnername"
+name_empty    = "Der Ordnername darf nicht leer sein."
+folder_name   = "Ordnername"
+
+[page.companies]
+title          = "🏢 Unternehmen"
+caption        = "Unternehmen werden über die Steuernummer (NIF) mit Rechnungen verknüpft, um PDFs in den richtigen Archivordner zu leiten."
+add_header     = "➕ Unternehmen hinzufügen"
+load_error     = "❌ Unternehmen konnten nicht geladen werden: {error}"
+no_companies   = "Noch keine Unternehmen. Verwenden Sie das Formular oben, um das erste hinzuzufügen."
+notes_label    = "Notizen"
+active_label   = "Aktiv"
+required_error = "Name und Steuernummer sind erforderlich."
+deleted        = "🗑️ {name} gelöscht"
+
+[page.audit]
+title           = "📋 Prüfprotokoll"
+no_events       = "Keine Ereignisse für die ausgewählten Filter gefunden."
+load_error      = "❌ Prüfprotokoll konnte nicht geladen werden: {error}"
+migrations_hint = "Führen Sie die neuesten Migrationen aus und starten Sie den ai-worker neu, um die audit_logs-Tabelle zu erstellen."
+
+[page.settings]
+title            = "⚙️ Einstellungen"
+archive_header   = "📁 Archivordner-Struktur"
+tokens_expander  = "Verfügbare Token"
+preview_label    = "**Vorschau** (mit Beispielwerten):"
+save_btn         = "Speichern"
+reset_btn        = "Auf Standard zurücksetzen"
+template_empty   = "Die Vorlage darf nicht leer sein."
+saved            = "✅ Gespeichert"
+reset_done       = "↩️ Auf Standard zurückgesetzt"
+
+# ── Dashboard — Hauptseite ────────────────────────────────────────────────────
+
+[dashboard]
+title                  = "📊 Überwachungspanel"
+warning_no_emails      = "⚠️ Der KI-Worker hat noch nicht genug E-Mails verarbeitet."
+error_db               = "❌ Datenbankfehler: {error}"
+error_db_hint          = "Tipp: Überprüfen Sie, ob die Telemetriespalten in PostgreSQL erstellt wurden."
+recent_records         = "📋 Aktuelle Datensätze"
+metric_total_emails    = "E-Mails gesamt"
+metric_avg_confidence  = "Ø Konfidenz"
+metric_avg_time        = "Ø vLLM-Zeit"
+chart_folder_dist      = "Ordnerverteilung"
+chart_decisions        = "Entscheidungen: Regeln vs. KI"
+col_subject            = "Betreff"
+col_category           = "Kategorie"
+col_sender             = "Absender"
+col_confidence         = "Konfidenz"
+col_source             = "Quelle"
+col_time               = "Zeit(s)"
+col_date               = "Datum"
+
+# ── Dashboard — Rechnungsseite ────────────────────────────────────────────────
+
+[dashboard.invoices]
+title                  = "🧾 Rechnungen"
+caption                = "Rechnungsdaten aus PDF-QR-Codes (Portugiesisches AT/ATCUD-Format)."
+filter_months          = "Letzte N Monate"
+filter_nif             = "NIF Verkäufer enthält"
+filter_search          = "Rechnungs-Nr. / ATCUD enthält"
+error_load             = "❌ Rechnungen konnten nicht geladen werden: {error}"
+empty                  = "Keine Rechnungen für den ausgewählten Zeitraum gefunden."
+metric_total_gross     = "Gesamt (brutto)"
+metric_total_vat       = "Gesamt MwSt."
+metric_taxable         = "Steuerbasis"
+metric_sellers         = "Eindeutige Verkäufer"
+chart_grand_total      = "Gesamtsumme"
+chart_sellers_count    = "{count} eindeutiger Verkäufer"
+chart_title            = "Top 5 Verkäufer + Sonstige"
+chart_x_label          = "NIF Verkäufer"
+others_label           = "Sonstige"
+col_date               = "Datum"
+col_doc_type           = "Dok.-Typ"
+col_doc_type_desc      = "Dokument"
+tab_at                 = "🇵🇹 AT-Rechnungen"
+tab_international      = "🌍 Ausland"
+intl_empty             = "Keine ausländischen Rechnungen für den ausgewählten Zeitraum gefunden."
+intl_count             = "Einträge"
+col_seller_name        = "Lieferant"
+col_seller_country     = "Land"
+col_receipt_num        = "Quittungs-Nr."
+col_vat_rate           = "MwSt.-Satz"
+col_currency           = "Währung"
+col_payment_method     = "Zahlung"
+col_card_last4         = "Karte"
+col_invoice_num        = "Rechnungs-Nr."
+col_nif_seller         = "NIF Verkäufer"
+col_nif_buyer          = "NIF Käufer"
+col_taxable            = "Steuerbasis"
+col_vat                = "MwSt."
+col_total              = "Gesamt"
+col_mb_entity          = "MB Entität"
+col_mb_ref             = "MB Referenz"
+col_mb_amount          = "MB Betrag"
+col_mb_due             = "MB Fällig"
+col_subject            = "Betreff"
+
+# ── Telegram-Suchanfragen (Worker) ────────────────────────────────────────────
+
+[telegram.query]
+unavailable          = "⚠️ Der Suchdienst ist derzeit nicht verfügbar. Überprüfen Sie, ob das LLM läuft und erreichbar ist."
+no_filters           = "keine Filter"
+no_results           = "📭 Keine E-Mails für Ihre Suche gefunden.\nVerwendete Filter: {filters}"
+results_ready        = "✅ *{count}* E-Mail(s) gefunden.\nFilter: {filters}\n\nWie möchten Sie die Ergebnisse erhalten?{smtp_note}"
+results_expired      = "⚠️ Ergebnisse abgelaufen. Bitte erneut suchen."
+smtp_not_configured  = "\nSMTP nicht konfiguriert — nur Inline verfügbar."
+smtp_fallback        = "⚠️ SMTP ist nicht konfiguriert. Zeige Ergebnisse hier."
+email_sent           = "📧 Ergebnisse an `{recipient}` gesendet."
+email_failed         = "⚠️ E-Mail konnte nicht gesendet werden. SMTP-Einstellungen prüfen."
+btn_show_here        = "📱 Hier anzeigen"
+btn_send_email       = "📧 Per E-Mail senden"
+found_header         = "📬 *{count}* E-Mail(s) gefunden:\n"
+no_subject           = "(kein Betreff)"
+more                 = "\n_…und {count} weitere._"
+
+# ── Telegram-Benachrichtigungen (Worker → Benutzer) ───────────────────────────
+
+[telegram.notifications]
+worker_started        = "🚀 KI-Worker ist aktiv — wartet auf Aufgaben."
+needs_review          = "🤔 Überprüfung erforderlich — KI-Konfidenz: {confidence}%\n\nVon: {sender}\nBetreff: {subject}\n\nBitte klassifizieren Sie diese E-Mail:"
+suggested_folder      = "🆕 KI schlägt einen neuen Ordner vor\n\nVon: {sender}\nBetreff: {subject}\n\n🧠 KI klassifiziert als: {folder} ({confidence}%)\nDieser Ordner existiert noch nicht.\n\nErstellen und dorthin verschieben oder vorhandenen Ordner wählen:"
+add_and_move          = "➕ '{folder}' hinzufügen & verschieben"
+rule_conflict         = "⚠️ Regelkonflikt — menschliche Eingabe erforderlich\n\nVon: {sender}\nBetreff: {subject}\n\n📚 Gelernte Regel sagt: {rule_folder}\n🧠 KI sagt: {llm_folder} ({confidence}%)\n\nWas ist richtig?"
+conflict_rule_btn     = "✅ {folder}  (Regel)"
+conflict_ai_btn       = "✅ {folder}  (KI · {confidence}%)"
+
+# ── Telegram-Button-Beschriftungen ────────────────────────────────────────────
+
+[telegram.buttons]
+approve        = "✅ Genehmigen → {folder}"
+change_folder  = "📁 Ordner ändern"
+new_folder     = "➕ Neuer Ordner"
+fix_sender     = "👤 Absender korrigieren"
+keywords       = "✏️ Schlüsselwörter"
+save_rule      = "✅ Bestätigen & Regel speichern"
+move_only      = "📁 Nur verschieben (keine Regel)"
+export_path    = "📂 Exportpfad"
+sender_company = "🏢 Unternehmen"
+sender_person  = "👤 Person"
+
+# ── Überprüfungskarte ─────────────────────────────────────────────────────────
+
+[telegram.review]
+header         = "📋 Lernmodus-Überprüfung"
+subject_line   = "Betreff: {subject}"
+from_line      = "Von: {sender_email}"
+sender_line    = "Absender: {sender_label}"
+ai_decision    = "🧠 KI-Entscheidung: {folder} ({confidence}% · {source})"
+keywords_line  = "🔑 Schlüsselwörter: {keywords}"
+what_to_do     = "Was sollen wir tun?"
+no_keywords    = "keine erkannt"
+
+# ── Regelkarte ────────────────────────────────────────────────────────────────
+
+[telegram.rule_card]
+moved_header      = "✅ Verschoben nach *{folder}*"
+configure_header  = "📋 *Regel für zukünftige E-Mails konfigurieren:*"
+sender_line       = "📧 {sender_email}"
+folder_line       = "📁 Ordner: *{folder}*"
+keywords_line     = "🔑 Schlüsselwörter: {keywords}"
+export_path_line  = "📂 Exportpfad: *{path}*"
+
+# ── Schlüsselwörter bearbeiten ────────────────────────────────────────────────
+
+[telegram.keywords]
+edit_prompt       = "✏️ *Schlüsselwörter bearbeiten*\n\nAktuell: {current}\n\nNeue Schlüsselwörter eingeben (leerzeichen-getrennt):\nBeispiel: `Rechnung Zahlung Referenz`"
+type_prompt       = "✏️ Schlüsselwörter eingeben (leerzeichen-getrennt):\n\nBeispiel: `Rechnung Referenz Zahlung`"
+
+# ── Ordner-Nachrichten ────────────────────────────────────────────────────────
+
+[telegram.folder]
+new_prompt        = "➕ *Neuer Ordner*\n\nGeben Sie den Ordnernamen ein, der erstellt und in den die E-Mail verschoben werden soll:"
+empty_name_error  = "⚠️ Der Ordnername darf nicht leer sein. Tippen Sie erneut auf ➕ Neuer Ordner."
+created_ok        = "✅ Ordner '{folder_name}' erstellt und E-Mail verschoben.\n\nIMAP: {imap_summary}"
+choose_folder     = "📁 Wählen Sie den richtigen Ordner:"
+
+# ── Absender-Nachrichten ──────────────────────────────────────────────────────
+
+[telegram.sender]
+ask_type          = "👤 Ist der Absender ein Unternehmen oder eine Privatperson?"
+name_saved        = "✅ Absendername gespeichert: {name}"
+
+# ── Lernmodus ─────────────────────────────────────────────────────────────────
+
+[telegram.learning_mode]
+on_message   = "🎓 *Lernmodus AKTIV*\n\nJede KI-Klassifikation wird hier zur Überprüfung gesendet, bevor sie angewendet wird."
+off_message  = "✅ *Lernmodus INAKTIV* — läuft autonom."
+status       = "🎓 Der Lernmodus ist derzeit *{status}*.\n\nVerwenden Sie `/learn on` oder `/learn off`."
+
+# ── In-App-Hilfetext ──────────────────────────────────────────────────────────
+
+[help]
+_label = "So funktioniert es"
+
+dashboard = """
+**Was Sie hier sehen**
+Die letzten 200 E-Mails, die vom KI-Worker klassifiziert und verschoben wurden.
+
+**Metriken**
+- **E-Mails gesamt** — verarbeitete E-Mails seit Systemstart
+- **Ø Konfidenz** — wie sicher die KI war (höher = besser)
+- **Ø vLLM-Zeit** — durchschnittliche LLM-Antwortzeit in Sekunden
+
+**Diagramme**
+- **Ordnerverteilung** — welche Ordner die meisten E-Mails erhalten haben
+- **Entscheidungen: Regeln vs. KI** — wie viele Entscheidungen durch gelernte Regeln vs. das KI-Modell getroffen wurden
+
+**Tabelle**
+Klicken Sie auf einen Spaltenheader zum Sortieren. Konfidenz wird als Prozentsatz angezeigt.
+"""
+
+accounts = """
+**Was Sie hier tun können**
+- **Aktivieren / Deaktivieren** — Worker starten oder stoppen, der ein Postfach abruft
+- **Worker-Modus** — legt fest, welcher Worker dieses Konto verwaltet:
+  - 🤖 *KI-Worker* — vollständige Pipeline: klassifizieren, Regeln prüfen, verschieben, Telegram-Überprüfung
+  - 🧾 *Rechnungs-Worker* — verarbeitet nur Finanz-E-Mails (Rechnungen, Quittungen); ignoriert alles andere (bleibt ungelesen, wird nicht verschoben)
+- **Passwort zurücksetzen** — das verschlüsselte IMAP/Outlook-Passwort aktualisieren
+
+**Konto hinzufügen**
+Verwenden Sie die Tabs IMAP oder Outlook unten, um ein neues Postfach zu konfigurieren.
+"""
+
+rules = """
+**Was sind gelernte Regeln?**
+Regeln sind Muster, die gespeichert werden, wenn Sie eine E-Mail über Telegram korrigieren. Sie werden **vor** der KI ausgelöst — keine LLM-Kosten, sofortige Entscheidungen.
+
+**Bedingungstypen**
+- `sender_email` — genaue E-Mail-Adresse
+- `sender_domain` — Domain-Übereinstimmung (z.B. `firma.de`)
+- `keyword` — Wort in Betreff oder Text gefunden
+
+**Was Sie tun können**
+- **Filterleiste** — nach Schlüsselwort, Absender, Ordner oder Status suchen
+- **Umschalten** — eine Regel ohne Löschen deaktivieren
+- **Bearbeiten** — Bedingungen, Min-Match-Anzahl oder Zielordner ändern
+- **Löschen** — eine Regel dauerhaft entfernen
+- **Manuell hinzufügen** — Regeln ohne Telegram erstellen
+"""
+
+folders = """
+**Wofür Ordner da sind**
+Ordner sind die Klassifikationskategorien, die im KI-Prompt, Telegram-Buttons und IMAP-Zielen verwendet werden.
+
+**Was Sie tun können**
+- Aktive Ordner erscheinen in den KI-Optionen bei der E-Mail-Klassifikation
+- **Deaktivieren** — verbirgt einen Ordner vor der KI ohne den Verlauf zu löschen
+- **Umbenennen** — benennt auch den IMAP-Ordner auf **allen aktiven Konten** um
+- **Löschen** — funktioniert nur, wenn keine E-Mails den Ordner referenzieren (stattdessen deaktivieren)
+
+**Ordner hinzufügen**
+Neue Ordner werden sowohl in der Datenbank als auch als IMAP-Postfächer auf allen aktiven Konten erstellt.
+"""
+
+companies = """
+**Wofür Unternehmen da sind**
+Unternehmen werden über die Steuernummer (NIF) mit Rechnungen abgeglichen. Wenn die Verkäufer- oder Käufer-NIF einer Rechnung mit einem registrierten Unternehmen übereinstimmt, wird das PDF an den Archivordner dieses Unternehmens weitergeleitet.
+
+**Was Sie tun können**
+- **Hinzufügen** — ein Unternehmen mit Name + Steuernummer registrieren
+- **Bearbeiten** — Name, Steuernummer oder Notizen aktualisieren
+- **Inaktiv** — vom Abgleich ausschließen ohne zu löschen
+- **Löschen** — dauerhaft entfernen (betrifft keine vorhandenen Rechnungen)
+"""
+
+invoices = """
+**Was Sie hier sehen**
+Rechnungsdaten aus PDF-QR-Codes (Portugiesisches AT/ATCUD-Format) und E-Mail-Texten.
+
+**Tabs**
+- 🇵🇹 **AT-Rechnungen** — Portugiesische Rechnungen mit ATCUD, NIF, MB-Zahlungsreferenz
+- 🌍 **Ausland** — Internationale Quittungen, SaaS-Abonnements, Überweisungen
+
+**Filter**
+- *Letzte N Monate* — Datumsbereich
+- *NIF Verkäufer enthält* — nach Verkäufer-Steuernummer filtern
+- *Rechnungs-Nr. / ATCUD enthält* — nach Dokumentnummer suchen
+
+**Exportieren**
+Verwenden Sie die **⬇️ Export CSV**-Schaltfläche, um alle sichtbaren Zeilen herunterzuladen.
+"""
+
+audit = """
+**Was das Prüfprotokoll erfasst**
+Jede Aktion von Dashboard-Benutzern und Workern wird hier dauerhaft aufgezeichnet.
+
+**Akteur-Typen**
+- `dashboard` — Aktionen, die Sie in dieser Benutzeroberfläche durchführen
+- `ai-worker` — E-Mail-Klassifikation und -Verschiebung
+- `invoice-worker` — Verarbeitung von Finanz-E-Mails
+- `telegram` — Genehmigungen und Korrekturen über Telegram
+
+**Filter**
+Nach Akteur-Name, Aktionstyp oder Datumsbereich filtern.
+Es werden maximal 500 Ereignisse gleichzeitig angezeigt.
+"""
+
+settings = """
+**Archivordner-Struktur**
+Legt den Unterordnerpfad fest, unter dem exportierte Rechnungs-PDFs in `FILES_ROOT` gespeichert werden.
+
+**Verfügbare Token**
+Verwenden Sie `{token}`-Platzhalter für dynamische Pfade. Beispiel:
+`{company}/{year}/{month}-{month_name}/{category}/{supplier}`
+→ `Acme GmbH/2025/04-April/Rechnungen/EDP Comercial/rechnung.pdf`
+
+**Speichern**
+Änderungen werden sofort wirksam — kein Neustart erforderlich. Verwenden Sie **↩️ Zurücksetzen** für den Standardwert.
+"""
+
+[help.sidebar]
+hybrid     = "Regeln werden zuerst ausgeführt; unsichere E-Mails gehen an das LLM. Bestes Gleichgewicht zwischen Kosten und Genauigkeit."
+rules_only = "Nur gelernte Regeln werden ausgeführt. Nicht zugeordnete E-Mails gehen zur manuellen Überprüfung an Telegram. Keine LLM-Kosten."
+llm_only   = "Jede E-Mail geht an das LLM und überspringt Regeln. Nützlich zur Überprüfung der Modellqualität."
+auto_learn = "Hybridmodus + LLM-Entscheidungen mit hoher Konfidenz werden automatisch als neue Regeln gespeichert."

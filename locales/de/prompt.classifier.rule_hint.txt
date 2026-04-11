@@ -1,0 +1,7 @@
+
+Eine gelernte Regel — basierend auf einer früheren menschlich bestätigten Entscheidung für diesen Absender — legt nahe, dass diese E-Mail gehört zu: {rule_hint}
+Validieren Sie dies sorgfältig:
+- Wenn der E-Mail-Inhalt dem entspricht, was Sie für "{rule_hint}" erwarten würden, geben Sie "{rule_hint}" mit Konfidenz >= 0.90 zurück.
+- Wenn der Inhalt von dem abzuweichen scheint, was die Regel erwartet
+  (z.B. gleiche Absender-Domain, aber diese E-Mail ist ein Newsletter, keine Rechnung),
+  geben Sie den richtigen Ordner unabhängig mit Ihrer ehrlichen Konfidenz zurück.

@@ -1,0 +1,38 @@
+Sie sind ein Finanzdate-Extraktor. Extrahieren Sie strukturierte Finanzinformationen aus der folgenden E-Mail.
+
+Betreff: {subject}
+
+Text:
+{body}
+
+Extrahieren Sie alle verfügbaren Finanzfelder und geben Sie NUR ein JSON-Objekt mit diesen Feldern zurück (verwenden Sie null für fehlende Werte):
+
+{{
+  "invoice_origin": "<eines von: payment_confirmation | bank_transfer | receipt | international>",
+  "seller_name": "<Firmen- oder Personenname, der die Zahlung erhalten hat>",
+  "seller_country": "<2-Buchstaben ISO-Ländercode oder null>",
+  "invoice_number": "<Rechnungs- oder Referenznummer>",
+  "receipt_number": "<Quittungsnummer falls zutreffend>",
+  "invoice_date": "<JJJJ-MM-TT oder null>",
+  "taxable_amount": <Zahl oder null>,
+  "vat_amount": <Zahl oder null>,
+  "total_amount": <Zahl oder null>,
+  "currency": "<3-Buchstaben ISO-Währungscode, z.B. EUR, USD>",
+  "vat_rate": <Dezimalsatz z.B. 0.19 für 19% oder null>,
+  "payment_method": "<card | bank_transfer | mbway | multibanco | paypal | null>",
+  "card_last4": "<letzte 4 Ziffern der Karte oder null>",
+  "nif_seller": "<Steuernummer des Verkäufers oder null>",
+  "nif_buyer": "<Steuernummer des Käufers oder null>",
+  "mb_entidade": "<Multibanco Entitätsnummer oder null>",
+  "mb_referencia": "<Multibanco Referenz oder null>",
+  "mb_valor": <Multibanco Betrag oder null>,
+  "mb_data_limite": "<Multibanco Fälligkeitsdatum JJJJ-MM-TT oder null>"
+}}
+
+Regeln:
+- invoice_origin muss genau eines sein von: payment_confirmation, bank_transfer, receipt, international
+- Verwenden Sie payment_confirmation für Kartenzahlungen, PayPal, MBWay und ähnliche Bestätigungen
+- Verwenden Sie bank_transfer für Überweisungen und Kontoauszüge
+- Verwenden Sie receipt für Quittungen aus physischen oder Online-Shops
+- Verwenden Sie international für ausländische Rechnungen ohne portugiesisches AT/ATCUD
+- Geben Sie NUR das JSON-Objekt zurück, keine Erklärung, keine Markdown-Begrenzungen

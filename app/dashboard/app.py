@@ -46,10 +46,10 @@ def _show_flash() -> None:
 
 
 def _page_help(section: str) -> None:
-    """Render a collapsible ℹ️ help panel for the given page section."""
+    """Render an ℹ️ help popover button for the given page section."""
     content = t(f"help.{section}")
     label = t("help._label")
-    with st.expander(f"ℹ️ {label}", expanded=False):
+    with st.popover(f"ℹ️ {label}"):
         st.markdown(content)
 
 # Ensure project root (parent of app/) is first in sys.path so `app.*` imports resolve

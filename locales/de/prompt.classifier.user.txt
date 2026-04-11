@@ -1,0 +1,21 @@
+Klassifizieren Sie die E-Mail in GENAU einen dieser Ordnernamen (Namen wortwörtlich kopieren, keine Übersetzung, keine Abweichung):
+{folder_list}
+
+WICHTIG: Die obigen Ordnernamen sind die EINZIGEN gültigen Werte für "folder". Übersetzen Sie diese NICHT. Verwenden Sie KEINE Synonyme. Wenn die E-Mail zu "Faturas" passt, geben Sie "Faturas" zurück — nicht "Rechnungen". Wenn die E-Mail zu "Trabalho" passt, geben Sie "Trabalho" zurück — nicht "Arbeit".
+{hint_block}
+Identifizieren Sie auch den Absender:
+- sender_type: "company" wenn von einem Unternehmen/Organisation gesendet, "person" wenn von einer Einzelperson
+- sender_name: der Firmenname (z.B. "Amazon", "LinkedIn") oder Personenname (z.B. "Max Müller") — NICHT die E-Mail-Adresse
+
+Geben Sie exakt zurück:
+{
+  "folder": "ExacterOrdnerNameAusListe",
+  "confidence": 0.0-1.0,
+  "sender_type": "company" oder "person",
+  "sender_name": "Name oder null"
+}
+
+Von: {from_address}
+Betreff: {subject}
+Text:
+{body}
