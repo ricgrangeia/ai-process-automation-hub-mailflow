@@ -1331,11 +1331,23 @@ def page_invoices(engine):
 
     from datetime import datetime, timezone, timedelta
 
+    # ── Load accounts for filter dropdown ──
+    try:
+        _accs = pd.read_sql(
+            "SELECT username FROM email_accounts WHERE active = true ORDER BY username",
+            engine,
+        )
+        account_options = ["— All accounts —"] + _accs["username"].tolist()
+    except Exception:
+        account_options = ["— All accounts —"]
+
     # ── Filters ──
-    col_months, col_nif, col_search = st.columns([1, 2, 2])
-    months_back = col_months.number_input(t("dashboard.invoices.filter_months"), min_value=1, max_value=24, value=3)
-    nif_filter = col_nif.text_input(t("dashboard.invoices.filter_nif"), placeholder="123456789")
+    col_months, col_nif, col_search, col_acc = st.columns([1, 2, 2, 2])
+    months_back   = col_months.number_input(t("dashboard.invoices.filter_months"), min_value=1, max_value=24, value=3)
+    nif_filter    = col_nif.text_input(t("dashboard.invoices.filter_nif"), placeholder="123456789")
     search_filter = col_search.text_input(t("dashboard.invoices.filter_search"), placeholder="FT 2026/1")
+    account_sel   = col_acc.selectbox(t("dashboard.invoices.filter_account"), account_options)
+    account_filter = None if account_sel.startswith("—") else account_sel
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=int(months_back) * 30)
 
@@ -1350,6 +1362,10 @@ def page_invoices(engine):
         conditions.append("(i.invoice_number ILIKE %(search)s OR i.atcud ILIKE %(search)s)")
         params["search"] = f"%{search_filter}%"
 
+    if account_filter:
+        conditions.append("a.username = %(account)s")
+        params["account"] = account_filter
+
     where = " AND ".join(conditions)
 
     try:
@@ -1360,6 +1376,7 @@ def page_invoices(engine):
                 i.email_id,
                 e.subject,
                 e.from_address,
+                a.username AS account,
                 i.invoice_origin,
                 i.document_type,
                 i.document_type_description,
@@ -1385,6 +1402,7 @@ def page_invoices(engine):
                 i.extracted_at
             FROM invoices i
             LEFT JOIN emails e ON e.id = i.email_id
+            LEFT JOIN email_accounts a ON a.id = e.account_id
             WHERE {where}
             ORDER BY i.invoice_date DESC NULLS LAST, i.extracted_at DESC
             """,
@@ -1414,6 +1432,47 @@ def page_invoices(engine):
     k2.metric(t("dashboard.invoices.metric_total_vat"),    f"€ {total_vat:,.2f}")
     k3.metric(t("dashboard.invoices.metric_taxable"),      f"€ {total_taxable:,.2f}")
     k4.metric(t("dashboard.invoices.metric_sellers"),      unique_sellers)
+
+    # ── Monthly totals chart ──────────────────────────────────────────────────
+    df_monthly = df.copy()
+    df_monthly["_date"] = pd.to_datetime(df_monthly["invoice_date"], errors="coerce")
+    df_monthly = df_monthly.dropna(subset=["_date"])
+
+    if not df_monthly.empty:
+        df_monthly["_month"] = df_monthly["_date"].dt.to_period("M")
+        monthly = (
+            df_monthly.groupby("_month")
+            .agg(
+                gross=("total_amount",   lambda x: pd.to_numeric(x, errors="coerce").sum()),
+                vat=  ("vat_amount",     lambda x: pd.to_numeric(x, errors="coerce").sum()),
+                count=("id",             "count"),
+            )
+            .reset_index()
+            .sort_values("_month")
+        )
+        monthly["Month"] = monthly["_month"].dt.strftime("%Y-%m")
+
+        fig_monthly = px.bar(
+            monthly,
+            x="Month",
+            y="gross",
+            text="count",
+            labels={"gross": "Total (€)", "count": "Invoices"},
+            title=t("dashboard.invoices.chart_monthly_title"),
+            color_discrete_sequence=["#4C78A8"],
+        )
+        fig_monthly.update_traces(
+            texttemplate="%{text}",
+            textposition="outside",
+            hovertemplate="<b>%{x}</b><br>Total: € %{y:,.2f}<br>Invoices: %{text}<extra></extra>",
+        )
+        fig_monthly.update_layout(
+            xaxis_title="",
+            yaxis_title="€",
+            showlegend=False,
+            margin=dict(t=40, b=20),
+        )
+        st.plotly_chart(fig_monthly, use_container_width=True)
 
     st.divider()
 
