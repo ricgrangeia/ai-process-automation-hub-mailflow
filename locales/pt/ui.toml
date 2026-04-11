@@ -132,6 +132,10 @@ col_date               = "Data"
 
 [dashboard.invoices]
 title                  = "🧾 Faturas"
+delete_col_help        = "Selecionar para eliminar"
+delete_selected_btn    = "🗑️ Eliminar selecionados"
+delete_warning         = "⚠️ {count} fatura(s) selecionada(s). Isto **não** elimina o e-mail original."
+delete_success         = "✅ {count} fatura(s) eliminada(s)."
 caption                = "Dados de faturas extraídos de QR codes em PDFs (formato AT/ATCUD português)."
 filter_months          = "Últimos N meses"
 filter_nif             = "NIF do vendedor contém"

@@ -132,6 +132,10 @@ col_date               = "Datum"
 
 [dashboard.invoices]
 title                  = "🧾 Rechnungen"
+delete_col_help        = "Zum Löschen auswählen"
+delete_selected_btn    = "🗑️ Ausgewählte löschen"
+delete_warning         = "⚠️ {count} Rechnung(en) ausgewählt. Die ursprüngliche E-Mail wird **nicht** gelöscht."
+delete_success         = "✅ {count} Rechnung(en) gelöscht."
 caption                = "Rechnungsdaten aus PDF-QR-Codes (Portugiesisches AT/ATCUD-Format)."
 filter_months          = "Letzte N Monate"
 filter_nif             = "NIF Verkäufer enthält"

@@ -132,6 +132,10 @@ col_date               = "Date"
 
 [dashboard.invoices]
 title                  = "🧾 Invoices"
+delete_col_help        = "Select to delete"
+delete_selected_btn    = "🗑️ Delete selected"
+delete_warning         = "⚠️ {count} invoice(s) selected. This does **not** delete the original email."
+delete_success         = "✅ Deleted {count} invoice(s)."
 caption                = "Invoice data extracted from PDF QR codes (Portuguese AT/ATCUD format)."
 filter_months          = "Last N months"
 filter_nif             = "NIF seller contains"
