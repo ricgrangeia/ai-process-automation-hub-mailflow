@@ -560,11 +560,74 @@ def page_learned_rules(engine, settings):
     if df.empty:
         st.info(t("page.rules.no_rules"))
     else:
-        st.metric("Total rules", len(df))
-        active_count = df["active"].sum()
-        st.caption(f"{active_count} active · {len(df) - active_count} disabled")
+        total = len(df)
+        active_count = int(df["active"].sum())
 
-        for _, row in df.iterrows():
+        # ── Filters ───────────────────────────────────────────────────────────
+        with st.container(border=True):
+            fc1, fc2, fc3 = st.columns([3, 2, 1])
+            search_q = fc1.text_input(
+                t("page.rules.filter_search"),
+                placeholder=t("page.rules.filter_search_hint"),
+                label_visibility="collapsed",
+            )
+
+            # Collect all unique folders from actions across all rules
+            _all_folders = set()
+            for acts in df["actions"]:
+                for a in (acts or []):
+                    if a.get("type") == "move_folder" and a.get("folder"):
+                        _all_folders.add(a["folder"])
+            folder_options = [t("page.rules.filter_all_folders")] + sorted(_all_folders)
+            filter_folder = fc2.selectbox(
+                t("page.rules.filter_folder"),
+                folder_options,
+                label_visibility="collapsed",
+            )
+
+            status_options = [
+                t("page.rules.filter_all_status"),
+                t("page.rules.filter_active"),
+                t("page.rules.filter_disabled"),
+            ]
+            filter_status = fc3.selectbox(
+                t("page.rules.filter_status"),
+                status_options,
+                label_visibility="collapsed",
+            )
+
+        # Apply filters
+        filtered = df.copy()
+        if search_q.strip():
+            q = search_q.strip().lower()
+            def _row_matches(row):
+                for c in (row["conditions"] or []):
+                    if q in str(c.get("value", "")).lower():
+                        return True
+                return False
+            filtered = filtered[filtered.apply(_row_matches, axis=1)]
+
+        if filter_folder != t("page.rules.filter_all_folders"):
+            def _has_folder(row):
+                return any(
+                    a.get("folder") == filter_folder
+                    for a in (row["actions"] or [])
+                    if a.get("type") == "move_folder"
+                )
+            filtered = filtered[filtered.apply(_has_folder, axis=1)]
+
+        if filter_status == t("page.rules.filter_active"):
+            filtered = filtered[filtered["active"] == True]
+        elif filter_status == t("page.rules.filter_disabled"):
+            filtered = filtered[filtered["active"] == False]
+
+        st.caption(
+            f"{t('page.rules.showing')} **{len(filtered)}** / {total} — "
+            f"{active_count} {t('page.rules.filter_active').lower()} · "
+            f"{total - active_count} {t('page.rules.filter_disabled').lower()}"
+        )
+
+        for _, row in filtered.iterrows():
             rule_id = int(row["id"])
             is_active = bool(row["active"])
             border_color = "#34d399" if is_active else "#4a4a4a"
