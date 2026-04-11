@@ -1,3 +1,4 @@
+import hashlib
 import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
@@ -51,6 +52,41 @@ def _page_help(section: str) -> None:
     label = t("help._label")
     with st.popover(f"ℹ️ {label}"):
         st.markdown(content)
+
+
+# ---------------------------------------------------------------------------
+# Pagination helpers
+# ---------------------------------------------------------------------------
+
+_PAGE_SIZE = 25
+
+
+def _page_controls(page_key: str, total: int, page_size: int = _PAGE_SIZE) -> tuple[int, int]:
+    """
+    Render prev / next pagination controls and return (current_page, offset).
+    The page resets to 0 automatically when page_key changes (e.g. on filter change).
+    """
+    total_pages = max(1, (total + page_size - 1) // page_size)
+
+    page = int(st.session_state.get(page_key, 0))
+    page = max(0, min(page, total_pages - 1))
+    st.session_state[page_key] = page
+
+    c_prev, c_info, c_next = st.columns([1, 6, 1])
+    with c_prev:
+        if st.button("◀", disabled=(page == 0), key=f"{page_key}_prev"):
+            st.session_state[page_key] = page - 1
+            st.rerun()
+    with c_info:
+        start = page * page_size + 1
+        end   = min((page + 1) * page_size, total)
+        st.caption(f"Page **{page + 1}** / {total_pages} — {start}–{end} of {total}")
+    with c_next:
+        if st.button("▶", disabled=(page >= total_pages - 1), key=f"{page_key}_next"):
+            st.session_state[page_key] = page + 1
+            st.rerun()
+
+    return page, page * page_size
 
 # Ensure project root (parent of app/) is first in sys.path so `app.*` imports resolve
 # regardless of where Streamlit is launched from.
@@ -238,71 +274,97 @@ def page_dashboard(engine, settings):
     st.title(t("dashboard.title"))
     _page_help("dashboard")
 
-    def load_data():
-        query = f"""
-            SELECT
-                subject        AS "{t('dashboard.col_subject')}",
-                classification_label AS "{t('dashboard.col_category')}",
-                CASE
-                    WHEN sender_type = 'company' THEN '🏢 ' || COALESCE(sender_name, from_address)
-                    WHEN sender_type = 'person'  THEN '👤 ' || COALESCE(sender_name, from_address)
-                    ELSE COALESCE(sender_name, from_address)
-                END            AS "{t('dashboard.col_sender')}",
-                ai_confidence  AS "{t('dashboard.col_confidence')}",
-                ai_source      AS "{t('dashboard.col_source')}",
-                processing_time_seconds AS "{t('dashboard.col_time')}",
-                processed_at   AS "{t('dashboard.col_date')}"
-            FROM emails
-            WHERE status = 'moved'
-            ORDER BY processed_at DESC LIMIT 200
-        """
-        return pd.read_sql(query, engine)
-
     try:
-        df = load_data()
+        # ── 1. Aggregate metrics (single fast query, no row transfer) ──────────
+        with engine.connect() as _conn:
+            agg = _conn.execute(text(
+                "SELECT COUNT(*) AS total, "
+                "AVG(ai_confidence) AS avg_conf, "
+                "AVG(processing_time_seconds) AS avg_time "
+                "FROM emails WHERE status = 'moved'"
+            )).fetchone()
 
-        col_confidence = t("dashboard.col_confidence")
-        col_time       = t("dashboard.col_time")
-
-        if df.empty:
+        total_emails = int(agg.total or 0)
+        if total_emails == 0:
             st.warning(t("dashboard.warning_no_emails"))
             return
 
         c1, c2, c3 = st.columns(3)
-        c1.metric(t("dashboard.metric_total_emails"), len(df))
-        c2.metric(t("dashboard.metric_avg_confidence"), f"{df[col_confidence].mean()*100:.1f}%")
-        _raw_times = pd.to_numeric(df[col_time], errors='coerce')
-        avg_time = _raw_times.dropna().mean()
-        c3.metric(t("dashboard.metric_avg_time"), f"{avg_time:.2f}s" if pd.notna(avg_time) else "—")
+        c1.metric(t("dashboard.metric_total_emails"), total_emails)
+        avg_conf = float(agg.avg_conf or 0)
+        c2.metric(t("dashboard.metric_avg_confidence"), f"{avg_conf * 100:.1f}%")
+        avg_time_val = float(agg.avg_time or 0)
+        c3.metric(t("dashboard.metric_avg_time"), f"{avg_time_val:.2f}s" if avg_time_val else "—")
 
         st.divider()
 
-        col_category = t("dashboard.col_category")
-        col_source   = t("dashboard.col_source")
+        # ── 2. Chart data (aggregated, tiny result sets) ───────────────────────
+        df_cat = pd.read_sql(
+            "SELECT classification_label AS cat, COUNT(*) AS n "
+            "FROM emails WHERE status = 'moved' GROUP BY 1 ORDER BY 2 DESC",
+            engine,
+        )
+        df_src = pd.read_sql(
+            "SELECT COALESCE(ai_source, 'unknown') AS src, COUNT(*) AS n "
+            "FROM emails WHERE status = 'moved' GROUP BY 1",
+            engine,
+        )
 
         g1, g2 = st.columns(2)
         with g1:
             st.plotly_chart(
-                px.pie(df, names=col_category, hole=0.4, title=t("dashboard.chart_folder_dist")),
+                px.pie(df_cat, names="cat", values="n", hole=0.4,
+                       title=t("dashboard.chart_folder_dist")),
                 width='stretch',
             )
         with g2:
             st.plotly_chart(
-                px.histogram(df, x=col_source, color=col_source, title=t("dashboard.chart_decisions")),
+                px.histogram(df_src, x="src", y="n", color="src",
+                             title=t("dashboard.chart_decisions")),
                 width='stretch',
             )
 
+        # ── 3. Paginated table (only loads current page rows) ─────────────────
         st.subheader(t("dashboard.recent_records"))
+        _page, _offset = _page_controls("dashboard_table", total_emails)
+
         col_subject    = t("dashboard.col_subject")
+        col_category   = t("dashboard.col_category")
+        col_sender     = t("dashboard.col_sender")
         col_confidence = t("dashboard.col_confidence")
+        col_source     = t("dashboard.col_source")
         col_time       = t("dashboard.col_time")
-        df[col_subject]    = df[col_subject].apply(_decode_mime_header)
-        df[col_confidence] = (df[col_confidence] * 100).round(0).astype(int)
-        df[col_time]       = df[col_time].apply(
+        col_date       = t("dashboard.col_date")
+
+        df_page = pd.read_sql(
+            text(f"""
+                SELECT
+                    subject        AS "{col_subject}",
+                    classification_label AS "{col_category}",
+                    CASE
+                        WHEN sender_type = 'company' THEN '🏢 ' || COALESCE(sender_name, from_address)
+                        WHEN sender_type = 'person'  THEN '👤 ' || COALESCE(sender_name, from_address)
+                        ELSE COALESCE(sender_name, from_address)
+                    END            AS "{col_sender}",
+                    ai_confidence  AS "{col_confidence}",
+                    ai_source      AS "{col_source}",
+                    processing_time_seconds AS "{col_time}",
+                    processed_at   AS "{col_date}"
+                FROM emails
+                WHERE status = 'moved'
+                ORDER BY processed_at DESC
+                LIMIT {_PAGE_SIZE} OFFSET {_offset}
+            """),
+            engine,
+        )
+
+        df_page[col_subject]    = df_page[col_subject].apply(_decode_mime_header)
+        df_page[col_confidence] = (df_page[col_confidence] * 100).round(0).astype(int)
+        df_page[col_time]       = df_page[col_time].apply(
             lambda v: f"{float(v):.2f}s" if pd.notna(v) else "—"
         )
         st.dataframe(
-            df,
+            df_page,
             width='stretch',
             hide_index=True,
             column_config={
@@ -664,13 +726,23 @@ def page_learned_rules(engine, settings):
         elif filter_status == t("page.rules.filter_disabled"):
             filtered = filtered[filtered["active"] == False]
 
+        filtered_total = len(filtered)
         st.caption(
-            f"{t('page.rules.showing')} **{len(filtered)}** / {total} — "
+            f"{t('page.rules.showing')} **{filtered_total}** / {total} — "
             f"{active_count} {t('page.rules.filter_active').lower()} · "
             f"{total - active_count} {t('page.rules.filter_disabled').lower()}"
         )
 
-        for _, row in filtered.iterrows():
+        # Pagination — key includes filter fingerprint so page resets on filter change
+        _rules_fhash = hashlib.md5(
+            str((search_q, filter_folder, filter_status)).encode()
+        ).hexdigest()[:8]
+        _rules_page, _rules_offset = _page_controls(
+            f"rules_page_{_rules_fhash}", filtered_total
+        )
+        filtered_page = filtered.iloc[_rules_offset : _rules_offset + _PAGE_SIZE]
+
+        for _, row in filtered_page.iterrows():
             rule_id = int(row["id"])
             is_active = bool(row["active"])
             border_color = "#34d399" if is_active else "#4a4a4a"
@@ -1368,14 +1440,20 @@ def page_invoices(engine):
                     fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False)
                     st.plotly_chart(fig, width='stretch')
 
-            # Table
-            display_at = df_at[[c for c in [
+            # Table — paginated
+            _fhash_at = hashlib.md5(
+                str((months_back, nif_filter, search_filter, "at")).encode()
+            ).hexdigest()[:8]
+            _at_page, _at_offset = _page_controls(f"inv_at_{_fhash_at}", len(df_at))
+            df_at_page = df_at.iloc[_at_offset : _at_offset + _PAGE_SIZE].copy()
+
+            display_at = df_at_page[[c for c in [
                 "invoice_date", "document_type", "document_type_description",
                 "invoice_number", "atcud", "nif_seller", "nif_buyer",
                 "taxable_amount", "vat_amount", "total_amount",
                 "mb_entidade", "mb_referencia", "mb_valor", "mb_data_limite",
                 "subject", "email_id",
-            ] if c in df_at.columns]].copy()
+            ] if c in df_at_page.columns]].copy()
 
             for col in ["taxable_amount", "vat_amount", "total_amount"]:
                 display_at[col] = pd.to_numeric(display_at[col], errors="coerce").apply(
@@ -1423,13 +1501,20 @@ def page_invoices(engine):
             ci1.metric(t("dashboard.invoices.metric_total_gross"), f"€ {intl_gross:,.2f}")
             ci2.metric(t("dashboard.invoices.intl_count"), intl_count)
 
-            display_intl = df_intl[[c for c in [
+            # Table — paginated
+            _fhash_intl = hashlib.md5(
+                str((months_back, nif_filter, search_filter, "intl")).encode()
+            ).hexdigest()[:8]
+            _intl_page, _intl_offset = _page_controls(f"inv_intl_{_fhash_intl}", len(df_intl))
+            df_intl_page = df_intl.iloc[_intl_offset : _intl_offset + _PAGE_SIZE].copy()
+
+            display_intl = df_intl_page[[c for c in [
                 "invoice_date", "seller_name", "seller_country",
                 "invoice_number", "receipt_number",
                 "taxable_amount", "vat_amount", "vat_rate", "total_amount", "currency",
                 "payment_method", "card_last4",
                 "subject", "email_id",
-            ] if c in df_intl.columns]].copy()
+            ] if c in df_intl_page.columns]].copy()
 
             display_intl["invoice_date"] = pd.to_datetime(display_intl["invoice_date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
 
@@ -1721,30 +1806,49 @@ def page_audit_log(engine):
         params["action"] = action_filter
 
     where = " AND ".join(conditions)
-    query = f"""
-        SELECT
-            created_at   AS "Time",
-            actor_type   AS "Type",
-            actor_name   AS "Actor",
-            action       AS "Action",
-            entity_type  AS "Entity",
-            entity_id    AS "ID",
-            details      AS "Details",
-            tenant_id    AS "Tenant"
-        FROM audit_logs
-        WHERE {where}
-        ORDER BY created_at DESC
-        LIMIT 500
-    """
 
     try:
+        with engine.connect() as _conn:
+            audit_total = int(
+                _conn.execute(
+                    text(f"SELECT COUNT(*) FROM audit_logs WHERE {where}"), params
+                ).scalar() or 0
+            )
+
+        if audit_total == 0:
+            st.info(t("page.audit.no_events"))
+            return
+
+        _audit_fhash = hashlib.md5(
+            str((actor_filter, action_filter, days)).encode()
+        ).hexdigest()[:8]
+        _audit_page, _audit_offset = _page_controls(
+            f"audit_page_{_audit_fhash}", audit_total
+        )
+
+        query = f"""
+            SELECT
+                created_at   AS "Time",
+                actor_type   AS "Type",
+                actor_name   AS "Actor",
+                action       AS "Action",
+                entity_type  AS "Entity",
+                entity_id    AS "ID",
+                details      AS "Details",
+                tenant_id    AS "Tenant"
+            FROM audit_logs
+            WHERE {where}
+            ORDER BY created_at DESC
+            LIMIT {_PAGE_SIZE} OFFSET {_audit_offset}
+        """
+
         df = pd.read_sql(query, engine, params=params)
 
         if df.empty:
             st.info(t("page.audit.no_events"))
             return
 
-        st.metric("Events shown", len(df))
+        st.metric("Events shown", audit_total)
 
         # Colour-code the Action column using a map for readability
         action_icons = {
