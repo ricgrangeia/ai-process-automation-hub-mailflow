@@ -1955,7 +1955,8 @@ def page_sellers(engine, settings):
 
     # ── Sellers table ─────────────────────────────────────────────────────────
     try:
-        df = pd.read_sql(
+        df = _sql(
+            engine,
             """
             SELECT
                 s.nif, s.name, s.activity, s.cae, s.address, s.situation,
@@ -1966,7 +1967,6 @@ def page_sellers(engine, settings):
             GROUP BY s.id, s.nif, s.name, s.activity, s.cae, s.address, s.situation
             ORDER BY invoice_count DESC, s.name
             """,
-            engine,
         )
     except Exception as e:
         st.error(t("page.sellers.load_error", error=e))
@@ -1975,8 +1975,6 @@ def page_sellers(engine, settings):
     if df.empty:
         st.info(t("page.sellers.empty"))
         return
-
-    st.caption(f"{len(df)} {t('page.sellers.count_label')}")
 
     # ── Search filter ─────────────────────────────────────────────────────────
     search = st.text_input(t("page.sellers.search"), placeholder="NIF or name…", label_visibility="collapsed")
@@ -1988,9 +1986,23 @@ def page_sellers(engine, settings):
         )
         df = df[mask]
 
-    # ── Display ───────────────────────────────────────────────────────────────
-    st.dataframe(
-        df.rename(columns={
+    st.caption(f"{len(df)} {t('page.sellers.count_label')}")
+
+    # ── Pagination ────────────────────────────────────────────────────────────
+    import hashlib as _hashlib
+    _sellers_fhash = _hashlib.md5(search.strip().encode()).hexdigest()[:8]
+    _sellers_page, _sellers_offset = _page_controls(f"sellers_page_{_sellers_fhash}", len(df))
+    df_page = df.iloc[_sellers_offset : _sellers_offset + _PAGE_SIZE].copy()
+
+    # ── Format columns ────────────────────────────────────────────────────────
+    df_page["last_invoice"] = pd.to_datetime(df_page["last_invoice"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
+    df_page["invoice_count"] = df_page["invoice_count"].fillna(0).astype(int)
+
+    df_page.insert(0, "🗑️", False)
+
+    # ── Data editor ───────────────────────────────────────────────────────────
+    edited = st.data_editor(
+        df_page.rename(columns={
             "nif":           t("page.sellers.col_nif"),
             "name":          t("page.sellers.col_name"),
             "activity":      t("page.sellers.col_activity"),
@@ -2000,21 +2012,30 @@ def page_sellers(engine, settings):
             "invoice_count": t("page.sellers.col_invoices"),
             "last_invoice":  t("page.sellers.col_last_invoice"),
         }),
+        column_config={
+            "🗑️": st.column_config.CheckboxColumn("🗑️", help=t("dashboard.invoices.delete_col_help"), width="small"),
+        },
+        disabled=[c for c in df_page.columns if c != "🗑️"],
         use_container_width=True,
         hide_index=True,
+        key=f"editor_sellers_{_sellers_fhash}",
     )
 
-    # ── Delete ────────────────────────────────────────────────────────────────
-    with st.expander(t("page.sellers.delete_header"), expanded=False):
-        del_nif = st.text_input(t("page.sellers.delete_nif"), placeholder="508517592")
-        if st.button(t("page.sellers.delete_btn"), type="secondary") and del_nif.strip():
+    to_delete = df_page.loc[edited["🗑️"].values, "nif"].tolist() if "🗑️" in edited.columns else []
+    if to_delete:
+        st.warning(t("page.sellers.delete_warning", count=len(to_delete)))
+        if st.button(t("page.sellers.delete_btn"), type="primary", key="del_sellers"):
             try:
+                nif_list = ", ".join(f"'{n}'" for n in to_delete)
                 with engine.begin() as conn:
-                    conn.execute(text("DELETE FROM sellers WHERE nif = :nif"), {"nif": del_nif.strip()})
-                _set_flash("success", t("page.sellers.deleted", nif=del_nif.strip()))
+                    conn.execute(text(f"DELETE FROM sellers WHERE nif IN ({nif_list})"))
+                _set_flash("success", t("page.sellers.deleted_count", count=len(to_delete)))
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ {e}")
+
+    csv_sellers = df.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Export CSV", csv_sellers, "sellers.csv", "text/csv", key="csv_sellers")
 
 
 def page_companies(engine):

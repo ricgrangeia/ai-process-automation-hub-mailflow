@@ -102,10 +102,9 @@ col_address        = "Address"
 col_situation      = "Situation"
 col_invoices       = "Invoices"
 col_last_invoice   = "Last Invoice"
-delete_header      = "🗑️ Remove seller"
-delete_nif         = "NIF to remove"
-delete_btn         = "Delete"
-deleted            = "🗑️ Removed seller {nif}"
+delete_warning     = "⚠️ {count} seller(s) selected for deletion."
+delete_btn         = "Delete selected"
+deleted_count      = "🗑️ Removed {count} seller(s)"
 
 [page.companies]
 title         = "🏢 Companies"

@@ -102,10 +102,9 @@ col_address        = "Adresse"
 col_situation      = "Status"
 col_invoices       = "Rechnungen"
 col_last_invoice   = "Letzte Rechnung"
-delete_header      = "🗑️ Lieferant entfernen"
-delete_nif         = "NIF zum Entfernen"
-delete_btn         = "Löschen"
-deleted            = "🗑️ Lieferant {nif} entfernt"
+delete_warning     = "⚠️ {count} Lieferant(en) zum Löschen ausgewählt."
+delete_btn         = "Ausgewählte löschen"
+deleted_count      = "🗑️ {count} Lieferant(en) entfernt"
 
 [page.companies]
 title          = "🏢 Unternehmen"
