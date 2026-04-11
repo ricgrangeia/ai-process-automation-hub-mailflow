@@ -1555,7 +1555,7 @@ def page_invoices(engine):
 
             display_at = df_at_page[[c for c in [
                 "id", "invoice_date", "document_type", "document_type_description",
-                "invoice_number", "atcud", "nif_seller", "nif_buyer",
+                "invoice_number", "atcud", "nif_seller", "seller_name", "nif_buyer",
                 "taxable_amount", "vat_amount", "total_amount",
                 "mb_entidade", "mb_referencia", "mb_valor", "mb_data_limite",
                 "subject", "email_id",
@@ -1579,6 +1579,7 @@ def page_invoices(engine):
                     "invoice_number":            t("dashboard.invoices.col_invoice_num"),
                     "atcud":          "ATCUD",
                     "nif_seller":     t("dashboard.invoices.col_nif_seller"),
+                    "seller_name":    t("dashboard.invoices.col_seller_name"),
                     "nif_buyer":      t("dashboard.invoices.col_nif_buyer"),
                     "taxable_amount": t("dashboard.invoices.col_taxable"),
                     "vat_amount":     t("dashboard.invoices.col_vat"),
