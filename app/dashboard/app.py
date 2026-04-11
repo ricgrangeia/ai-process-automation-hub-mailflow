@@ -26,6 +26,24 @@ def _decode_mime_header(value):
     except Exception:
         return value
 
+
+# ---------------------------------------------------------------------------
+# Flash message helpers — survive st.rerun() via session_state
+# ---------------------------------------------------------------------------
+
+def _set_flash(level: str, message: str) -> None:
+    """Store a feedback message to show on the next render cycle."""
+    st.session_state["_flash"] = (level, message)
+
+
+def _show_flash() -> None:
+    """Display and clear the stored flash message (call once per page, at the top)."""
+    flash = st.session_state.pop("_flash", None)
+    if not flash:
+        return
+    level, msg = flash
+    {"success": st.success, "error": st.error, "warning": st.warning}.get(level, st.info)(msg)
+
 # Ensure project root (parent of app/) is first in sys.path so `app.*` imports resolve
 # regardless of where Streamlit is launched from.
 _project_root = str(Path(__file__).resolve().parent.parent.parent)
@@ -294,6 +312,7 @@ def page_dashboard(engine, settings):
 
 def page_email_accounts(engine, settings):
     st.title(t("page.accounts.title"))
+    _show_flash()
 
     # ---- list accounts ----
     def load_accounts():
@@ -348,6 +367,15 @@ def page_email_accounts(engine, settings):
                         st.rerun()
 
                 with st.expander(f"⚙️ {t('page.accounts.settings_label')} — {row['email']}"):
+                    # Flash message from previous rerun
+                    _flash_key = f"_mode_flash_{row['id']}"
+                    if st.session_state.get(_flash_key):
+                        _flash_type, _flash_msg = st.session_state.pop(_flash_key)
+                        if _flash_type == "success":
+                            st.success(_flash_msg)
+                        else:
+                            st.error(_flash_msg)
+
                     # Worker mode selector
                     worker_options = ["ai_worker", "invoice_worker"]
                     worker_labels  = [t("page.accounts.mode_ai_full"), t("page.accounts.mode_invoice_full")]
@@ -361,22 +389,25 @@ def page_email_accounts(engine, settings):
                     )
                     if st.button(t("page.accounts.save_mode_btn"), key=f"save_mode_{row['id']}"):
                         new_managed_by = worker_options[worker_labels.index(new_mode)]
-                        with engine.begin() as conn:
-                            conn.execute(
-                                text("UPDATE email_accounts SET managed_by = :mb WHERE id = :id"),
-                                {"mb": new_managed_by, "id": int(row["id"])},
+                        try:
+                            with engine.begin() as conn:
+                                conn.execute(
+                                    text("UPDATE email_accounts SET managed_by = :mb WHERE id = :id"),
+                                    {"mb": new_managed_by, "id": int(row["id"])},
+                                )
+                            from app.core.audit import log_audit_sync
+                            log_audit_sync(
+                                engine,
+                                actor_type="dashboard",
+                                actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                                action="account.managed_by_changed",
+                                entity_type="account",
+                                entity_id=int(row["id"]),
+                                details={"email": row["email"], "managed_by": new_managed_by},
                             )
-                        from app.core.audit import log_audit_sync
-                        log_audit_sync(
-                            engine,
-                            actor_type="dashboard",
-                            actor_name=os.environ.get("DASHBOARD_USER", "admin"),
-                            action="account.managed_by_changed",
-                            entity_type="account",
-                            entity_id=int(row["id"]),
-                            details={"email": row["email"], "managed_by": new_managed_by},
-                        )
-                        st.success(t("page.accounts.mode_saved"))
+                            st.session_state[_flash_key] = ("success", t("page.accounts.mode_saved"))
+                        except Exception as _e:
+                            st.session_state[_flash_key] = ("error", f"❌ {_e}")
                         st.rerun()
 
                     st.divider()
@@ -458,7 +489,7 @@ def page_email_accounts(engine, settings):
                         entity_type="account",
                         details={"email": email, "provider": "imap", "host": imap_host},
                     )
-                    st.success(f"IMAP account **{email}** added.")
+                    _set_flash("success", f"✅ IMAP account **{email}** added.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
@@ -501,7 +532,7 @@ def page_email_accounts(engine, settings):
                         entity_type="account",
                         details={"email": o_email, "provider": "outlook"},
                     )
-                    st.success(f"Outlook account **{o_email}** added.")
+                    _set_flash("success", f"✅ Outlook account **{o_email}** added.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
@@ -541,6 +572,7 @@ def _actions_summary(actions: list) -> str:
 def page_learned_rules(engine, settings):
     st.title(t("page.rules.title"))
     st.caption(t("page.rules.caption"))
+    _show_flash()
     FOLDERS = _get_folder_names(engine)
 
     try:
@@ -773,7 +805,7 @@ def page_learned_rules(engine, settings):
                                     "actions": new_actions,
                                 },
                             )
-                            st.success("Rule updated.")
+                            _set_flash("success", "✅ Rule updated.")
                             st.rerun()
 
                     # Delete button outside form
@@ -794,6 +826,7 @@ def page_learned_rules(engine, settings):
                                 "conditions": row["conditions"],
                             },
                         )
+                        _set_flash("success", f"🗑️ Rule #{rule_id} deleted.")
                         st.rerun()
 
     st.divider()
@@ -860,7 +893,7 @@ def page_learned_rules(engine, settings):
                         details={"conditions": new_conditions, "min_match": int(a_min_match), "actions": new_actions},
                         tenant_id=int(a_tenant),
                     )
-                    st.success(f"Rule added with {len(new_conditions)} condition(s).")
+                    _set_flash("success", f"✅ Rule added with {len(new_conditions)} condition(s).")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
@@ -1177,6 +1210,7 @@ def page_folders(engine, settings):
 
 def page_invoices(engine):
     st.title(t("dashboard.invoices.title"))
+    _show_flash()
     st.caption(t("dashboard.invoices.caption"))
 
     from datetime import datetime, timezone, timedelta
@@ -1454,7 +1488,7 @@ def page_invoices(engine):
                                 text("DELETE FROM invoices WHERE id = ANY(:ids)"),
                                 {"ids": ids_to_delete},
                             )
-                        st.success(f"✅ Deleted {len(ids_to_delete)} invoice(s).")
+                        _set_flash("success", f"✅ Deleted {len(ids_to_delete)} invoice(s).")
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ Delete failed: {e}")
@@ -1462,6 +1496,7 @@ def page_invoices(engine):
 
 def page_settings(engine):
     st.title(t("page.settings.title"))
+    _show_flash()
 
     try:
         from app.core.system_settings import (
@@ -1508,7 +1543,7 @@ def page_settings(engine):
                 else:
                     try:
                         set_setting(engine, FOLDER_STRUCTURE_KEY, val)
-                        st.success(t("page.settings.saved"))
+                        _set_flash("success", t("page.settings.saved"))
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ {e}")
@@ -1516,7 +1551,7 @@ def page_settings(engine):
         if reset:
             try:
                 set_setting(engine, FOLDER_STRUCTURE_KEY, FOLDER_STRUCTURE_DEFAULT)
-                st.success(t("page.settings.reset_done"))
+                _set_flash("success", t("page.settings.reset_done"))
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ {e}")
@@ -1542,6 +1577,7 @@ def page_settings(engine):
 def page_companies(engine):
     st.title(t("page.companies.title"))
     st.caption(t("page.companies.caption"))
+    _show_flash()
 
     # ── Add company form ──────────────────────────────────────────────────────
     with st.expander(t("page.companies.add_header"), expanded=False):
@@ -1562,7 +1598,7 @@ def page_companies(engine):
                                 {"name": new_name.strip(), "nif": new_nif.strip(), "notes": new_notes.strip() or None},
                             )
                             conn.commit()
-                        st.success(f"✅ Added {new_name.strip()}")
+                        _set_flash("success", f"✅ Added {new_name.strip()}")
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ {e}")
@@ -1624,7 +1660,7 @@ def page_companies(engine):
                                     },
                                 )
                                 conn.commit()
-                            st.success(t("page.settings.saved"))
+                            _set_flash("success", t("page.settings.saved"))
                             st.rerun()
                         except Exception as e:
                             st.error(f"❌ {e}")
@@ -1634,7 +1670,7 @@ def page_companies(engine):
                         with engine.connect() as conn:
                             conn.execute(text("DELETE FROM companies WHERE id=:id"), {"id": cid})
                             conn.commit()
-                        st.success(t("page.companies.deleted", name=name))
+                        _set_flash("success", t("page.companies.deleted", name=name))
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ {e}")
