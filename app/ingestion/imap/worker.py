@@ -13,62 +13,49 @@ from app.core.crypto import decrypt_secret
 from app.accounts.models import EmailAccount
 from app.messages.models import EmailMessage, Attachment
 from app.messages.storage import save_raw_email, save_attachment
-from app.processing.queue import enqueue_email_job
+from app.processing.queue import enqueue_email_job, enqueue_invoice_job
 from app.ingestion.parser import parse_email
 from app.ingestion.imap.client import connect_imap, fetch_unseen_raw_messages, mark_seen
+from app.invoice_worker.detector import classify_email as classify_financial
 
 
-# -----------------------------
+# ─────────────────────────────────────────────────────────────────────────────
 # Logging
-# -----------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
+logger = logging.getLogger("imap-worker")
 
-logger = logging.getLogger("email-worker")
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-account poll
+# ─────────────────────────────────────────────────────────────────────────────
 
-# -----------------------------
-# Process Account
-# -----------------------------
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
 async def process_account_once(settings, session_factory, r, acc: EmailAccount):
 
-    # 🔥 Safety: Only IMAP accounts
     if acc.provider != "imap":
         return
 
-    if not acc.imap_host:
-        logger.warning(f"[{acc.username}] IMAP host missing. Skipping.")
+    if not acc.imap_host or not acc.username:
+        logger.warning(f"[account id={acc.id}] Incomplete config. Skipping.")
         return
 
-    if not acc.username:
-        logger.warning(f"[account id={acc.id}] Username missing. Skipping.")
-        return
-
-    logger.info(f"[{acc.username}] Checking account...")
+    managed_by = acc.managed_by or "ai_worker"
+    logger.info(f"[{acc.username}] Checking account (managed_by={managed_by})...")
 
     password = decrypt_secret(settings.master_key, acc.password_encrypted)
 
     def _fetch():
-
-        conn = connect_imap(
-            acc.imap_host,
-            acc.imap_port or 993,
-            acc.username,
-            password
-        )
-
+        conn = connect_imap(acc.imap_host, acc.imap_port or 993, acc.username, password)
         try:
             messages = list(fetch_unseen_raw_messages(
-                conn,
-                settings.inbox_folder,
-                settings.max_unseen_per_cycle
+                conn, settings.inbox_folder, settings.max_unseen_per_cycle
             ))
-
             return messages, conn
-
         except Exception:
             conn.logout()
             raise
@@ -83,24 +70,38 @@ async def process_account_once(settings, session_factory, r, acc: EmailAccount):
         logger.info(f"[{acc.username}] No new messages.")
         return
 
-    logger.info(f"[{acc.username}] Fetched {len(messages)} new messages.")
+    logger.info(f"[{acc.username}] Fetched {len(messages)} message(s).")
 
     async with session_factory() as session:
         for uid, raw_bytes, uid_for_seen in messages:
 
+            # ── Duplicate guard ───────────────────────────────────────────────
             exists = await session.execute(
                 select(EmailMessage.id).where(
                     EmailMessage.account_id == acc.id,
-                    EmailMessage.imap_uid == uid
+                    EmailMessage.imap_uid == uid,
                 )
             )
-
             if exists.scalar_one_or_none() is not None:
                 logger.info(f"[{acc.username}] Skipping duplicate UID {uid}")
                 continue
 
             parsed = parse_email(raw_bytes)
 
+            # ── Invoice-worker accounts: pre-filter non-financial emails ──────
+            # Non-financial emails on invoice accounts are left completely
+            # untouched (unread, unmoved, not stored) — intentional behaviour.
+            if managed_by == "invoice_worker":
+                classification = classify_financial(parsed)
+                if classification is None:
+                    logger.info(
+                        f"[{acc.username}] UID {uid} — not financial, leaving untouched"
+                    )
+                    continue  # do NOT mark seen, do NOT store, do NOT enqueue
+            else:
+                classification = None  # ai-worker: no pre-filter needed
+
+            # ── Store email + attachments ─────────────────────────────────────
             email_row = EmailMessage(
                 tenant_id=acc.tenant_id,
                 account_id=acc.id,
@@ -114,59 +115,63 @@ async def process_account_once(settings, session_factory, r, acc: EmailAccount):
                 received_at=parsed["received_at"],
                 status="new",
             )
-
             session.add(email_row)
             await session.flush()
 
             raw_path = save_raw_email(
-                settings.storage_root,
-                acc.tenant_id,
-                email_row.id,
-                raw_bytes
+                settings.storage_root, acc.tenant_id, email_row.id, raw_bytes
             )
             email_row.raw_path = raw_path
 
             for att in parsed["attachments"]:
                 path = save_attachment(
-                    settings.storage_root,
-                    acc.tenant_id,
-                    email_row.id,
-                    att["filename"] or "attachment.bin",
-                    att["content"]
+                    settings.storage_root, acc.tenant_id, email_row.id,
+                    att["filename"] or "attachment.bin", att["content"]
                 )
-
                 session.add(Attachment(
                     email_id=email_row.id,
                     filename=att["filename"],
                     mime_type=att["mime_type"],
                     path=path,
-                    sha256=att["sha256"]
+                    sha256=att["sha256"],
                 ))
 
             await session.commit()
-
             logger.info(f"[{acc.username}] Stored email id={email_row.id}")
 
-            await enqueue_email_job(r, acc.tenant_id, email_row.id)
+            # ── Route to the correct worker queue ─────────────────────────────
+            if managed_by == "invoice_worker":
+                await enqueue_invoice_job(r, acc.tenant_id, email_row.id, classification)
+                logger.info(
+                    f"[{acc.username}] Enqueued invoice job "
+                    f"id={email_row.id} ({classification})"
+                )
+            else:
+                await enqueue_email_job(r, acc.tenant_id, email_row.id)
+                logger.info(
+                    f"[{acc.username}] Enqueued ai-worker job id={email_row.id}"
+                )
 
-            logger.info(f"[{acc.username}] Enqueued job for email id={email_row.id}")
-
+            # ── Mark seen ─────────────────────────────────────────────────────
             if settings.mark_seen_after_store:
                 await asyncio.to_thread(
-                                mark_seen,
-                                conn,
-                                settings.inbox_folder,
-                                uid_for_seen
-                            )
+                    mark_seen, conn, settings.inbox_folder, uid_for_seen
+                )
                 logger.info(f"[{acc.username}] Marked UID {uid} as seen")
 
+    try:
+        conn.logout()
+    except Exception:
+        pass
 
-# -----------------------------
-# Worker Loop
-# -----------------------------
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Worker loop — polls ALL active IMAP accounts
+# ─────────────────────────────────────────────────────────────────────────────
+
 async def worker_loop():
     settings = get_settings()
-    logger.info("Worker starting...")
+    logger.info("IMAP Worker starting...")
 
     engine = make_engine(settings.database_url)
     await init_db(engine)
@@ -185,13 +190,12 @@ async def worker_loop():
                     select(EmailAccount).where(
                         EmailAccount.active == True,
                         EmailAccount.provider == "imap",
-                        # Only manage accounts assigned to ai_worker (or unset legacy rows)
-                        (EmailAccount.managed_by == "ai_worker") | (EmailAccount.managed_by == None),
+                        # All accounts — routing is handled per-message above
                     )
                 )
                 accounts = list(res.scalars().all())
 
-            logger.info(f"Found {len(accounts)} active IMAP accounts.")
+            logger.info(f"Found {len(accounts)} active IMAP account(s).")
 
             sem = asyncio.Semaphore(10)
 
@@ -202,12 +206,9 @@ async def worker_loop():
             await asyncio.gather(*[_run(a) for a in accounts])
 
         except RetryError as e:
-            original = e.last_attempt.exception()
-            logger.exception(f"Retry failed: {original}")
-
+            logger.exception(f"Retry failed: {e.last_attempt.exception()}")
         except SQLAlchemyError as e:
             logger.error(f"DB error: {e}")
-
         except Exception:
             logger.exception("Unexpected error")
 

@@ -1,20 +1,21 @@
 """
-Invoice Worker — collaborative mode for financial-only mailbox management.
+Invoice Worker — Redis queue consumer for financial email processing.
 
 Behaviour:
-  - Watches accounts where managed_by = 'invoice_worker'
-  - For each unseen email:
-      • Has PDF(s)      → extract invoice via tool server → save DB + archive PDF + move email
-      • Financial body  → LLM body extraction → save DB + move email
-      • Neither         → leave completely untouched (unread, unmoved)
-  - Sends a Telegram notification for every successfully extracted invoice
+  - Listens on mailai:jobs:invoice (populated by the IMAP worker)
+  - For each job:
+      • classification=pdf_invoice   → extract invoice via tool server → save DB + archive PDF + move email
+      • classification=financial_body → LLM body extraction → save DB + move email
+  - Non-financial emails are never enqueued here; the IMAP worker pre-filters them
+    and leaves them completely untouched (unread, unmoved) on the mailserver.
 """
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 
-from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
+import redis.asyncio as redis
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -24,11 +25,9 @@ from app.core.database.init import init_db
 from app.core.crypto import decrypt_secret
 from app.accounts.models import EmailAccount
 from app.messages.models import EmailMessage, Attachment
-from app.messages.storage import save_raw_email, save_attachment
-from app.ingestion.parser import parse_email
-from app.ingestion.imap.client import connect_imap, fetch_unseen_raw_messages, mark_seen, move_message
 from app.invoices.service import save_invoice_from_pdf, save_invoice_from_body
-from app.invoice_worker.detector import classify_email
+from app.ingestion.imap.client import connect_imap, move_message
+from app.processing.queue import INVOICE_QUEUE_KEY
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,7 +35,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("invoice-worker")
 
-# IMAP folder where financial emails land after processing
 _DEFAULT_INVOICE_FOLDER = "Invoices"
 
 
@@ -60,11 +58,11 @@ async def _notify_telegram(bot_token: str, chat_id: str, message: str) -> None:
 
 def _build_invoice_message(email_row: EmailMessage, invoice_data: dict, origin: str) -> str:
     origin_labels = {
-        "pt_at":               "🇵🇹 AT Invoice",
-        "international":       "🌍 International",
+        "pt_at":                "🇵🇹 AT Invoice",
+        "international":        "🌍 International",
         "payment_confirmation": "💳 Payment Confirmation",
-        "bank_transfer":       "🏦 Bank Transfer",
-        "receipt":             "🧾 Receipt",
+        "bank_transfer":        "🏦 Bank Transfer",
+        "receipt":              "🧾 Receipt",
     }
     label = origin_labels.get(origin, origin)
     parts = [f"🧾 *Invoice Extracted* — {label}"]
@@ -84,11 +82,10 @@ def _build_invoice_message(email_row: EmailMessage, invoice_data: dict, origin: 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PDF archive helper (reuses export_pdf logic without the EmailAction wrapper)
+# PDF archive helper
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _archive_pdfs(email_row: EmailMessage, settings, invoice_data: dict) -> None:
-    """Copy PDF attachments to the structured files archive."""
     import asyncio
     from app.processing.actions.export_pdf import (
         _resolve_dest, _copy_no_duplicate, _lookup_companies,
@@ -108,7 +105,7 @@ async def _archive_pdfs(email_row: EmailMessage, settings, invoice_data: dict) -
     nif_buyer  = invoice_data.get("nif_buyer")
     nif_seller = invoice_data.get("nif_seller")
 
-    matched = await asyncio.to_thread(_lookup_companies, nif_buyer, nif_seller)
+    matched      = await asyncio.to_thread(_lookup_companies, nif_buyer, nif_seller)
     company_names = [c["name"] for c in matched] if matched else [fallback_company]
 
     att_files = await asyncio.to_thread(_fetch_pdf_attachments, email_row.id)
@@ -117,13 +114,14 @@ async def _archive_pdfs(email_row: EmailMessage, settings, invoice_data: dict) -
         if att_src.exists():
             att_files = [(p, p.name) for p in att_src.glob("*.pdf")]
 
-    supplier = (email_row.from_address or "Unknown").split("@")[0]
+    supplier   = (email_row.from_address or "Unknown").split("@")[0]
     received_at = getattr(email_row, "received_at", None)
-
-    category = invoice_data.get("invoice_origin", "Invoices").replace("_", " ").title()
+    category   = invoice_data.get("invoice_origin", "Invoices").replace("_", " ").title()
 
     for company_name in company_names:
-        dest = _resolve_dest(files_root, company_name, category, supplier, received_at, folder_template)
+        dest = _resolve_dest(
+            files_root, company_name, category, supplier, received_at, folder_template
+        )
         dest.mkdir(parents=True, exist_ok=True)
         for att_path, att_name in att_files:
             result = _copy_no_duplicate(att_path, dest, att_name)
@@ -134,7 +132,9 @@ async def _archive_pdfs(email_row: EmailMessage, settings, invoice_data: dict) -
 # Move email to IMAP folder
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _move_email(email_row: EmailMessage, acc: EmailAccount, settings, target_folder: str) -> None:
+async def _move_email(
+    email_row: EmailMessage, acc: EmailAccount, settings, target_folder: str
+) -> None:
     password = decrypt_secret(settings.master_key, acc.password_encrypted)
 
     def _do_move():
@@ -155,7 +155,7 @@ async def _move_email(email_row: EmailMessage, acc: EmailAccount, settings, targ
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Finalize email record — status, sender identity, telemetry
+# Finalize email record
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _finalize_email(
@@ -164,28 +164,20 @@ async def _finalize_email(
     folder: str,
     invoice_data: dict | None,
 ) -> None:
-    """
-    Write status=moved + sender identity derived from invoice data.
-    Invoices always come from companies; seller_name/nif_seller are used as the
-    sender name so the dashboard never shows an unknown/raw email address.
-    """
     from datetime import datetime, timezone
 
     sender_name = None
     if invoice_data:
-        sender_name = (
-            invoice_data.get("seller_name")
-            or invoice_data.get("nif_seller")
-        )
+        sender_name = invoice_data.get("seller_name") or invoice_data.get("nif_seller")
 
     async with session_factory() as session:
         row = await session.get(EmailMessage, email_id)
         if row:
-            row.status = "moved"
+            row.status               = "moved"
             row.classification_label = folder
-            row.processed_at = datetime.now(timezone.utc)
-            row.ai_source = "invoice_worker"
-            row.sender_type = "company"  # invoices are always from companies
+            row.processed_at         = datetime.now(timezone.utc)
+            row.ai_source            = "invoice_worker"
+            row.sender_type          = "company"
             if sender_name and not row.sender_name:
                 row.sender_name = sender_name
             await session.commit()
@@ -196,72 +188,38 @@ async def _finalize_email(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Process a single email
+# Process a single email (loaded from DB by id)
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _process_email(
+async def _process_email_by_id(
     session_factory,
     settings,
-    acc: EmailAccount,
-    uid: int,
-    raw_bytes: bytes,
-    uid_for_seen: int,
-    imap_conn,
+    email_id: int,
+    classification: str,
 ) -> None:
-    parsed = parse_email(raw_bytes)
-
-    classification = classify_email(parsed)
-    if classification is None:
-        logger.info(f"[{acc.username}] UID {uid} — not financial, leaving untouched")
-        return  # do NOT mark seen, do NOT move
-
+    """
+    Process an email that was already stored in the DB by the IMAP worker.
+    classification is one of: "pdf_invoice", "financial_body"
+    """
+    # Load email and its account from the DB
     async with session_factory() as session:
-        exists = await session.execute(
-            select(EmailMessage.id).where(
-                EmailMessage.account_id == acc.id,
-                EmailMessage.imap_uid == uid,
+        email_row = await session.get(EmailMessage, email_id)
+        if not email_row:
+            logger.error(f"Email {email_id} not found in DB — skipping")
+            return
+        acc = await session.get(EmailAccount, email_row.account_id)
+        if not acc:
+            logger.error(
+                f"Account {email_row.account_id} not found for email {email_id} — skipping"
             )
-        )
-        if exists.scalar_one_or_none() is not None:
-            logger.info(f"[{acc.username}] Skipping duplicate UID {uid}")
             return
 
-        email_row = EmailMessage(
-            tenant_id=acc.tenant_id,
-            account_id=acc.id,
-            message_id=parsed["message_id"],
-            imap_uid=uid,
-            from_name=parsed["from_name"],
-            from_address=parsed["from_address"],
-            subject=parsed["subject"],
-            body_text=parsed["body_text"],
-            body_html=parsed["body_html"],
-            received_at=parsed["received_at"],
-            status="new",
-        )
-        session.add(email_row)
-        await session.flush()
+    logger.info(
+        f"Processing email id={email_id} ({classification}) "
+        f"from {email_row.from_address}"
+    )
 
-        raw_path = save_raw_email(settings.storage_root, acc.tenant_id, email_row.id, raw_bytes)
-        email_row.raw_path = raw_path
-
-        for att in parsed["attachments"]:
-            path = save_attachment(
-                settings.storage_root, acc.tenant_id, email_row.id,
-                att["filename"] or "attachment.bin", att["content"]
-            )
-            session.add(Attachment(
-                email_id=email_row.id,
-                filename=att["filename"],
-                mime_type=att["mime_type"],
-                path=path,
-                sha256=att["sha256"],
-            ))
-
-        await session.commit()
-        logger.info(f"[{acc.username}] Stored email id={email_row.id} ({classification})")
-
-    # ── PDF invoice path ─────────────────────────────────────────────────────
+    # ── PDF invoice path ──────────────────────────────────────────────────────
     if classification == "pdf_invoice":
         from app.processing.actions.export_pdf import _fetch_pdf_attachments
         att_files = await asyncio.to_thread(_fetch_pdf_attachments, email_row.id)
@@ -275,7 +233,7 @@ async def _process_email(
                 break
 
         if not invoice_data:
-            logger.warning(f"No invoice data extracted from PDF(s) in email {email_row.id}")
+            logger.warning(f"No invoice data extracted from PDF(s) in email {email_id}")
 
         await _archive_pdfs(email_row, settings, invoice_data or {})
 
@@ -283,18 +241,20 @@ async def _process_email(
         await _move_email(email_row, acc, settings, target)
 
         if invoice_data:
-            msg = _build_invoice_message(email_row, invoice_data, invoice_data.get("invoice_origin", "pt_at"))
+            msg = _build_invoice_message(
+                email_row, invoice_data, invoice_data.get("invoice_origin", "pt_at")
+            )
             await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
 
         await _finalize_email(session_factory, email_row.id, target, invoice_data)
 
-    # ── Financial body path ──────────────────────────────────────────────────
+    # ── Financial body path ───────────────────────────────────────────────────
     elif classification == "financial_body":
         import os
         invoice_data = await save_invoice_from_body(
             session_factory, email_row.id,
-            subject=parsed.get("subject", ""),
-            body_text=parsed.get("body_text", ""),
+            subject=email_row.subject or "",
+            body_text=email_row.body_text or "",
             settings=settings,
             language=os.environ.get("LANGUAGE", "en"),
         )
@@ -303,73 +263,23 @@ async def _process_email(
             target = _DEFAULT_INVOICE_FOLDER
             await _move_email(email_row, acc, settings, target)
 
-            msg = _build_invoice_message(email_row, invoice_data, invoice_data.get("invoice_origin", "payment_confirmation"))
+            msg = _build_invoice_message(
+                email_row, invoice_data,
+                invoice_data.get("invoice_origin", "payment_confirmation"),
+            )
             await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
-        else:
-            logger.warning(f"LLM body extraction returned nothing for email {email_row.id}")
-            # Leave email unread/unmoved — human will deal with it
-
-        if invoice_data:
             await _finalize_email(session_factory, email_row.id, target, invoice_data)
+        else:
+            logger.warning(
+                f"LLM body extraction returned nothing for email {email_id} — leaving for manual review"
+            )
 
-    # Mark seen after successful processing
-    if settings.mark_seen_after_store:
-        try:
-            mark_seen(imap_conn, settings.inbox_folder, uid_for_seen)
-        except Exception as e:
-            logger.warning(f"mark_seen failed for UID {uid}: {e}")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Account poll
-# ─────────────────────────────────────────────────────────────────────────────
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
-async def process_account_once(settings, session_factory, acc: EmailAccount) -> None:
-    if acc.provider != "imap":
-        return
-    if not acc.imap_host or not acc.username:
-        logger.warning(f"[account id={acc.id}] Incomplete config. Skipping.")
-        return
-
-    logger.info(f"[{acc.username}] Checking account (invoice-worker)...")
-    password = decrypt_secret(settings.master_key, acc.password_encrypted)
-
-    def _fetch():
-        conn = connect_imap(acc.imap_host, acc.imap_port or 993, acc.username, password)
-        try:
-            messages = list(fetch_unseen_raw_messages(conn, settings.inbox_folder, settings.max_unseen_per_cycle))
-            return messages, conn
-        except Exception:
-            conn.logout()
-            raise
-
-    try:
-        messages, conn = await asyncio.to_thread(_fetch)
-    except Exception as e:
-        logger.error(f"[{acc.username}] IMAP connection failed: {e}")
-        raise
-
-    if not messages:
-        logger.info(f"[{acc.username}] No new messages.")
-        return
-
-    logger.info(f"[{acc.username}] Fetched {len(messages)} messages.")
-
-    for uid, raw_bytes, uid_for_seen in messages:
-        try:
-            await _process_email(session_factory, settings, acc, uid, raw_bytes, uid_for_seen, conn)
-        except Exception as e:
-            logger.exception(f"[{acc.username}] Error processing UID {uid}: {e}")
-
-    try:
-        conn.logout()
-    except Exception:
-        pass
+    else:
+        logger.error(f"Unknown classification '{classification}' for email {email_id}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Worker loop
+# Worker loop — Redis consumer
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def worker_loop() -> None:
@@ -381,40 +291,30 @@ async def worker_loop() -> None:
     logger.info("Database initialized.")
 
     session_factory = make_session_factory(engine)
+    r = redis.from_url(settings.redis_url, decode_responses=True)
+    logger.info(f"Connected to Redis. Listening on {INVOICE_QUEUE_KEY} ...")
 
     while True:
         try:
-            logger.info("Invoice Worker poll cycle started.")
+            # Block up to 5 s, then loop (allows clean shutdown checks)
+            job = await r.brpop(INVOICE_QUEUE_KEY, timeout=5)
+            if job is None:
+                continue
 
-            async with session_factory() as session:
-                res = await session.execute(
-                    select(EmailAccount).where(
-                        EmailAccount.active == True,
-                        EmailAccount.provider == "imap",
-                        EmailAccount.managed_by == "invoice_worker",
-                    )
-                )
-                accounts = list(res.scalars().all())
+            _, payload_str = job
+            payload        = json.loads(payload_str)
+            email_id       = payload["email_id"]
+            classification = payload.get("classification", "pdf_invoice")
 
-            logger.info(f"Found {len(accounts)} invoice-worker account(s).")
+            logger.info(
+                f"Received invoice job: email_id={email_id} ({classification})"
+            )
+            await _process_email_by_id(session_factory, settings, email_id, classification)
 
-            sem = asyncio.Semaphore(5)
-
-            async def _run(acc):
-                async with sem:
-                    await process_account_once(settings, session_factory, acc)
-
-            await asyncio.gather(*[_run(a) for a in accounts])
-
-        except RetryError as e:
-            logger.exception(f"Retry failed: {e.last_attempt.exception()}")
         except SQLAlchemyError as e:
             logger.error(f"DB error: {e}")
         except Exception:
             logger.exception("Unexpected error in invoice-worker")
-
-        logger.info(f"Sleeping {settings.poll_interval_sec}s...\n")
-        await asyncio.sleep(settings.poll_interval_sec)
 
 
 def main():

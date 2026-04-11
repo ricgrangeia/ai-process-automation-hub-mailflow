@@ -1702,12 +1702,26 @@ def page_settings(engine):
     st.subheader("🧪 Testing Tools")
     st.caption("⚠️ For testing only — will be removed when no longer needed.")
 
-    with st.expander("🔄 Re-queue emails for reprocessing", expanded=False):
+    with st.expander("🔄 Re-process emails", expanded=False):
         st.markdown(
-            "Resets the status of selected emails back to `new` and pushes them "
-            "back into the AI worker queue. **Does not re-fetch from IMAP** — "
-            "uses whatever is already stored in the database."
+            "Resets the status of selected emails back to `new`. "
+            "**ai-worker** emails are pushed to the Redis queue immediately. "
+            "**invoice-worker** emails are reset so the invoice-worker picks them up on its next IMAP poll. "
+            "Does **not** re-fetch from IMAP — uses whatever is already stored in the database."
         )
+
+        # Base query — join account for managed_by; check attachments to infer classification
+        _BASE_Q = """
+            SELECT e.id, e.tenant_id, e.account_id, e.status, e.classification_label,
+                   COALESCE(a.managed_by, 'ai_worker') AS managed_by,
+                   EXISTS(
+                       SELECT 1 FROM attachments att
+                       WHERE att.email_id = e.id
+                         AND (att.filename ILIKE '%.pdf' OR att.mime_type = 'application/pdf')
+                   ) AS has_pdf
+            FROM emails e
+            LEFT JOIN email_accounts a ON a.id = e.account_id
+        """
 
         # Status summary
         try:
@@ -1718,12 +1732,12 @@ def page_settings(engine):
             status_summary = "  ·  ".join(
                 f"`{r['status']}` **{r['n']}**" for _, r in status_df.iterrows()
             )
-            st.caption(f"All emails in DB: {status_summary}")
+            st.caption(f"Emails in DB: {status_summary}")
         except Exception:
             pass
 
         scope = st.radio(
-            "Which emails to re-queue:",
+            "Which emails to re-process:",
             [
                 "Last N emails (any status)",
                 "Already in folders (status=moved)",
@@ -1734,83 +1748,100 @@ def page_settings(engine):
             key="requeue_scope",
         )
 
-        ids_to_requeue: list[tuple[int, int]] = []  # (tenant_id, email_id)
+        rows = pd.DataFrame()
 
         if scope == "Last N emails (any status)":
             n = st.number_input("Number of emails", min_value=1, max_value=500, value=10, step=1)
-            rows = pd.read_sql(
-                f"SELECT id, tenant_id, status, classification_label FROM emails ORDER BY id DESC LIMIT {int(n)}",
-                engine,
-            )
-            ids_to_requeue = list(zip(rows["tenant_id"], rows["id"]))
+            rows = pd.read_sql(_BASE_Q + f"ORDER BY e.id DESC LIMIT {int(n)}", engine)
             moved = int((rows["status"] == "moved").sum())
-            st.caption(f"{len(ids_to_requeue)} email(s) selected — {moved} already in folders, will be re-classified.")
+            st.caption(f"{len(rows)} email(s) — {moved} already in folders.")
 
         elif scope == "Already in folders (status=moved)":
-            folder_filter = st.text_input("Filter by folder name (leave blank for all)", placeholder="Faturas")
-            query = "SELECT id, tenant_id, classification_label FROM emails WHERE status = 'moved'"
+            folder_filter = st.text_input("Filter by folder name (blank = all)", placeholder="Faturas")
+            q = _BASE_Q + "WHERE e.status = 'moved'"
             if folder_filter.strip():
-                rows = pd.read_sql(
-                    query + " AND classification_label ILIKE :f ORDER BY id DESC",
-                    engine,
-                    params={"f": f"%{folder_filter.strip()}%"},
-                )
+                rows = pd.read_sql(q + " AND e.classification_label ILIKE :f ORDER BY e.id DESC",
+                                   engine, params={"f": f"%{folder_filter.strip()}%"})
             else:
-                rows = pd.read_sql(query + " ORDER BY id DESC", engine)
-            ids_to_requeue = list(zip(rows["tenant_id"], rows["id"]))
+                rows = pd.read_sql(q + " ORDER BY e.id DESC", engine)
             folder_counts = rows["classification_label"].value_counts().to_dict()
             summary = "  ·  ".join(f"{k}: **{v}**" for k, v in list(folder_counts.items())[:6])
-            st.caption(f"{len(ids_to_requeue)} email(s) — {summary}")
+            st.caption(f"{len(rows)} email(s) — {summary}")
 
         elif scope == "Specific email IDs":
             raw = st.text_input("Email IDs (comma-separated)", placeholder="1, 2, 3")
             if raw.strip():
                 try:
                     parsed_ids = [int(x.strip()) for x in raw.split(",") if x.strip()]
-                    rows = pd.read_sql(
-                        "SELECT id, tenant_id, status, classification_label FROM emails WHERE id = ANY(:ids)",
-                        engine,
-                        params={"ids": parsed_ids},
-                    )
-                    ids_to_requeue = list(zip(rows["tenant_id"], rows["id"]))
-                    st.caption(f"{len(ids_to_requeue)} email(s) found: " +
-                               ", ".join(f"#{r['id']} [{r['status']}]" for _, r in rows.iterrows()))
+                    rows = pd.read_sql(_BASE_Q + "WHERE e.id = ANY(:ids)", engine,
+                                       params={"ids": parsed_ids})
+                    st.caption(f"{len(rows)} email(s) found: " +
+                               ", ".join(f"#{r['id']} [{r['status']}] ({r['managed_by']})"
+                                         for _, r in rows.iterrows()))
                 except ValueError:
                     st.error("Invalid IDs — use comma-separated numbers.")
 
         else:  # All emails
-            rows = pd.read_sql("SELECT id, tenant_id, status FROM emails ORDER BY id DESC", engine)
-            ids_to_requeue = list(zip(rows["tenant_id"], rows["id"]))
-            st.caption(f"{len(ids_to_requeue)} email(s) total — includes all statuses.")
+            rows = pd.read_sql(_BASE_Q + "ORDER BY e.id DESC", engine)
+            st.caption(f"{len(rows)} email(s) total.")
 
-        if ids_to_requeue and st.button("🔄 Reset & Re-queue", type="primary", key="btn_requeue"):
+        # Show worker split before confirming
+        if not rows.empty:
+            ai_count  = int((rows["managed_by"] == "ai_worker").sum())
+            inv_count = int((rows["managed_by"] == "invoice_worker").sum())
+            st.info(
+                f"🤖 **{ai_count}** ai-worker email(s) → pushed to `mailai:jobs:email`  \n"
+                f"🧾 **{inv_count}** invoice-worker email(s) → pushed to `mailai:jobs:invoice`"
+            )
+
+        if not rows.empty and st.button("🔄 Reset & Re-process", type="primary", key="btn_requeue"):
             try:
                 import json as _json
                 import redis as _redis_sync
 
-                # 1 — reset status in DB
-                email_ids = [eid for _, eid in ids_to_requeue]
+                email_ids = rows["id"].tolist()
+
+                # 1 — reset status for all selected emails
                 with engine.begin() as conn:
                     conn.execute(
                         text("UPDATE emails SET status = 'new' WHERE id = ANY(:ids)"),
                         {"ids": email_ids},
                     )
 
-                # 2 — push to Redis queue
                 _r = _redis_sync.from_url(settings.redis_url, decode_responses=True)
-                queue_key = "mailai:jobs:email"
-                for tenant_id, email_id in ids_to_requeue:
-                    _r.lpush(queue_key, _json.dumps({
-                        "type": "process_email",
-                        "tenant_id": int(tenant_id),
-                        "email_id": int(email_id),
+
+                # 2 — push ai_worker emails to their queue
+                ai_rows = rows[rows["managed_by"] == "ai_worker"]
+                for _, row in ai_rows.iterrows():
+                    _r.lpush("mailai:jobs:email", _json.dumps({
+                        "type":      "process_email",
+                        "tenant_id": int(row["tenant_id"]),
+                        "email_id":  int(row["id"]),
                     }))
+
+                # 3 — push invoice_worker emails to their queue
+                #     infer classification from stored attachments (has_pdf column)
+                inv_rows = rows[rows["managed_by"] == "invoice_worker"]
+                for _, row in inv_rows.iterrows():
+                    classification = "pdf_invoice" if row.get("has_pdf") else "financial_body"
+                    _r.lpush("mailai:jobs:invoice", _json.dumps({
+                        "type":           "process_invoice",
+                        "tenant_id":      int(row["tenant_id"]),
+                        "email_id":       int(row["id"]),
+                        "classification": classification,
+                    }))
+
                 _r.close()
 
-                _set_flash("success", f"✅ Re-queued {len(ids_to_requeue)} email(s). The AI worker will pick them up shortly.")
+                msg = f"✅ Reset {len(email_ids)} email(s)."
+                if not ai_rows.empty:
+                    msg += f" {len(ai_rows)} pushed to ai-worker queue."
+                if not inv_rows.empty:
+                    msg += f" {len(inv_rows)} pushed to invoice-worker queue."
+                _set_flash("success", msg)
                 st.rerun()
             except Exception as e:
-                st.error(f"❌ Re-queue failed: {e}")
+                st.error(f"❌ Re-process failed: {e}")
 
 
 def page_companies(engine):
