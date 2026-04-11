@@ -40,6 +40,8 @@ class Invoice(Base):
 
     # Document type (from QR field D): FT, FR, FS, ND, NC, RG, etc.
     document_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Human-readable label derived from document_type: "Fatura", "Recibo", etc.
+    document_type_description: Mapped[str | None] = mapped_column(String(60), nullable=True)
 
     # Raw QR string and extraction metadata
     raw_qr: Mapped[str | None] = mapped_column(Text, nullable=True)

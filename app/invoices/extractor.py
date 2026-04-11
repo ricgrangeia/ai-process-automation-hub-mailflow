@@ -56,6 +56,13 @@ async def extract_qr_from_pdf(pdf_path: str, tool_server_url: str, api_key: str 
 
     populated = {k: v for k, v in invoice.items() if v is not None}
     logger.info(f"Invoice extracted from {path.name}: {populated}")
+
+    # document_type_description is derived from document_type — no LLM needed
+    doc_type = invoice.get("document_type")
+    if doc_type and not invoice.get("document_type_description"):
+        from app.invoices.document_types import DOCUMENT_TYPES
+        invoice["document_type_description"] = DOCUMENT_TYPES.get(doc_type)
+
     return [invoice]
 
 

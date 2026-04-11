@@ -1108,6 +1108,7 @@ def page_invoices(engine):
                 e.subject,
                 e.from_address,
                 i.document_type,
+                i.document_type_description,
                 i.nif_seller,
                 i.nif_buyer,
                 i.invoice_number,
@@ -1203,7 +1204,7 @@ def page_invoices(engine):
     # ── Table ──
     display = df[[
         c for c in [
-            "invoice_date", "document_type", "invoice_number", "atcud",
+            "invoice_date", "document_type", "document_type_description", "invoice_number", "atcud",
             "nif_seller", "nif_buyer",
             "taxable_amount", "vat_amount", "total_amount",
             "mb_entidade", "mb_referencia", "mb_valor", "mb_data_limite",
@@ -1222,9 +1223,10 @@ def page_invoices(engine):
 
     st.dataframe(
         display.rename(columns={
-            "invoice_date":   t("dashboard.invoices.col_date"),
-            "document_type":  t("dashboard.invoices.col_doc_type"),
-            "invoice_number": t("dashboard.invoices.col_invoice_num"),
+            "invoice_date":              t("dashboard.invoices.col_date"),
+            "document_type":             t("dashboard.invoices.col_doc_type"),
+            "document_type_description": t("dashboard.invoices.col_doc_type_desc"),
+            "invoice_number":            t("dashboard.invoices.col_invoice_num"),
             "atcud":          "ATCUD",
             "nif_seller":     t("dashboard.invoices.col_nif_seller"),
             "nif_buyer":      t("dashboard.invoices.col_nif_buyer"),
