@@ -17,7 +17,6 @@ class Invoice(Base):
 
     # Seller (emitente)
     nif_seller: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
-    seller_name: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Buyer (adquirente)
     nif_buyer: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -53,6 +52,7 @@ class Invoice(Base):
     vat_rate: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
     receipt_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     card_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    payment_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # Raw QR string and extraction metadata
     raw_qr: Mapped[str | None] = mapped_column(Text, nullable=True)
