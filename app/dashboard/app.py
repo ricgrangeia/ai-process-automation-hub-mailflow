@@ -1808,12 +1808,10 @@ def page_audit_log(engine):
     where = " AND ".join(conditions)
 
     try:
-        with engine.connect() as _conn:
-            audit_total = int(
-                _conn.execute(
-                    text(f"SELECT COUNT(*) FROM audit_logs WHERE {where}"), params
-                ).scalar() or 0
-            )
+        _count_df = pd.read_sql(
+            f"SELECT COUNT(*) AS n FROM audit_logs WHERE {where}", engine, params=params
+        )
+        audit_total = int(_count_df["n"].iloc[0] if not _count_df.empty else 0)
 
         if audit_total == 0:
             st.info(t("page.audit.no_events"))
