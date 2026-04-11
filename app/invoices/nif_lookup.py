@@ -33,51 +33,62 @@ async def resolve_seller_name(
 
     nif = nif.strip()
 
+    import sqlalchemy
+
     def _db_lookup() -> str | None:
-        import sqlalchemy
-        engine = sqlalchemy.create_engine(db_url)
-        with engine.connect() as conn:
-            row = conn.execute(
-                text("SELECT name FROM sellers WHERE nif = :nif LIMIT 1"),
-                {"nif": nif},
-            ).fetchone()
-        engine.dispose()
-        return row[0] if row else None
+        """Check sellers cache. Returns None gracefully if table doesn't exist yet."""
+        try:
+            engine = sqlalchemy.create_engine(db_url)
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT name FROM sellers WHERE nif = :nif LIMIT 1"),
+                    {"nif": nif},
+                ).fetchone()
+            engine.dispose()
+            return row[0] if row else None
+        except Exception:
+            return None  # table may not exist yet — not a fatal error
 
     def _db_upsert(data: dict) -> None:
-        import sqlalchemy
-        engine = sqlalchemy.create_engine(db_url)
-        with engine.begin() as conn:
-            conn.execute(
-                text("""
-                    INSERT INTO sellers (nif, name, activity, cae, address, situation)
-                    VALUES (:nif, :name, :activity, :cae, :address, :situation)
-                    ON CONFLICT (nif) DO UPDATE SET
-                        name      = EXCLUDED.name,
-                        activity  = EXCLUDED.activity,
-                        cae       = EXCLUDED.cae,
-                        address   = EXCLUDED.address,
-                        situation = EXCLUDED.situation,
-                        updated_at = now()
-                """),
-                data,
-            )
-        engine.dispose()
+        """Save to sellers table. Skipped silently if table doesn't exist yet."""
+        try:
+            engine = sqlalchemy.create_engine(db_url)
+            with engine.begin() as conn:
+                conn.execute(
+                    text("""
+                        INSERT INTO sellers (nif, name, activity, cae, address, situation)
+                        VALUES (:nif, :name, :activity, :cae, :address, :situation)
+                        ON CONFLICT (nif) DO UPDATE SET
+                            name      = EXCLUDED.name,
+                            activity  = EXCLUDED.activity,
+                            cae       = EXCLUDED.cae,
+                            address   = EXCLUDED.address,
+                            situation = EXCLUDED.situation,
+                            updated_at = now()
+                    """),
+                    data,
+                )
+            engine.dispose()
+        except Exception as e:
+            logger.warning(f"Could not upsert seller {nif}: {e}")
 
     def _db_update_invoices(name: str) -> None:
-        import sqlalchemy
-        engine = sqlalchemy.create_engine(db_url)
-        with engine.begin() as conn:
-            conn.execute(
-                text("""
-                    UPDATE invoices
-                    SET seller_name = :name
-                    WHERE nif_seller = :nif
-                      AND (seller_name IS NULL OR seller_name = '')
-                """),
-                {"name": name, "nif": nif},
-            )
-        engine.dispose()
+        """Backfill seller_name on existing invoices. Always runs independently."""
+        try:
+            engine = sqlalchemy.create_engine(db_url)
+            with engine.begin() as conn:
+                conn.execute(
+                    text("""
+                        UPDATE invoices
+                        SET seller_name = :name
+                        WHERE nif_seller = :nif
+                          AND (seller_name IS NULL OR seller_name = '')
+                    """),
+                    {"name": name, "nif": nif},
+                )
+            engine.dispose()
+        except Exception as e:
+            logger.warning(f"Could not backfill invoices seller_name for {nif}: {e}")
 
     # 1. Check sellers table cache
     cached = await asyncio.to_thread(_db_lookup)
@@ -106,24 +117,21 @@ async def resolve_seller_name(
         return None
 
     if not data.get("found") or not data.get("name"):
-        logger.debug(f"NIF {nif} not found in registry")
+        logger.info(f"NIF {nif} not found in registry (found={data.get('found')}, name={data.get('name')})")
         return None
 
     name = data["name"]
+    logger.info(f"NIF {nif} resolved → '{name}'")
 
-    # 3. Upsert sellers + backfill invoices.seller_name
-    try:
-        await asyncio.to_thread(_db_upsert, {
-            "nif":       nif,
-            "name":      name,
-            "activity":  data.get("activity"),
-            "cae":       data.get("cae"),
-            "address":   data.get("address"),
-            "situation": data.get("situation"),
-        })
-        await asyncio.to_thread(_db_update_invoices, name)
-        logger.info(f"Saved seller NIF {nif} = '{name}'")
-    except Exception as e:
-        logger.warning(f"Failed to save seller for NIF {nif}: {e}")
+    # 3. Each DB operation is independent — one failing doesn't block the others
+    await asyncio.to_thread(_db_upsert, {
+        "nif":       nif,
+        "name":      name,
+        "activity":  data.get("activity"),
+        "cae":       data.get("cae"),
+        "address":   data.get("address"),
+        "situation": data.get("situation"),
+    })
+    await asyncio.to_thread(_db_update_invoices, name)
 
     return name
