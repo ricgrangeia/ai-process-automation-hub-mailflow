@@ -74,7 +74,7 @@
 
   <!-- ── Title ── -->
   <text x="600" y="46" text-anchor="middle" fill="#ffffff" font-size="24" font-weight="700" filter="url(#glow)" letter-spacing="1">MailFlow Engine</text>
-  <text x="600" y="68" text-anchor="middle" fill="#4a9eff" font-size="12" letter-spacing="3">AI-POWERED EMAIL AUTOMATION · ON-PREMISE · i18n · AT/ATCUD</text>
+  <text x="600" y="68" text-anchor="middle" fill="#4a9eff" font-size="12" letter-spacing="3">AI-POWERED EMAIL AUTOMATION · ON-PREMISE · i18n · AT/ATCUD · NIF LOOKUP</text>
   <line x1="80" y1="82" x2="1120" y2="82" stroke="#4a9eff" stroke-width="0.5" opacity="0.4"/>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -105,8 +105,8 @@
   <rect x="553" y="113" width="240" height="100" rx="10" fill="url(#blueGrad)" stroke="#60a5fa" stroke-width="1.2" filter="url(#shadow)"/>
   <text x="673" y="140" text-anchor="middle" fill="#60a5fa" font-size="18">⚙️</text>
   <text x="673" y="162" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="600">Ingestion Workers</text>
-  <text x="673" y="179" text-anchor="middle" fill="#8892a4" font-size="11">Fetch · Parse RFC822</text>
-  <text x="673" y="196" text-anchor="middle" fill="#8892a4" font-size="11">Store · Deduplicate</text>
+  <text x="673" y="179" text-anchor="middle" fill="#8892a4" font-size="11">Fetch · Parse · Route by managed_by</text>
+  <text x="673" y="196" text-anchor="middle" fill="#22d3ee" font-size="10">jobs:email  or  jobs:invoice</text>
 
   <!-- Arrow: ingestion → redis -->
   <line x1="793" y1="163" x2="853" y2="163" stroke="#4a9eff" stroke-width="1.5" opacity="0.6" marker-end="url(#arrow)"/>
@@ -115,8 +115,9 @@
   <text x="860" y="107" text-anchor="start" fill="#f59e0b" font-size="10" letter-spacing="2" opacity="0.7">QUEUE</text>
   <rect x="860" y="128" width="160" height="72" rx="10" fill="#1a0a00" stroke="#f59e0b" stroke-width="1.5" filter="url(#shadow)"/>
   <text x="940" y="153" text-anchor="middle" fill="#f59e0b" font-size="18">⚡</text>
-  <text x="940" y="174" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600">Redis Queue</text>
-  <text x="940" y="190" text-anchor="middle" fill="#8892a4" font-size="10">AOF Persistent</text>
+  <text x="940" y="170" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">Redis Queues</text>
+  <text x="940" y="184" text-anchor="middle" fill="#f59e0b" font-size="9">jobs:email · jobs:invoice</text>
+  <text x="940" y="197" text-anchor="middle" fill="#8892a4" font-size="9">AOF Persistent</text>
 
   <!-- Telegram box — spans row 1 through AI section -->
   <rect x="1093" y="113" width="87" height="365" rx="10" fill="#0d1f3b" stroke="#4a9eff" stroke-width="1" filter="url(#shadow)"/>
@@ -186,6 +187,42 @@
   <line x1="933" y1="465" x2="933" y2="570" stroke="#34d399" stroke-width="1.5" opacity="0.7" marker-end="url(#arrowGreen)"/>
 
   <!-- ══════════════════════════════════════════════════════════
+       INVOICE WORKER  (x 293, y 240 — below Outlook box)
+       ══════════════════════════════════════════════════════════ -->
+
+  <!-- Arrow: Redis jobs:invoice → Invoice Worker (curved left-down) -->
+  <path d="M860,183 Q640,183 506,310" stroke="#f59e0b" stroke-width="1.5" fill="none" opacity="0.55" stroke-dasharray="5,3" marker-end="url(#arrowOrange)"/>
+
+  <rect x="293" y="240" width="213" height="218" rx="10" fill="#110800" stroke="#f59e0b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="399" y="262" text-anchor="middle" fill="#f59e0b" font-size="10" letter-spacing="2">INVOICE WORKER</text>
+  <text x="399" y="282" text-anchor="middle" fill="#fcd34d" font-size="18">🧾</text>
+  <text x="399" y="303" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">Redis Consumer</text>
+  <text x="399" y="318" text-anchor="middle" fill="#8892a4" font-size="10">BRPOP jobs:invoice</text>
+
+  <!-- marketing filter sub-box -->
+  <rect x="306" y="328" width="190" height="26" rx="5" fill="#071a20" stroke="#22d3ee" stroke-width="0.8"/>
+  <text x="401" y="345" text-anchor="middle" fill="#22d3ee" font-size="10">🚫 is_marketing() gate</text>
+
+  <!-- PDF path sub-box -->
+  <rect x="306" y="362" width="88" height="52" rx="5" fill="#0d1f3b" stroke="#4a9eff" stroke-width="0.8"/>
+  <text x="350" y="379" text-anchor="middle" fill="#93c5fd" font-size="10">📄 PDF</text>
+  <text x="350" y="394" text-anchor="middle" fill="#8892a4" font-size="9">Tool Server</text>
+  <text x="350" y="407" text-anchor="middle" fill="#8892a4" font-size="9">QR decode</text>
+
+  <!-- Body path sub-box -->
+  <rect x="408" y="362" width="88" height="52" rx="5" fill="#1a0a00" stroke="#f59e0b" stroke-width="0.8"/>
+  <text x="452" y="379" text-anchor="middle" fill="#fcd34d" font-size="10">📝 Body</text>
+  <text x="452" y="394" text-anchor="middle" fill="#8892a4" font-size="9">keywords</text>
+  <text x="452" y="407" text-anchor="middle" fill="#8892a4" font-size="9">→ LLM</text>
+
+  <!-- NIF lookup line -->
+  <text x="399" y="432" text-anchor="middle" fill="#34d399" font-size="10">🔍 NIF → sellers table</text>
+  <text x="399" y="448" text-anchor="middle" fill="#8892a4" font-size="9">ai-api DDG · nif.pt</text>
+
+  <!-- Arrow: Invoice Worker → PostgreSQL -->
+  <line x1="506" y1="375" x2="791" y2="600" stroke="#34d399" stroke-width="1.5" opacity="0.55" marker-end="url(#arrowGreen)"/>
+
+  <!-- ══════════════════════════════════════════════════════════
        IMAP FOLDERS + POSTGRESQL  (y 570)
        ══════════════════════════════════════════════════════════ -->
   <rect x="467" y="570" width="200" height="168" rx="10" fill="url(#greenGrad)" stroke="#34d399" stroke-width="1" filter="url(#shadow)"/>
@@ -197,15 +234,16 @@
   <text x="567" y="685" text-anchor="middle" fill="#f59e0b" font-size="11">📂 NeedsReview</text>
   <text x="567" y="702" text-anchor="middle" fill="#22d3ee" font-size="10">🆕 AI suggests new</text>
 
-  <rect x="793" y="570" width="280" height="138" rx="10" fill="url(#blueGrad)" stroke="#4a9eff" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="793" y="570" width="280" height="155" rx="10" fill="url(#blueGrad)" stroke="#4a9eff" stroke-width="1" filter="url(#shadow)"/>
   <text x="933" y="592" text-anchor="middle" fill="#4a9eff" font-size="10" letter-spacing="2">PERSISTENCE</text>
-  <text x="933" y="614" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="600">🗄 PostgreSQL</text>
-  <text x="933" y="635" text-anchor="middle" fill="#8892a4" font-size="11">Emails · Accounts · Attachments</text>
-  <text x="933" y="655" text-anchor="middle" fill="#8892a4" font-size="11">Sender Identity · AI Telemetry</text>
-  <text x="933" y="675" text-anchor="middle" fill="#8892a4" font-size="11">Alembic Migrations · Audit Log</text>
+  <text x="933" y="612" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="600">🗄 PostgreSQL</text>
+  <text x="933" y="630" text-anchor="middle" fill="#8892a4" font-size="11">Emails · Accounts · Attachments</text>
+  <text x="933" y="648" text-anchor="middle" fill="#8892a4" font-size="11">Sender Identity · AI Telemetry</text>
+  <text x="933" y="666" text-anchor="middle" fill="#fcd34d" font-size="11">Invoices · Sellers (NIF cache)</text>
+  <text x="933" y="684" text-anchor="middle" fill="#8892a4" font-size="11">Alembic Migrations · Audit Log</text>
 
   <!-- Arrow: PostgreSQL → Dashboard -->
-  <line x1="933" y1="708" x2="933" y2="795" stroke="#4a9eff" stroke-width="1.5" opacity="0.6" marker-end="url(#arrow)"/>
+  <line x1="933" y1="725" x2="933" y2="795" stroke="#4a9eff" stroke-width="1.5" opacity="0.6" marker-end="url(#arrow)"/>
 
   <!-- ══════════════════════════════════════════════════════════
        AUDIT LOG + OPERATION MODE  (left column)
@@ -249,14 +287,18 @@
   <!-- Dashboard pill row 3 -->
   <rect x="480" y="931" width="130" height="30" rx="5" fill="#1a0f00" stroke="#f59e0b" stroke-width="0.8"/>
   <text x="545" y="946" text-anchor="middle" fill="#fcd34d" font-size="10">🧾 Invoices</text>
-  <text x="545" y="959" text-anchor="middle" fill="#f59e0b" font-size="8">+ 🗑️ Delete</text>
+  <text x="545" y="959" text-anchor="middle" fill="#f59e0b" font-size="8">+ 🗑️ Delete · account filter</text>
+
+  <rect x="620" y="931" width="130" height="30" rx="5" fill="#110800" stroke="#f59e0b" stroke-width="0.8"/>
+  <text x="685" y="946" text-anchor="middle" fill="#fcd34d" font-size="10">🏪 Sellers</text>
+  <text x="685" y="959" text-anchor="middle" fill="#8892a4" font-size="8">NIF lookup · 🗑️ delete</text>
 
   <!-- Management callout -->
   <rect x="762" y="857" width="401" height="105" rx="5" fill="#100d1a" stroke="#22d3ee" stroke-width="0.8"/>
   <text x="962" y="876" text-anchor="middle" fill="#22d3ee" font-size="10" font-weight="600">📁 Folders · 📚 Rules CRUD</text>
   <text x="962" y="893" text-anchor="middle" fill="#8892a4" font-size="9">Add · Rename · Disable · Delete · IMAP sync · subfolders</text>
-  <text x="962" y="909" text-anchor="middle" fill="#fcd34d" font-size="9">🧾 QR + MB payment · NIF · VAT · totals · entity · reference</text>
-  <text x="962" y="924" text-anchor="middle" fill="#f59e0b" font-size="9">Dedup by seller+invoice# · 🗑️ delete records · CSV export</text>
+  <text x="962" y="909" text-anchor="middle" fill="#fcd34d" font-size="9">🧾 QR + MB payment · seller name · monthly chart · account filter</text>
+  <text x="962" y="924" text-anchor="middle" fill="#f59e0b" font-size="9">🏪 Sellers: NIF→name (DDG · nif.pt) · sellers table · CSV export</text>
   <text x="962" y="939" text-anchor="middle" fill="#8892a4" font-size="9">AI suggests new folders · LLM via ai-api · full chat history</text>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -348,6 +390,6 @@
 
   <!-- ── Footer ── -->
   <line x1="80" y1="1307" x2="1120" y2="1307" stroke="#4a9eff" stroke-width="0.5" opacity="0.3"/>
-  <text x="600" y="1326" text-anchor="middle" fill="#4a6080" font-size="10">Appa8 AI Process Automation Hub · MailFlow Engine v2.6.0 · on-premise · GDPR-friendly · i18n</text>
+  <text x="600" y="1326" text-anchor="middle" fill="#4a6080" font-size="10">Appa8 AI Process Automation Hub · MailFlow Engine v2.8.0 · on-premise · GDPR-friendly · i18n · NIF lookup</text>
 
 </svg>

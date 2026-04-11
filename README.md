@@ -1,6 +1,6 @@
 # MailFlow Engine
 
-> Version 2.7.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
+> Version 2.8.0 — Part of the [Appa8 AI Process Automation Hub](https://appa8.com)
 
 AI-powered email automation and classification engine, built for **on-premise deployments** where full data privacy is required.
 
@@ -82,6 +82,14 @@ for supervision and account management.
 | Keyword extractor — real words only: preserves accented chars, rejects codes and digit strings | ✅ |
 | LLM folder names — prompts enforce exact folder names, no translation to English | ✅ |
 | Dashboard flash feedback — all save/delete actions show success or error after rerun | ✅ |
+| Unified IMAP worker routing — single worker polls all accounts, routes to jobs:email or jobs:invoice by managed_by | ✅ |
+| Invoice Worker as Redis consumer — BRPOP on jobs:invoice; no direct IMAP polling | ✅ |
+| Marketing email filter — is_marketing() blocks newsletters before keyword scan (List-Unsubscribe / unsubscribe in body) | ✅ |
+| NIF / seller name lookup — ai-api tool endpoint; DDG-first strategy; nif.pt for metadata; in-process cache | ✅ |
+| Sellers table — DB cache of resolved NIF → company name; backfills invoices.seller_name automatically | ✅ |
+| 🏪 Sellers dashboard page — paginated data_editor with inline delete, search, manual NIF lookup, CSV export | ✅ |
+| Invoices dashboard account filter — filter KPIs, charts, and tables by email account | ✅ |
+| Invoices dashboard monthly totals chart — bar chart of gross total per month | ✅ |
 
 ---
 
@@ -91,16 +99,31 @@ for supervision and account management.
 IMAP / Outlook
       │
       ▼
- email-worker / api-worker           invoice-worker
- (managed_by = ai_worker)        (managed_by = invoice_worker)
- fetch unseen → parse RFC822         fetch unseen → keyword scan
-      │                                    │
-      │                           PDF? ────┤
-      │                           ├─ yes → AI Tool Server → QR/LLM extract
-      │                           │        → save DB + archive PDF + move
-      │                           └─ body keywords → LLM body extract
-      │                                    → save DB + move
-      ▼
+ email-worker / api-worker   ←── single IMAP worker polls ALL accounts
+ parse RFC822 · route by managed_by
+      │
+      ├─ managed_by = ai_worker  ──────────▶  Redis  mailai:jobs:email
+      │                                             │
+      │                                             ▼
+      │                                          ai-worker  [Operation Mode]
+      │
+      └─ managed_by = invoice_worker
+           │
+           ├─ is_marketing()?  YES → leave untouched (unread, unmoved)
+           ├─ has PDF?          YES → store + enqueue
+           └─ financial keywords? YES → store + enqueue
+                 │
+                 ▼
+            Redis  mailai:jobs:invoice
+                 │
+                 ▼
+            invoice-worker  (BRPOP consumer)
+            ├─ PDF → AI Tool Server → QR/LLM extract
+            │        → save DB + archive PDF + move + Telegram notify
+            └─ body keywords → LLM body extract
+                     → save DB + move + Telegram notify
+            (both paths) → NIF lookup → sellers table → seller_name backfill
+
   Redis  mailai:jobs:email
       │
       ▼
@@ -159,10 +182,10 @@ IMAP / Outlook
 
 | Service | Role |
 |---|---|
-| `email-worker` | Polls IMAP accounts (`managed_by = ai_worker`), parses emails, enqueues jobs |
-| `api-worker` | Polls Microsoft Graph accounts (`managed_by = ai_worker`), enqueues jobs |
+| `email-worker` | Polls **all** IMAP accounts; routes to `jobs:email` (ai_worker) or `jobs:invoice` (invoice_worker) based on `managed_by`; pre-filters non-financial emails for invoice accounts |
+| `api-worker` | Polls Microsoft Graph accounts (`managed_by = ai_worker`), enqueues jobs to `jobs:email` |
 | `ai-worker` | Classifies emails, executes actions, runs DB migrations on startup |
-| `invoice-worker` | Polls IMAP accounts (`managed_by = invoice_worker`); PDF extract + body keyword detect; saves invoices + archives PDFs + moves emails |
+| `invoice-worker` | **Redis consumer** (`BRPOP jobs:invoice`); loads email by ID from DB; PDF extract via tool server + body keyword detect; saves invoices + archives PDFs + moves emails + Telegram notify |
 | `telegram-bot` | Thin UI layer — user input, NeedsReview callbacks, admin commands |
 | `review-worker` | Learning Mode — sends review cards, handles Approve / Change / Fix sender |
 | `query-worker` | Natural language search — LLM parse → DB search → deliver results |
@@ -175,11 +198,13 @@ IMAP / Outlook
 The `invoice-worker` lets you use one mailbox for both human email and automated invoice management:
 
 - Set `managed_by = invoice_worker` on any account from the dashboard
-- The ai-worker and api-worker ignore those accounts entirely
-- The invoice-worker scans only those accounts and acts on financial emails only:
-  - **PDF emails** → tool server QR decode → LLM merge → save DB → archive PDF → move to `Invoices` folder → Telegram notification
-  - **Body-only financial emails** (payment confirmations, bank transfers, receipts) → keyword scan (free, zero LLM) → if matched: LLM body extraction → save DB → move
-  - **Everything else** → left completely untouched (unread, unmoved)
+- The IMAP worker (email-worker) handles all accounts; for `invoice_worker` accounts it pre-screens emails before storing and routes the job to `mailai:jobs:invoice`
+- The invoice-worker is a **Redis consumer** (BRPOP on `mailai:jobs:invoice`) — no IMAP polling; loads the stored email from DB by `email_id`
+- **Marketing gate** — `is_marketing_email()` checks `List-Unsubscribe` header and body for unsubscribe links before any keyword matching; newsletters and promotional emails are left completely untouched (unread, unmoved), even if they contain words like "payment"
+- **PDF emails** → tool server QR decode → LLM merge → save DB → archive PDF → move to `Invoices` folder → Telegram notification
+- **Body-only financial emails** (payment confirmations, bank transfers, receipts) → keyword scan (free, zero LLM) → if matched: LLM body extraction → save DB → move
+- **NIF lookup** — after saving, calls `ai-api /tools/nif/lookup` to resolve seller name; upserts into `sellers` table; backfills `invoices.seller_name`
+- **Everything else** → left completely untouched (unread, unmoved)
 
 ### Code Structure
 
@@ -215,16 +240,19 @@ app/
 │   │                       #   seller_name, seller_country, currency, vat_rate, receipt_number,
 │   │                       #   card_last4, payment_method, raw_qr
 │   ├── document_types.py   # DOCUMENT_TYPES dict — AT code → human label (FT→"Fatura", etc.)
+│   ├── nif_lookup.py       # resolve_seller_name() — calls ai-api, upserts sellers, backfills invoices
 │   ├── qr_parser.py        # Portuguese AT/ATCUD QR string parser
 │   └── extractor.py        # Calls AI Tool Server, deduplicates by seller+number, persists
+├── sellers/                # Sellers domain — NIF → company name cache
+│   └── models.py           # Seller ORM model (nif, name, activity, cae, address, situation)
 ├── invoice_worker/         # Invoice Worker — collaborative mode for financial-only accounts
-│   ├── detector.py         # Two-stage: PDF check → body keyword scan (PAYMENT_KEYWORDS regex)
+│   ├── detector.py         # Three-stage: PDF check → is_marketing() gate → keyword scan
 │   ├── body_extractor.py   # LLM extraction from email body (payment_confirmation, bank_transfer…)
-│   └── worker.py           # Poll loop — filters managed_by = invoice_worker; full pipeline
+│   └── worker.py           # Redis consumer (BRPOP jobs:invoice); loads email from DB by ID
 ├── telegram/               # Telegram bot — thin UI layer, pushes jobs to Redis
 └── dashboard/              # Streamlit UI
-    └── app.py              # All pages: dashboard, accounts, rules, folders, companies, invoices,
-                            #   settings, audit log; flash feedback, i18n, cookie login
+    └── app.py              # All pages: dashboard, accounts, rules, folders, companies, sellers,
+                            #   invoices, settings, audit log; flash feedback, i18n, cookie login
 
 alembic/                    # Database migration scripts (auto-run on ai-worker startup)
 ├── env.py                  # Async engine setup, all models imported
@@ -245,7 +273,8 @@ alembic/                    # Database migration scripts (auto-run on ai-worker 
     ├── 014_add_invoice_international_fields.py  # invoice_origin, seller_country, currency,
     │                                            #   vat_rate, receipt_number, card_last4,
     │                                            #   payment_method
-    └── 015_add_managed_by_to_email_accounts.py  # managed_by on email_accounts (ai_worker | invoice_worker)
+    ├── 015_add_managed_by_to_email_accounts.py  # managed_by on email_accounts (ai_worker | invoice_worker)
+    └── 016_add_sellers_table.py                 # sellers table with unique index on nif
 
 locales/
 ├── en/                     # English (default fallback)
@@ -448,18 +477,27 @@ After login (cookie-persisted across page refreshes), the following pages are av
 - Add / edit / delete companies with Name, NIF, Notes, Active flag
 - Used by `ExportPdfAction` to route PDFs under the correct company folder
 
+### 🏪 Sellers
+
+- Resolved invoice senders — automatically populated by NIF lookup during invoice processing
+- Paginated table with inline `🗑️` delete, search by NIF / name / activity, CSV export
+- **Manual lookup** expander — enter any 9-digit NIF to trigger lookup and cache result immediately
+- Data sourced from `ai-api /tools/nif/lookup` (DuckDuckGo + nif.pt); stored in `sellers` table
+- Seller names backfill `invoices.seller_name` automatically on resolution
+
 ### 🧾 Invoices
 
 Automatically populated when PDF attachments are decoded or financial emails are processed by the invoice-worker.
 
 **🇵🇹 AT Invoices tab**
 
-- QR code data (AT/ATCUD): NIF seller/buyer, invoice number, ATCUD, date, taxable amount, VAT, gross total
+- QR code data (AT/ATCUD): NIF seller/buyer, seller name, invoice number, ATCUD, date, taxable amount, VAT, gross total
 - Document type (AT field D) with human-readable description (Fatura, Fatura Simplificada, Recibo…)
 - Payment data: Multibanco entity, reference, amount, due date
 - KPIs: gross total, total VAT, taxable base, unique sellers
-- Bar chart: top 5 sellers + Others
-- Filter: last N months, NIF seller contains, invoice # / ATCUD contains
+- Bar chart: monthly totals (gross per month)
+- Bar chart: top 5 sellers by total (NIF + name labels)
+- Filter: email account, last N months, NIF seller contains, invoice # / ATCUD contains
 
 **🌍 Foreign tab**
 
@@ -549,7 +587,6 @@ make shell          # Shell into ai-worker container
 ## Roadmap
 
 - [ ] Invoice OCR — handle scanned PDFs with no text layer
-- [ ] Supplier name resolution — map NIF to company name via AT public registry
 - [ ] Invoice status tracking — paid / unpaid / overdue based on due date
 - [ ] REST API (FastAPI) for external integrations
 - [ ] Webhook notifications on classification events
@@ -590,6 +627,13 @@ make shell          # Shell into ai-worker container
 - [x] Dashboard login persistence — cookie-based; survives page refresh without re-login
 - [x] Keyword extractor — preserves accented Portuguese chars, rejects codes and digit strings
 - [x] LLM folder names — prompts enforce exact folder names, no English translation
+- [x] Unified IMAP worker routing — single worker polls all accounts, routes by managed_by to two queues
+- [x] Invoice worker as Redis consumer — BRPOP on jobs:invoice; no direct IMAP polling
+- [x] Marketing email filter — is_marketing() blocks newsletters/promos before keyword detection
+- [x] NIF / seller name lookup — ai-api tool; DDG-first + nif.pt enrichment; sellers table cache
+- [x] Sellers dashboard page — paginated data_editor with inline delete, search, CSV export
+- [x] Invoices account filter — KPIs and charts scoped per email account
+- [x] Invoices monthly totals chart — gross total per month bar chart
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

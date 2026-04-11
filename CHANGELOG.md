@@ -6,6 +6,86 @@ This project uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.8.0] — 2026-04-11
+
+### Added
+
+- **Unified IMAP worker routing** — `email-worker` now polls **all** active IMAP accounts regardless of `managed_by`; routes jobs to `mailai:jobs:email` (ai_worker accounts) or `mailai:jobs:invoice` (invoice_worker accounts); for invoice accounts, runs `is_marketing()` + keyword pre-screen before storing — non-financial emails left completely untouched (unread, unmoved)
+- **Invoice worker as Redis consumer** — `invoice-worker` no longer polls IMAP directly; receives jobs via `BRPOP mailai:jobs:invoice`; `_process_email_by_id()` loads the stored `EmailMessage` and `EmailAccount` from DB by `email_id` + `classification` from the job payload; full pipeline unchanged
+- **Marketing email filter** (`detector.py`) — new `is_marketing_email()` function; checks `List-Unsubscribe` header (set by all bulk-mail senders per RFC 2369) and body/HTML for "unsubscribe", "opt-out", "ver no navegador", etc.; runs before keyword detection; marketing emails never trigger LLM or DB storage even if they mention "payment"; bare `"confirmation"` keyword removed from `PAYMENT_KEYWORDS` (was too broad — matched shipping/subscription confirmations)
+- **NIF / seller name lookup tool** in `python-ai-api` — `GET /tools/nif/lookup?nif=` resolves Portuguese NIF to company name; DDG-first strategy: POST to `html.duckduckgo.com/html/` with PT-specific extraction patterns (eInforma "contribuinte de X", Iberinform "O NIF de X é …", Kompass "N. FISCAL …"); nif.pt fetched second for activity/CAE/address enrichment; in-process cache; `POST /tools/nif/lookup/bulk` (up to 20 NIFs in one call); `GET /tools/nif/raw` debug endpoint returning raw nif.pt HTML
+- **Sellers table** (`app/sellers/`) — new `sellers` DB table with columns `nif` (unique), `name`, `activity`, `cae`, `address`, `situation`, `created_at`, `updated_at`; Alembic migration `016_add_sellers_table.py`; model registered in `core/database/init.py` for `create_all`
+- **Seller name enrichment** — `app/invoices/nif_lookup.py` calls `ai-api /tools/nif/lookup` on cache miss; upserts into `sellers`; backfills `invoices.seller_name` for existing rows; each DB operation (`_db_lookup`, `_db_upsert`, `_db_update_invoices`) is independently error-handled — a missing table or DB failure on one step does not block the others
+- **`seller_name` column in AT Invoices dashboard tab** — resolved company name shown alongside NIF seller
+- **🏪 Sellers dashboard page** — paginated `st.data_editor` with `🗑️` inline-delete column (same pattern as invoices table), search filter (NIF / name / activity), manual NIF lookup expander, CSV export; navigation between Companies and Invoices
+- **Invoices dashboard account filter** — selectbox to scope all KPIs, charts, and tables to a single email account; "All accounts" shows aggregate
+- **Invoices dashboard monthly totals chart** — bar chart showing gross invoice total per calendar month, displayed below KPI metrics
+- **Top 5 sellers chart fix** — NIF values were abbreviated as "501M" due to Plotly treating them as numerics; fixed with `xaxis_type="category"` + `category_orders`; labels now show seller name + NIF; "Others" bar removed
+
+### Changed
+
+- `email-worker` — removed `managed_by = ai_worker` filter from account query; added routing logic: invoice_worker accounts go through marketing + keyword pre-screen before storing
+- `invoice-worker` — removed all IMAP polling code; now a pure Redis consumer; `_process_email_by_id()` is the main entry point
+- `detector.py` — `is_marketing_email()` added as first gate in `classify_email()`; bare `"confirmation"` removed from `PAYMENT_KEYWORDS`
+
+### Fixed
+
+- `/v1/v1/chat/completions` 404 in `body_extractor.py` — `llm_base_url` already ends with `/v1` on some configs; fixed with `base = llm_base_url.rstrip("/").removesuffix("/v1")`
+- `immutabledict is not a sequence` in dashboard testing tools — `pd.read_sql` with SQLAlchemy 2.x passes immutabledict params to psycopg2; replaced with `_sql()` helper using `engine.connect()` + `text()` + manual DataFrame construction
+
+---
+
+## [2.7.0] — 2026-04-09
+
+### Added
+
+- **Full i18n** — all dashboard pages, Telegram notifications, and query worker support `LANGUAGE=pt/en/de` env var; locale files in `locales/{lang}/ui.toml`; missing keys fall back to English
+- **Dashboard login persistence** — cookie-based session; user stays logged in across page refreshes without re-entering credentials
+- **Keyword extractor improvements** — preserves accented Portuguese characters; rejects codes and digit strings; real words only
+
+### Changed
+
+- LLM prompts enforce exact folder names from the DB; no English translation of folder names by the model
+
+---
+
+## [2.6.0] — 2026-04-09
+
+### Added
+
+- **Invoice Worker service** — dedicated Docker service (`invoice-worker`) for accounts with `managed_by = invoice_worker`; operates independently of the AI classification pipeline
+- **`managed_by` column** on `email_accounts` — values: `ai_worker` (default) or `invoice_worker`; Alembic migration `015`
+- **Per-account worker mode UI** — dashboard Email Accounts page allows switching worker mode per account; change takes effect on next poll cycle
+- **Body-only financial detection** — invoice-worker uses two-stage keyword scan + LLM extraction for emails without PDF attachments (payment confirmations, bank transfers, store receipts)
+- **Payment extraction gate** — non-payment document types (ND, NC, GR, GT) skip Multibanco payment extraction step
+- **ATCUD QR selection** — picks the first QR code containing AT field H; ignores decorative/tracking QR codes
+- **Invoice Worker Collaborative Mode** — one mailbox can handle both personal email (ai_worker) and automated invoice processing (invoice_worker); non-financial emails on invoice accounts are left untouched
+
+---
+
+## [2.5.0] — 2026-04-09
+
+### Added
+
+- **International invoice support** — non-PT-AT PDFs (no ATCUD) extracted via LLM; captures `seller_name`, `seller_country`, `currency`, `vat_rate`, `receipt_number`, `card_last4`, `payment_method`; Alembic migration `014`
+- **`invoice_origin` field** — classifies the financial document type: `pt_at`, `international`, `payment_confirmation`, `bank_transfer`, `receipt`
+- **Payment method field** — `card / bank_transfer / mbway / multibanco / paypal` stored per invoice
+- **Invoice dashboard two-tab layout** — `🇵🇹 AT Invoices` tab (QR/ATCUD data) + `🌍 Foreign` tab (international); separate KPI rows, columns, and CSV export per tab
+- **LLM routing via ai-api** — mailflow routes all LLM calls through `ai-api /v1/chat/completions` instead of vLLM directly; enables full message history support and LangGraph tool routing
+
+---
+
+## [2.4.0] — 2026-04-08
+
+### Added
+
+- **Multibanco payment extraction** — invoice-worker LLM reads PDF text layer and extracts MB entity, reference, amount, and due date; stored in `invoices` table; Alembic migration `007`
+- **Invoice deduplication** — three-level dedup: `(nif_seller, invoice_number)` unique key → ATCUD fallback → `email_id` fallback; Alembic migration `008`
+- **`document_type` field** — AT QR field D parsed and stored (FT, FS, FR, ND, NC, GR, GT…); Alembic migration `012`
+- **`document_type_description`** — human-readable label derived from AT code (e.g. FT → "Fatura"); Alembic migration `013`
+
+---
+
 ## [2.3.0] — 2026-04-08
 
 ### Added

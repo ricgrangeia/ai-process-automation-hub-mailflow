@@ -1320,6 +1320,17 @@ def page_folders(engine, settings):
 
 
 # ---------------------------------------------------------------------------
+# Shared SQL helper (avoids pd.read_sql + SQLAlchemy 2.x immutabledict bug)
+# ---------------------------------------------------------------------------
+
+def _sql(engine, sql: str, params: dict | None = None) -> "pd.DataFrame":
+    """Execute raw SQL and return a DataFrame."""
+    with engine.connect() as _conn:
+        result = _conn.execute(text(sql), params or {})
+        return pd.DataFrame(result.fetchall(), columns=list(result.keys()))
+
+
+# ---------------------------------------------------------------------------
 # Page: Audit Log
 # ---------------------------------------------------------------------------
 
@@ -1799,15 +1810,9 @@ def page_settings(engine):
             LEFT JOIN email_accounts a ON a.id = e.account_id
         """
 
-        def _sql(sql: str, params: dict | None = None) -> pd.DataFrame:
-            """Execute raw SQL and return a DataFrame. Avoids pd.read_sql param issues."""
-            with engine.connect() as _conn:
-                result = _conn.execute(text(sql), params or {})
-                return pd.DataFrame(result.fetchall(), columns=list(result.keys()))
-
         # Status summary
         try:
-            status_df = _sql("SELECT status, COUNT(*) AS n FROM emails GROUP BY status ORDER BY n DESC")
+            status_df = _sql(engine, "SELECT status, COUNT(*) AS n FROM emails GROUP BY status ORDER BY n DESC")
             status_summary = "  ·  ".join(
                 f"`{r['status']}` **{r['n']}**" for _, r in status_df.iterrows()
             )
@@ -1831,7 +1836,7 @@ def page_settings(engine):
 
         if scope == "Last N emails (any status)":
             n = st.number_input("Number of emails", min_value=1, max_value=500, value=10, step=1)
-            rows = _sql(_BASE_Q + f"ORDER BY e.id DESC LIMIT {int(n)}")
+            rows = _sql(engine, _BASE_Q + f"ORDER BY e.id DESC LIMIT {int(n)}")
             moved = int((rows["status"] == "moved").sum())
             st.caption(f"{len(rows)} email(s) — {moved} already in folders.")
 
@@ -1839,11 +1844,12 @@ def page_settings(engine):
             folder_filter = st.text_input("Filter by folder name (blank = all)", placeholder="Faturas")
             if folder_filter.strip():
                 rows = _sql(
+                    engine,
                     _BASE_Q + "WHERE e.status = 'moved' AND e.classification_label ILIKE :f ORDER BY e.id DESC",
                     {"f": f"%{folder_filter.strip()}%"},
                 )
             else:
-                rows = _sql(_BASE_Q + "WHERE e.status = 'moved' ORDER BY e.id DESC")
+                rows = _sql(engine, _BASE_Q + "WHERE e.status = 'moved' ORDER BY e.id DESC")
             folder_counts = rows["classification_label"].value_counts().to_dict()
             summary = "  ·  ".join(f"{k}: **{v}**" for k, v in list(folder_counts.items())[:6])
             st.caption(f"{len(rows)} email(s) — {summary}")
@@ -1855,7 +1861,7 @@ def page_settings(engine):
                     parsed_ids = [int(x.strip()) for x in raw.split(",") if x.strip()]
                     # IDs are validated ints — safe to interpolate directly
                     id_list = ",".join(str(i) for i in parsed_ids)
-                    rows = _sql(_BASE_Q + f"WHERE e.id = ANY(ARRAY[{id_list}])")
+                    rows = _sql(engine, _BASE_Q + f"WHERE e.id = ANY(ARRAY[{id_list}])")
                     st.caption(f"{len(rows)} email(s) found: " +
                                ", ".join(f"#{r['id']} [{r['status']}] ({r['managed_by']})"
                                          for _, r in rows.iterrows()))
@@ -1863,7 +1869,7 @@ def page_settings(engine):
                     st.error("Invalid IDs — use comma-separated numbers.")
 
         else:  # All emails
-            rows = _sql(_BASE_Q + "ORDER BY e.id DESC")
+            rows = _sql(engine, _BASE_Q + "ORDER BY e.id DESC")
             st.caption(f"{len(rows)} email(s) total.")
 
         # Show worker split before confirming
@@ -1953,11 +1959,53 @@ def page_sellers(engine, settings):
                     _set_flash("warning", t("page.sellers.lookup_not_found", nif=nif))
                 st.rerun()
 
+    # ── Add seller manually ───────────────────────────────────────────────────
+    with st.expander(t("page.sellers.add_header"), expanded=False):
+        with st.form("add_seller_form", clear_on_submit=True):
+            col_nif2, col_name2 = st.columns([2, 3])
+            new_nif      = col_nif2.text_input("NIF *", placeholder="508517592")
+            new_name     = col_name2.text_input(t("page.sellers.col_name") + " *", placeholder="Empresa Exemplo Lda")
+            col_a, col_b, col_c = st.columns(3)
+            new_activity = col_a.text_input(t("page.sellers.col_activity"), placeholder="Comércio por grosso")
+            new_cae      = col_b.text_input(t("page.sellers.col_cae"), placeholder="46900")
+            new_situation= col_c.text_input(t("page.sellers.col_situation"), placeholder="Ativo")
+            new_address  = st.text_input(t("page.sellers.col_address"), placeholder="Rua Exemplo, 1 — 1000-001 Lisboa")
+            submitted = st.form_submit_button(t("page.sellers.add_btn"), type="primary")
+            if submitted:
+                nif_v = new_nif.strip()
+                name_v = new_name.strip()
+                if not nif_v or not name_v:
+                    st.error(t("page.sellers.add_required"))
+                elif not nif_v.isdigit() or len(nif_v) != 9:
+                    st.error(t("page.sellers.add_nif_invalid"))
+                else:
+                    try:
+                        with engine.begin() as conn:
+                            conn.execute(text("""
+                                INSERT INTO sellers (nif, name, activity, cae, address, situation)
+                                VALUES (:nif, :name, :activity, :cae, :address, :situation)
+                                ON CONFLICT (nif) DO UPDATE SET
+                                    name      = EXCLUDED.name,
+                                    activity  = EXCLUDED.activity,
+                                    cae       = EXCLUDED.cae,
+                                    address   = EXCLUDED.address,
+                                    situation = EXCLUDED.situation,
+                                    updated_at = now()
+                            """), {
+                                "nif": nif_v, "name": name_v,
+                                "activity": new_activity.strip() or None,
+                                "cae": new_cae.strip() or None,
+                                "address": new_address.strip() or None,
+                                "situation": new_situation.strip() or None,
+                            })
+                        _set_flash("success", t("page.sellers.add_success", nif=nif_v, name=name_v))
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
     # ── Sellers table ─────────────────────────────────────────────────────────
     try:
-        df = _sql(
-            engine,
-            """
+        df = _sql(engine, """
             SELECT
                 s.nif, s.name, s.activity, s.cae, s.address, s.situation,
                 COUNT(i.id) AS invoice_count,
@@ -1966,8 +2014,7 @@ def page_sellers(engine, settings):
             LEFT JOIN invoices i ON i.nif_seller = s.nif
             GROUP BY s.id, s.nif, s.name, s.activity, s.cae, s.address, s.situation
             ORDER BY invoice_count DESC, s.name
-            """,
-        )
+        """)
     except Exception as e:
         st.error(t("page.sellers.load_error", error=e))
         return
@@ -1982,7 +2029,7 @@ def page_sellers(engine, settings):
         mask = (
             df["nif"].str.contains(search.strip(), case=False, na=False) |
             df["name"].str.contains(search.strip(), case=False, na=False) |
-            df["activity"].str.contains(search.strip(), case=False, na=False)
+            df["activity"].fillna("").str.contains(search.strip(), case=False, na=False)
         )
         df = df[mask]
 
@@ -1994,33 +2041,87 @@ def page_sellers(engine, settings):
     _sellers_page, _sellers_offset = _page_controls(f"sellers_page_{_sellers_fhash}", len(df))
     df_page = df.iloc[_sellers_offset : _sellers_offset + _PAGE_SIZE].copy()
 
-    # ── Format columns ────────────────────────────────────────────────────────
+    # ── Format display columns (keep originals for edit tracking) ─────────────
     df_page["last_invoice"] = pd.to_datetime(df_page["last_invoice"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
     df_page["invoice_count"] = df_page["invoice_count"].fillna(0).astype(int)
-
     df_page.insert(0, "🗑️", False)
+
+    # Editable cols: name, activity, cae, address, situation (nif is the key — keep disabled)
+    _editable = ["🗑️", "name", "activity", "cae", "address", "situation"]
+    _disabled = [c for c in df_page.columns if c not in _editable]
+
+    col_labels = {
+        "nif":           t("page.sellers.col_nif"),
+        "name":          t("page.sellers.col_name"),
+        "activity":      t("page.sellers.col_activity"),
+        "cae":           t("page.sellers.col_cae"),
+        "address":       t("page.sellers.col_address"),
+        "situation":     t("page.sellers.col_situation"),
+        "invoice_count": t("page.sellers.col_invoices"),
+        "last_invoice":  t("page.sellers.col_last_invoice"),
+    }
 
     # ── Data editor ───────────────────────────────────────────────────────────
     edited = st.data_editor(
-        df_page.rename(columns={
-            "nif":           t("page.sellers.col_nif"),
-            "name":          t("page.sellers.col_name"),
-            "activity":      t("page.sellers.col_activity"),
-            "cae":           t("page.sellers.col_cae"),
-            "address":       t("page.sellers.col_address"),
-            "situation":     t("page.sellers.col_situation"),
-            "invoice_count": t("page.sellers.col_invoices"),
-            "last_invoice":  t("page.sellers.col_last_invoice"),
-        }),
+        df_page.rename(columns=col_labels),
         column_config={
             "🗑️": st.column_config.CheckboxColumn("🗑️", help=t("dashboard.invoices.delete_col_help"), width="small"),
         },
-        disabled=[c for c in df_page.columns if c != "🗑️"],
+        disabled=[col_labels.get(c, c) for c in _disabled],
         use_container_width=True,
         hide_index=True,
         key=f"editor_sellers_{_sellers_fhash}",
     )
 
+    # ── Save edits ────────────────────────────────────────────────────────────
+    # Map label columns back to original names for comparison
+    inv_labels = {v: k for k, v in col_labels.items()}
+    edited_orig = edited.rename(columns=inv_labels)
+
+    changed_rows = []
+    for idx in df_page.index:
+        pos = df_page.index.get_loc(idx)
+        for col in ["name", "activity", "cae", "address", "situation"]:
+            orig_val = df_page.at[idx, col]
+            new_val  = edited_orig.iloc[pos][col] if col in edited_orig.columns else orig_val
+            # Treat NaN and None as equal
+            orig_str = "" if pd.isna(orig_val) else str(orig_val)
+            new_str  = "" if pd.isna(new_val)  else str(new_val)
+            if orig_str != new_str:
+                changed_rows.append(idx)
+                break
+
+    if changed_rows:
+        if st.button(t("page.sellers.save_edits_btn"), type="primary", key="save_sellers"):
+            try:
+                with engine.begin() as conn:
+                    for idx in changed_rows:
+                        pos = df_page.index.get_loc(idx)
+                        row = edited_orig.iloc[pos]
+                        nif_key = df_page.at[idx, "nif"]
+                        conn.execute(text("""
+                            UPDATE sellers SET
+                                name      = :name,
+                                activity  = :activity,
+                                cae       = :cae,
+                                address   = :address,
+                                situation = :situation,
+                                updated_at = now()
+                            WHERE nif = :nif
+                        """), {
+                            "nif":       nif_key,
+                            "name":      row.get("name") or None,
+                            "activity":  row.get("activity") or None,
+                            "cae":       row.get("cae") or None,
+                            "address":   row.get("address") or None,
+                            "situation": row.get("situation") or None,
+                        })
+                _set_flash("success", t("page.sellers.save_edits_success", count=len(changed_rows)))
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ {e}")
+
+    # ── Delete ────────────────────────────────────────────────────────────────
     to_delete = df_page.loc[edited["🗑️"].values, "nif"].tolist() if "🗑️" in edited.columns else []
     if to_delete:
         st.warning(t("page.sellers.delete_warning", count=len(to_delete)))
