@@ -43,6 +43,17 @@ class Invoice(Base):
     # Human-readable label derived from document_type: "Fatura", "Recibo", etc.
     document_type_description: Mapped[str | None] = mapped_column(String(60), nullable=True)
 
+    # Origin: "pt_at" | "international"
+    invoice_origin: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    # International invoice fields (non-PT-AT documents)
+    seller_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seller_country: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    vat_rate: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    receipt_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    card_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
+
     # Raw QR string and extraction metadata
     raw_qr: Mapped[str | None] = mapped_column(Text, nullable=True)
     extracted_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

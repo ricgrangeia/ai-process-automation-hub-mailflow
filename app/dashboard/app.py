@@ -1107,20 +1107,28 @@ def page_invoices(engine):
                 i.email_id,
                 e.subject,
                 e.from_address,
+                i.invoice_origin,
                 i.document_type,
                 i.document_type_description,
                 i.nif_seller,
                 i.nif_buyer,
                 i.invoice_number,
+                i.receipt_number,
                 i.atcud,
                 i.invoice_date,
                 i.taxable_amount,
                 i.vat_amount,
+                i.vat_rate,
                 i.total_amount,
+                i.currency,
                 i.mb_entidade,
                 i.mb_referencia,
                 i.mb_valor,
                 i.mb_data_limite,
+                i.seller_name,
+                i.seller_country,
+                i.payment_method,
+                i.card_last4,
                 i.extracted_at
             FROM invoices i
             LEFT JOIN emails e ON e.id = i.email_id
@@ -1138,7 +1146,11 @@ def page_invoices(engine):
         st.info(t("dashboard.invoices.empty"))
         return
 
-    # ── KPI row ──
+    # Split by origin
+    df_at   = df[df["invoice_origin"].isin(["pt_at", None, ""]) | df["invoice_origin"].isna()].copy()
+    df_intl = df[df["invoice_origin"] == "international"].copy()
+
+    # ── KPI row (all invoices combined) ──
     total_gross    = pd.to_numeric(df["total_amount"],   errors="coerce").sum()
     total_vat      = pd.to_numeric(df["vat_amount"],     errors="coerce").sum()
     total_taxable  = pd.to_numeric(df["taxable_amount"], errors="coerce").sum()
@@ -1152,111 +1164,166 @@ def page_invoices(engine):
 
     st.divider()
 
-    # ── Option B: Total card (left) + Top 5 + Others bar chart (right) ──
-    chart_left, chart_right = st.columns([1, 2])
+    # ── Two tabs ──
+    tab_at, tab_intl = st.tabs([
+        t("dashboard.invoices.tab_at"),
+        t("dashboard.invoices.tab_international"),
+    ])
 
-    with chart_left:
-        st.metric(t("dashboard.invoices.chart_grand_total"), f"€ {total_gross:,.2f}")
-        st.caption(t("dashboard.invoices.chart_sellers_count", count=unique_sellers))
+    # ── Helper: currency-aware amount formatter ──
+    def _fmt_amount(v, currency_val="€"):
+        if pd.isna(v):
+            return "—"
+        symbol = {"EUR": "€", "USD": "$", "GBP": "£"}.get(str(currency_val).upper(), str(currency_val) + " ")
+        return f"{symbol} {float(v):,.2f}"
 
-    with chart_right:
-        if not df["nif_seller"].isna().all():
-            seller_amounts = (
-                df.groupby("nif_seller")["total_amount"]
-                .apply(lambda x: pd.to_numeric(x, errors="coerce").sum())
-                .sort_values(ascending=False)
+    # ════════════════════════════════
+    # TAB 1 — PT AT Invoices
+    # ════════════════════════════════
+    with tab_at:
+        if df_at.empty:
+            st.info(t("dashboard.invoices.empty"))
+        else:
+            # Chart
+            chart_left, chart_right = st.columns([1, 2])
+            with chart_left:
+                at_gross = pd.to_numeric(df_at["total_amount"], errors="coerce").sum()
+                at_sellers = df_at["nif_seller"].nunique()
+                st.metric(t("dashboard.invoices.chart_grand_total"), f"€ {at_gross:,.2f}")
+                st.caption(t("dashboard.invoices.chart_sellers_count", count=at_sellers))
+
+            with chart_right:
+                if not df_at["nif_seller"].isna().all():
+                    seller_amounts = (
+                        df_at.groupby("nif_seller")["total_amount"]
+                        .apply(lambda x: pd.to_numeric(x, errors="coerce").sum())
+                        .sort_values(ascending=False)
+                    )
+                    top5   = seller_amounts.head(5)
+                    others = seller_amounts.iloc[5:].sum()
+                    labels = list(top5.index)
+                    values = list(top5.values)
+                    colors = ["#4a9eff"] * len(top5)
+                    if others > 0:
+                        labels.append(t("dashboard.invoices.others_label"))
+                        values.append(others)
+                        colors.append("#888888")
+                    chart_df = pd.DataFrame({"nif_seller": labels, "total_col": values, "color": colors})
+                    fig = px.bar(
+                        chart_df, x="nif_seller", y="total_col",
+                        title=t("dashboard.invoices.chart_title"),
+                        labels={"nif_seller": t("dashboard.invoices.chart_x_label"), "total_col": "Total (€)"},
+                        color="color", color_discrete_map="identity",
+                    )
+                    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+
+            # Table
+            display_at = df_at[[c for c in [
+                "invoice_date", "document_type", "document_type_description",
+                "invoice_number", "atcud", "nif_seller", "nif_buyer",
+                "taxable_amount", "vat_amount", "total_amount",
+                "mb_entidade", "mb_referencia", "mb_valor", "mb_data_limite",
+                "subject", "email_id",
+            ] if c in df_at.columns]].copy()
+
+            for col in ["taxable_amount", "vat_amount", "total_amount"]:
+                display_at[col] = pd.to_numeric(display_at[col], errors="coerce").apply(
+                    lambda v: f"€ {v:,.2f}" if pd.notna(v) else "—"
+                )
+            display_at["mb_valor"] = pd.to_numeric(display_at["mb_valor"], errors="coerce").apply(
+                lambda v: f"€ {v:,.2f}" if pd.notna(v) else "—"
             )
-            top5      = seller_amounts.head(5)
-            others    = seller_amounts.iloc[5:].sum()
-            labels    = list(top5.index)
-            values    = list(top5.values)
-            colors    = ["#4a9eff"] * len(top5)
-            if others > 0:
-                labels.append(t("dashboard.invoices.others_label"))
-                values.append(others)
-                colors.append("#888888")
+            display_at["invoice_date"] = pd.to_datetime(display_at["invoice_date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
 
-            chart_df = pd.DataFrame({
-                "nif_seller": labels,
-                "total_col":  values,
-                "color":      colors,
-            })
-
-            fig = px.bar(
-                chart_df,
-                x="nif_seller",
-                y="total_col",
-                title=t("dashboard.invoices.chart_title"),
-                labels={
-                    "nif_seller": t("dashboard.invoices.chart_x_label"),
-                    "total_col":  "Total (€)",
-                },
-                color="color",
-                color_discrete_map="identity",
+            st.dataframe(
+                display_at.rename(columns={
+                    "invoice_date":              t("dashboard.invoices.col_date"),
+                    "document_type":             t("dashboard.invoices.col_doc_type"),
+                    "document_type_description": t("dashboard.invoices.col_doc_type_desc"),
+                    "invoice_number":            t("dashboard.invoices.col_invoice_num"),
+                    "atcud":          "ATCUD",
+                    "nif_seller":     t("dashboard.invoices.col_nif_seller"),
+                    "nif_buyer":      t("dashboard.invoices.col_nif_buyer"),
+                    "taxable_amount": t("dashboard.invoices.col_taxable"),
+                    "vat_amount":     t("dashboard.invoices.col_vat"),
+                    "total_amount":   t("dashboard.invoices.col_total"),
+                    "mb_entidade":    t("dashboard.invoices.col_mb_entity"),
+                    "mb_referencia":  t("dashboard.invoices.col_mb_ref"),
+                    "mb_valor":       t("dashboard.invoices.col_mb_amount"),
+                    "mb_data_limite": t("dashboard.invoices.col_mb_due"),
+                    "subject":        t("dashboard.invoices.col_subject"),
+                    "email_id":       "Email ID",
+                }),
+                use_container_width=True, hide_index=True,
             )
-            fig.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                showlegend=False,
+            csv_at = df_at.to_csv(index=False).encode("utf-8")
+            st.download_button("⬇️ Export CSV", csv_at, "invoices_at.csv", "text/csv", key="csv_at")
+
+    # ════════════════════════════════
+    # TAB 2 — International / Foreign
+    # ════════════════════════════════
+    with tab_intl:
+        if df_intl.empty:
+            st.info(t("dashboard.invoices.intl_empty"))
+        else:
+            intl_gross = pd.to_numeric(df_intl["total_amount"], errors="coerce").sum()
+            intl_count = len(df_intl)
+            ci1, ci2 = st.columns(2)
+            ci1.metric(t("dashboard.invoices.metric_total_gross"), f"€ {intl_gross:,.2f}")
+            ci2.metric(t("dashboard.invoices.intl_count"), intl_count)
+
+            display_intl = df_intl[[c for c in [
+                "invoice_date", "seller_name", "seller_country",
+                "invoice_number", "receipt_number",
+                "taxable_amount", "vat_amount", "vat_rate", "total_amount", "currency",
+                "payment_method", "card_last4",
+                "subject", "email_id",
+            ] if c in df_intl.columns]].copy()
+
+            display_intl["invoice_date"] = pd.to_datetime(display_intl["invoice_date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
+
+            # Format amounts with their own currency
+            for amt_col in ["taxable_amount", "vat_amount", "total_amount"]:
+                display_intl[amt_col] = display_intl.apply(
+                    lambda row, c=amt_col: _fmt_amount(row[c], row.get("currency", "€")),
+                    axis=1,
+                )
+            if "vat_rate" in display_intl.columns:
+                display_intl["vat_rate"] = pd.to_numeric(display_intl["vat_rate"], errors="coerce").apply(
+                    lambda v: f"{v*100:.0f}%" if pd.notna(v) else "—"
+                )
+
+            st.dataframe(
+                display_intl.rename(columns={
+                    "invoice_date":   t("dashboard.invoices.col_date"),
+                    "seller_name":    t("dashboard.invoices.col_seller_name"),
+                    "seller_country": t("dashboard.invoices.col_seller_country"),
+                    "invoice_number": t("dashboard.invoices.col_invoice_num"),
+                    "receipt_number": t("dashboard.invoices.col_receipt_num"),
+                    "taxable_amount": t("dashboard.invoices.col_taxable"),
+                    "vat_amount":     t("dashboard.invoices.col_vat"),
+                    "vat_rate":       t("dashboard.invoices.col_vat_rate"),
+                    "total_amount":   t("dashboard.invoices.col_total"),
+                    "currency":       t("dashboard.invoices.col_currency"),
+                    "payment_method": t("dashboard.invoices.col_payment_method"),
+                    "card_last4":     t("dashboard.invoices.col_card_last4"),
+                    "subject":        t("dashboard.invoices.col_subject"),
+                    "email_id":       "Email ID",
+                }),
+                use_container_width=True, hide_index=True,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            csv_intl = df_intl.to_csv(index=False).encode("utf-8")
+            st.download_button("⬇️ Export CSV", csv_intl, "invoices_international.csv", "text/csv", key="csv_intl")
 
-    # ── Table ──
-    display = df[[
-        c for c in [
-            "invoice_date", "document_type", "document_type_description", "invoice_number", "atcud",
-            "nif_seller", "nif_buyer",
-            "taxable_amount", "vat_amount", "total_amount",
-            "mb_entidade", "mb_referencia", "mb_valor", "mb_data_limite",
-            "subject", "email_id",
-        ] if c in df.columns
-    ]].copy()
-
-    for col in ["taxable_amount", "vat_amount", "total_amount"]:
-        display[col] = pd.to_numeric(display[col], errors="coerce").apply(
-            lambda v: f"€ {v:,.2f}" if pd.notna(v) else "—"
-        )
-    display["mb_valor"] = pd.to_numeric(display["mb_valor"], errors="coerce").apply(
-        lambda v: f"€ {v:,.2f}" if pd.notna(v) else "—"
-    )
-    display["invoice_date"] = pd.to_datetime(display["invoice_date"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("—")
-
-    st.dataframe(
-        display.rename(columns={
-            "invoice_date":              t("dashboard.invoices.col_date"),
-            "document_type":             t("dashboard.invoices.col_doc_type"),
-            "document_type_description": t("dashboard.invoices.col_doc_type_desc"),
-            "invoice_number":            t("dashboard.invoices.col_invoice_num"),
-            "atcud":          "ATCUD",
-            "nif_seller":     t("dashboard.invoices.col_nif_seller"),
-            "nif_buyer":      t("dashboard.invoices.col_nif_buyer"),
-            "taxable_amount": t("dashboard.invoices.col_taxable"),
-            "vat_amount":     t("dashboard.invoices.col_vat"),
-            "total_amount":   t("dashboard.invoices.col_total"),
-            "mb_entidade":    t("dashboard.invoices.col_mb_entity"),
-            "mb_referencia":  t("dashboard.invoices.col_mb_ref"),
-            "mb_valor":       t("dashboard.invoices.col_mb_amount"),
-            "mb_data_limite": t("dashboard.invoices.col_mb_due"),
-            "subject":        t("dashboard.invoices.col_subject"),
-            "email_id":       "Email ID",
-        }),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    # ── CSV export ──
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("⬇️ Export CSV", csv, "invoices.csv", "text/csv")
-
-    # ── Delete ──
+    # ── Delete (works across both tabs — uses full df) ──
     st.divider()
     with st.expander("🗑️ Delete invoices"):
-        # Build a human-readable label for each row
         def _row_label(row) -> str:
-            num  = row.get("invoice_number") or row.get("atcud") or f"ID {row['id']}"
-            date = row.get("invoice_date") or "?"
-            nif  = row.get("nif_seller") or "?"
-            return f"{num}  ·  {date}  ·  NIF {nif}"
+            num  = row.get("invoice_number") or row.get("receipt_number") or row.get("atcud") or f"ID {row['id']}"
+            date = str(row.get("invoice_date") or "?")[:10]
+            who  = row.get("seller_name") or row.get("nif_seller") or "?"
+            return f"{num}  ·  {date}  ·  {who}"
 
         options: dict[str, int] = {
             _row_label(row): int(row["id"])
