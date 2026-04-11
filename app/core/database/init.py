@@ -6,6 +6,7 @@ from app.core.database.base import Base
 import app.accounts.models        # noqa: F401 — registers EmailAccount, ApiCredential
 import app.messages.models        # noqa: F401 — registers EmailMessage, Attachment
 import app.classification.learned_rules  # noqa: F401 — registers LearnedRule
+import app.sellers.models         # noqa: F401 — registers Seller
 
 
 async def init_db(engine: AsyncEngine):

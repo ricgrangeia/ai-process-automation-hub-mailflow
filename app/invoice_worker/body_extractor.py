@@ -68,9 +68,10 @@ async def extract_financial_from_body(
     }
 
     try:
+        base = llm_base_url.rstrip("/").removesuffix("/v1")
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
-                f"{llm_base_url}/v1/chat/completions",
+                f"{base}/v1/chat/completions",
                 json=payload,
                 headers=headers,
             )
