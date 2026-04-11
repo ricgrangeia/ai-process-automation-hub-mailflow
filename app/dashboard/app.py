@@ -359,7 +359,9 @@ def page_dashboard(engine, settings):
         )
 
         df_page[col_subject]    = df_page[col_subject].apply(_decode_mime_header)
-        df_page[col_confidence] = (df_page[col_confidence] * 100).round(0).astype(int)
+        df_page[col_confidence] = (
+            pd.to_numeric(df_page[col_confidence], errors="coerce") * 100
+        ).round(0).astype("Int64")  # nullable int — handles NaN from invoice-worker emails
         df_page[col_time]       = df_page[col_time].apply(
             lambda v: f"{float(v):.2f}s" if pd.notna(v) else "—"
         )

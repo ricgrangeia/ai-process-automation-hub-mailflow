@@ -79,7 +79,8 @@ def _build_invoice_message(email_row: EmailMessage, invoice_data: dict, origin: 
     if invoice_data.get("invoice_number"):
         parts.append(f"Invoice #: `{invoice_data['invoice_number']}`")
     if invoice_data.get("total_amount") is not None:
-        parts.append(f"Total: *{invoice_data['total_amount']} {invoice_data.get('currency', 'EUR')}*")
+        currency = invoice_data.get("currency") or "EUR"
+        parts.append(f"Total: *{invoice_data['total_amount']} {currency}*")
     return "\n".join(parts)
 
 
