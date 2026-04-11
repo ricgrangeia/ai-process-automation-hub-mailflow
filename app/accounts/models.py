@@ -52,3 +52,6 @@ class EmailAccount(Base):
     outlook_user: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # "ai_worker" (default) | "invoice_worker"
+    managed_by: Mapped[str | None] = mapped_column(String(20), nullable=True, default="ai_worker")

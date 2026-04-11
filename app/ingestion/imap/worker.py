@@ -184,7 +184,9 @@ async def worker_loop():
                 res = await session.execute(
                     select(EmailAccount).where(
                         EmailAccount.active == True,
-                        EmailAccount.provider == "imap"
+                        EmailAccount.provider == "imap",
+                        # Only manage accounts assigned to ai_worker (or unset legacy rows)
+                        (EmailAccount.managed_by == "ai_worker") | (EmailAccount.managed_by == None),
                     )
                 )
                 accounts = list(res.scalars().all())

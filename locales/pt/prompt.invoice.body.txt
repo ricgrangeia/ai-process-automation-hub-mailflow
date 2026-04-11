@@ -1,0 +1,38 @@
+És um extrator de dados financeiros. Extrai informação financeira estruturada do e-mail abaixo.
+
+Assunto: {subject}
+
+Corpo:
+{body}
+
+Extrai todos os campos financeiros disponíveis e devolve APENAS um objeto JSON com estes campos (usa null para valores em falta):
+
+{{
+  "invoice_origin": "<um de: payment_confirmation | bank_transfer | receipt | international>",
+  "seller_name": "<nome da empresa ou pessoa que recebeu o pagamento>",
+  "seller_country": "<código ISO de 2 letras do país ou null>",
+  "invoice_number": "<número de fatura ou referência>",
+  "receipt_number": "<número de recibo se aplicável>",
+  "invoice_date": "<AAAA-MM-DD ou null>",
+  "taxable_amount": <número ou null>,
+  "vat_amount": <número ou null>,
+  "total_amount": <número ou null>,
+  "currency": "<código ISO de moeda de 3 letras, ex. EUR, USD>",
+  "vat_rate": <taxa decimal ex. 0.23 para 23% ou null>,
+  "payment_method": "<card | bank_transfer | mbway | multibanco | paypal | null>",
+  "card_last4": "<últimos 4 dígitos do cartão ou null>",
+  "nif_seller": "<NIF do vendedor ou null>",
+  "nif_buyer": "<NIF do comprador ou null>",
+  "mb_entidade": "<entidade Multibanco ou null>",
+  "mb_referencia": "<referência Multibanco ou null>",
+  "mb_valor": <montante Multibanco ou null>,
+  "mb_data_limite": "<prazo Multibanco AAAA-MM-DD ou null>"
+}}
+
+Regras:
+- invoice_origin deve ser exatamente um de: payment_confirmation, bank_transfer, receipt, international
+- Usa payment_confirmation para pagamentos com cartão, PayPal, MBWay e confirmações similares
+- Usa bank_transfer para transferências bancárias e extratos
+- Usa receipt para recibos de lojas físicas ou online
+- Usa international para faturas estrangeiras sem AT/ATCUD português
+- Devolve APENAS o objeto JSON, sem explicação, sem blocos markdown

@@ -105,6 +105,36 @@ services:
       - database
       - ai
 
+  invoice-worker:
+    build: .
+    container_name: mailflow-invoice-worker
+    restart: unless-stopped
+    depends_on:
+      - redis
+    command: ["python", "-m", "app.invoice_worker.worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      STORAGE_ROOT: ${STORAGE_ROOT}
+      MASTER_KEY: ${MASTER_KEY}
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      TOOL_SERVER_URL: ${TOOL_SERVER_URL}
+      TOOL_SERVER_API_KEY: ${TOOL_SERVER_API_KEY}
+      FILES_ROOT: ${FILES_ROOT:-/files}
+      COMPANY_NAME: ${COMPANY_NAME:-Company}
+      LANGUAGE: ${LANGUAGE:-en}
+    volumes:
+      - mail_storage:/storage
+      - files_storage:/files
+    networks:
+      - mail
+      - database
+      - ai
+
   telegram-bot:
     build: .
     container_name: mailflow-telegram-bot

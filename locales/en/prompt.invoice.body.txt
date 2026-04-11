@@ -1,0 +1,38 @@
+You are a financial data extractor. Extract structured financial information from the email below.
+
+Subject: {subject}
+
+Body:
+{body}
+
+Extract all available financial fields and return ONLY a JSON object with these fields (use null for missing values):
+
+{{
+  "invoice_origin": "<one of: payment_confirmation | bank_transfer | receipt | international>",
+  "seller_name": "<company or person name that received the payment>",
+  "seller_country": "<2-letter ISO country code or null>",
+  "invoice_number": "<invoice or reference number>",
+  "receipt_number": "<receipt number if applicable>",
+  "invoice_date": "<YYYY-MM-DD or null>",
+  "taxable_amount": <number or null>,
+  "vat_amount": <number or null>,
+  "total_amount": <number or null>,
+  "currency": "<3-letter ISO currency code, e.g. EUR, USD>",
+  "vat_rate": <decimal rate e.g. 0.23 for 23% or null>,
+  "payment_method": "<card | bank_transfer | mbway | multibanco | paypal | null>",
+  "card_last4": "<last 4 digits of card or null>",
+  "nif_seller": "<tax ID of seller or null>",
+  "nif_buyer": "<tax ID of buyer or null>",
+  "mb_entidade": "<Multibanco entity number or null>",
+  "mb_referencia": "<Multibanco reference or null>",
+  "mb_valor": <Multibanco amount or null>,
+  "mb_data_limite": "<Multibanco due date YYYY-MM-DD or null>"
+}}
+
+Rules:
+- invoice_origin must be exactly one of: payment_confirmation, bank_transfer, receipt, international
+- Use payment_confirmation for card payments, PayPal, MBWay, and similar confirmations
+- Use bank_transfer for wire transfers and bank statements
+- Use receipt for receipts from physical or online stores
+- Use international for foreign invoices without Portuguese AT/ATCUD
+- Return ONLY the JSON object, no explanation, no markdown fences

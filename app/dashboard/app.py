@@ -298,7 +298,8 @@ def page_email_accounts(engine, settings):
     # ---- list accounts ----
     def load_accounts():
         return pd.read_sql(
-            "SELECT id, tenant_id, provider, email, imap_host, imap_port, username, active "
+            "SELECT id, tenant_id, provider, email, imap_host, imap_port, username, active, "
+            "COALESCE(managed_by, 'ai_worker') AS managed_by "
             "FROM email_accounts ORDER BY id",
             engine,
         )
@@ -313,15 +314,20 @@ def page_email_accounts(engine, settings):
         # Show table with action buttons per row
         for _, row in df.iterrows():
             with st.container(border=True):
-                c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
+                c1, c2, c3, c4, c5 = st.columns([3, 2, 1, 1, 1])
                 c1.markdown(f"**{row['email']}**  \n`{row['provider'].upper()}` · {row['imap_host'] or '—'}")
                 c2.markdown(f"Tenant: `{row['tenant_id']}`  \nUser: `{row['username'] or '—'}`")
-                status_label = "🟢 Active" if row["active"] else "🔴 Inactive"
+                status_label = "🟢 " + t("page.accounts.active_label") if row["active"] else "🔴 Inactive"
                 c3.markdown(f"<br>{status_label}", unsafe_allow_html=True)
 
-                with c4:
+                managed_by = row.get("managed_by") or "ai_worker"
+                mode_icon  = "🤖" if managed_by == "ai_worker" else "🧾"
+                mode_label = t("page.accounts.mode_ai") if managed_by == "ai_worker" else t("page.accounts.mode_invoice")
+                c4.markdown(f"<br>{mode_icon} {mode_label}", unsafe_allow_html=True)
+
+                with c5:
                     st.write("")  # vertical align
-                    toggle_label = "Deactivate" if row["active"] else "Activate"
+                    toggle_label = t("page.accounts.deactivate") if row["active"] else t("page.accounts.activate")
                     if st.button(toggle_label, key=f"toggle_{row['id']}"):
                         new_val = not row["active"]
                         with engine.begin() as conn:
@@ -341,12 +347,46 @@ def page_email_accounts(engine, settings):
                         )
                         st.rerun()
 
-                new_pw_key = f"new_pw_{row['id']}"
-                with st.expander(f"🔑 Reset password — {row['email']}"):
-                    new_pw = st.text_input("New password", type="password", key=new_pw_key)
-                    if st.button("Save new password", key=f"save_pw_{row['id']}"):
+                with st.expander(f"⚙️ {t('page.accounts.settings_label')} — {row['email']}"):
+                    # Worker mode selector
+                    worker_options = ["ai_worker", "invoice_worker"]
+                    worker_labels  = [t("page.accounts.mode_ai_full"), t("page.accounts.mode_invoice_full")]
+                    current_idx = worker_options.index(managed_by) if managed_by in worker_options else 0
+                    new_mode = st.radio(
+                        t("page.accounts.worker_mode_label"),
+                        options=worker_labels,
+                        index=current_idx,
+                        horizontal=True,
+                        key=f"mode_{row['id']}",
+                    )
+                    if st.button(t("page.accounts.save_mode_btn"), key=f"save_mode_{row['id']}"):
+                        new_managed_by = worker_options[worker_labels.index(new_mode)]
+                        with engine.begin() as conn:
+                            conn.execute(
+                                text("UPDATE email_accounts SET managed_by = :mb WHERE id = :id"),
+                                {"mb": new_managed_by, "id": int(row["id"])},
+                            )
+                        from app.core.audit import log_audit_sync
+                        log_audit_sync(
+                            engine,
+                            actor_type="dashboard",
+                            actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                            action="account.managed_by_changed",
+                            entity_type="account",
+                            entity_id=int(row["id"]),
+                            details={"email": row["email"], "managed_by": new_managed_by},
+                        )
+                        st.success(t("page.accounts.mode_saved"))
+                        st.rerun()
+
+                    st.divider()
+
+                    # Password reset
+                    new_pw_key = f"new_pw_{row['id']}"
+                    new_pw = st.text_input(t("page.accounts.reset_pw_label"), type="password", key=new_pw_key)
+                    if st.button(t("page.accounts.save_pw_btn"), key=f"save_pw_{row['id']}"):
                         if not new_pw:
-                            st.error("Password cannot be empty.")
+                            st.error(t("page.accounts.pw_empty_error"))
                         else:
                             encrypted_pw = encrypt_secret(settings.master_key, new_pw)
                             with engine.begin() as conn:
@@ -364,7 +404,7 @@ def page_email_accounts(engine, settings):
                                 entity_id=int(row["id"]),
                                 details={"email": row["email"]},
                             )
-                            st.success("Password updated and encrypted.")
+                            st.success(t("page.accounts.pw_saved"))
 
     st.divider()
 
