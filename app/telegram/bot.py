@@ -283,6 +283,12 @@ async def _save_rule(
     if conditions is None:
         conditions = [{"type": "sender_email", "value": sender}]
 
+    # Drop any condition with a blank value — prevents no-condition rules
+    conditions = [c for c in conditions if (c.get("value") or "").strip()]
+    if not conditions:
+        logger.warning(f"_save_rule: all conditions were empty for email {email.id} — rule not saved")
+        return None
+
     async with session_factory() as session:
         # Allow multiple rules per sender — only skip if exact same conditions exist
         existing = await session.execute(

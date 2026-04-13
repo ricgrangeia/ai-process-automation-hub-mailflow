@@ -789,12 +789,15 @@ def page_learned_rules(engine, settings):
                         icon = _type_icon.get(c.get("type", ""), "❓")
                         cond_lines.append(f"{icon} `{c.get('value','')}`")
                     min_match = int(row.get("min_match") or 1)
-                    cond_text = "  \n".join(cond_lines) if cond_lines else "_no conditions_"
-                    st.markdown(
-                        f"{cond_text}  \n"
-                        f"_match ≥ {min_match}_  \n"
-                        f"{_actions_summary(row['actions'])}"
-                    )
+                    if cond_lines:
+                        cond_text = "  \n".join(cond_lines)
+                        st.markdown(
+                            f"{cond_text}  \n"
+                            f"_match ≥ {min_match}_  \n"
+                            f"{_actions_summary(row['actions'])}"
+                        )
+                    else:
+                        st.error("⚠️ **No conditions** — this rule is inactive (skipped by classifier). Edit it to add at least one condition, or delete it.")
 
                 with c2:
                     st.markdown(
@@ -884,42 +887,45 @@ def page_learned_rules(engine, settings):
                                     if ctype.strip() and cval.strip():
                                         new_conditions.append({"type": ctype.strip(), "value": cval.strip()})
 
-                            new_actions = []
-                            if new_folder != "(none)":
-                                new_actions.append({"type": "move_folder", "folder": new_folder})
-                            if new_pdf_path.strip():
-                                new_actions.append({"type": "export_pdf", "path": new_pdf_path.strip()})
+                            if not new_conditions:
+                                st.error("❌ At least one condition is required. A rule with no conditions would match every email.")
+                            else:
+                                new_actions = []
+                                if new_folder != "(none)":
+                                    new_actions.append({"type": "move_folder", "folder": new_folder})
+                                if new_pdf_path.strip():
+                                    new_actions.append({"type": "export_pdf", "path": new_pdf_path.strip()})
 
-                            import json as _json
-                            with engine.begin() as conn:
-                                conn.execute(
-                                    text(
-                                        "UPDATE learned_rules "
-                                        "SET conditions = CAST(:cond AS jsonb), min_match = :mm, actions = CAST(:ac AS jsonb) "
-                                        "WHERE id = :id"
-                                    ),
-                                    {
-                                        "cond": _json.dumps(new_conditions),
-                                        "mm": int(new_min_match),
-                                        "ac": _json.dumps(new_actions),
-                                        "id": rule_id,
+                                import json as _json
+                                with engine.begin() as conn:
+                                    conn.execute(
+                                        text(
+                                            "UPDATE learned_rules "
+                                            "SET conditions = CAST(:cond AS jsonb), min_match = :mm, actions = CAST(:ac AS jsonb) "
+                                            "WHERE id = :id"
+                                        ),
+                                        {
+                                            "cond": _json.dumps(new_conditions),
+                                            "mm": int(new_min_match),
+                                            "ac": _json.dumps(new_actions),
+                                            "id": rule_id,
+                                        },
+                                    )
+                                from app.core.audit import log_audit_sync
+                                log_audit_sync(
+                                    engine,
+                                    actor_type="dashboard",
+                                    actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                                    action="rule.updated",
+                                    entity_type="rule",
+                                    entity_id=rule_id,
+                                    details={
+                                        "conditions": new_conditions,
+                                        "min_match": int(new_min_match),
+                                        "actions": new_actions,
                                     },
                                 )
-                            from app.core.audit import log_audit_sync
-                            log_audit_sync(
-                                engine,
-                                actor_type="dashboard",
-                                actor_name=os.environ.get("DASHBOARD_USER", "admin"),
-                                action="rule.updated",
-                                entity_type="rule",
-                                entity_id=rule_id,
-                                details={
-                                    "conditions": new_conditions,
-                                    "min_match": int(new_min_match),
-                                    "actions": new_actions,
-                                },
-                            )
-                            _set_flash("success", "✅ Rule updated.")
+                                _set_flash("success", "✅ Rule updated.")
                             st.rerun()
 
                     # Delete button outside form
