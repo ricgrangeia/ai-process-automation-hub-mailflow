@@ -1807,29 +1807,39 @@ def page_settings(engine):
             st.caption(t("page.settings.keywords_pills_hint"))
             st.markdown("""
             <style>
-            /* 1. Target the 'Selected' state - Forced Cyan */
-            div[data-testid="stPills"] [data-testid="stBaseButton-secondary"][aria-checked="true"] {
+            /* 1. Target the button and any child elements (like the text span) */
+            div[data-testid="stPills"] button[aria-checked="true"],
+            div[data-testid="stPills"] button[aria-checked="true"] span {
                 background-color: #0891b2 !important;
+                color: white !important;
                 border-color: #0891b2 !important;
+            }
+
+            /* 2. Remove the red outline/border that appears on hover/focus */
+            div[data-testid="stPills"] button[aria-checked="true"]:hover,
+            div[data-testid="stPills"] button[aria-checked="true"]:focus,
+            div[data-testid="stPills"] button[aria-checked="true"]:active {
+                background-color: #0e7490 !important;
+                border-color: #0e7490 !important;
                 color: white !important;
             }
 
-            /* 2. Hover state for selected pills */
-            div[data-testid="stPills"] [data-testid="stBaseButton-secondary"][aria-checked="true"]:hover {
-                background-color: #0e7490 !important;
-                border-color: #0e7490 !important;
-            }
-
-            /* 3. Target the 'Deselected' state - Neutral/Grey */
-            div[data-testid="stPills"] [data-testid="stBaseButton-secondary"][aria-checked="false"] {
+            /* 3. Handle the 'Deselected' state to ensure NO red borders exist */
+            div[data-testid="stPills"] button[aria-checked="false"] {
                 background-color: transparent !important;
-                border-color: #94a3b8 !important;
+                border: 1px solid #94a3b8 !important; /* Forces a grey border */
                 color: #94a3b8 !important;
             }
 
-            /* 4. Optional: Change the focus ring color to Cyan instead of Red */
-            div[data-testid="stPills"] button:focus {
-                box-shadow: 0 0 0 0.2rem rgba(8, 145, 178, 0.5) !important;
+            /* 4. Kill the 'Primary' theme glow (the red ring) */
+            div[data-testid="stPills"] button:focus:not(:active) {
+                box-shadow: none !important;
+                border-color: #0891b2 !important;
+            }
+
+            /* 5. Force the selection indicator (if any) to be cyan */
+            div[data-testid="stPills"] button[aria-checked="true"] div {
+                color: white !important;
             }
             </style>
             """, unsafe_allow_html=True)
