@@ -7,6 +7,7 @@ and from Streamlit.
 
 from __future__ import annotations
 
+import json
 import logging
 from sqlalchemy import create_engine, text
 
@@ -16,6 +17,21 @@ logger = logging.getLogger("core.system_settings")
 
 FOLDER_STRUCTURE_KEY = "folder_structure"
 FOLDER_STRUCTURE_DEFAULT = "{company}/{year}/{month}-{month_name}/{category}/{supplier}"
+
+INBOX_KEYWORDS_KEY = "inbox_filter_keywords"
+
+# Plain-string keywords that humans can read and edit.
+# Regex-based amount patterns live in detector.py and are never exposed here.
+DEFAULT_PLAIN_KEYWORDS: list[str] = [
+    # English
+    "invoice", "receipt", "payment", "paid", "billing", "statement",
+    "transaction", "transfer", "wire transfer", "bank transfer",
+    "order confirmation", "purchase",
+    # Portuguese
+    "fatura", "recibo", "pagamento", "pago", "transferência", "mbway",
+    "multibanco", "referência de pagamento", "comprovativo",
+    "débito", "crédito", "extrato", "liquidação",
+]
 
 DEFAULTS: dict[str, str] = {
     FOLDER_STRUCTURE_KEY: FOLDER_STRUCTURE_DEFAULT,
@@ -68,6 +84,29 @@ def set_setting(engine_or_url, key: str, value: str) -> None:
     except Exception as e:
         logger.error(f"system_settings write failed for '{key}': {e}")
         raise
+
+
+def get_inbox_keywords(engine_or_url) -> list[str]:
+    """Return the active inbox filter keyword list.
+
+    Falls back to DEFAULT_PLAIN_KEYWORDS if the setting has never been saved.
+    """
+    raw = get_setting(engine_or_url, INBOX_KEYWORDS_KEY)
+    if not raw:
+        return list(DEFAULT_PLAIN_KEYWORDS)
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(k) for k in parsed if k]
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning(f"inbox_filter_keywords parse error: {e} — using defaults")
+    return list(DEFAULT_PLAIN_KEYWORDS)
+
+
+def set_inbox_keywords(engine_or_url, keywords: list[str]) -> None:
+    """Persist the inbox filter keyword list."""
+    cleaned = [k.strip().lower() for k in keywords if k and k.strip()]
+    set_setting(engine_or_url, INBOX_KEYWORDS_KEY, json.dumps(cleaned, ensure_ascii=False))
 
 
 def _ensure_engine(engine_or_url):

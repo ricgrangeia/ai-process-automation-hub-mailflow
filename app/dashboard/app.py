@@ -1786,6 +1786,60 @@ def page_settings(engine):
     except Exception as e:
         st.warning(f"Preview error: {e}")
 
+    # ── Inbox Filter Keywords ─────────────────────────────────────────────────
+    st.divider()
+    st.subheader(t("page.settings.keywords_header"))
+    st.caption(t("page.settings.keywords_caption"))
+
+    try:
+        from app.core.system_settings import (
+            INBOX_KEYWORDS_KEY, DEFAULT_PLAIN_KEYWORDS,
+            get_inbox_keywords, set_inbox_keywords,
+        )
+    except ImportError as e:
+        st.error(f"❌ Could not import keyword helpers: {e}")
+    else:
+        current_kws = get_inbox_keywords(engine)
+
+        if not current_kws:
+            st.warning(t("page.settings.keywords_none"))
+        else:
+            # Render each keyword as a labelled remove-button row
+            for i, kw in enumerate(current_kws):
+                col_kw, col_del = st.columns([9, 1])
+                col_kw.markdown(f"`{kw}`")
+                if col_del.button("✕", key=f"del_kw_{i}", help=f"Remove '{kw}'"):
+                    updated = [k for k in current_kws if k != kw]
+                    set_inbox_keywords(engine, updated)
+                    _set_flash("success", t("page.settings.keywords_saved"))
+                    st.rerun()
+
+        # Add new keyword
+        with st.form("add_keyword_form", clear_on_submit=True):
+            new_kw = st.text_input(
+                t("page.settings.keywords_add_label"),
+                placeholder="e.g. fatura",
+            )
+            col_add, col_reset = st.columns([3, 1])
+            submitted = col_add.form_submit_button(t("page.settings.keywords_add_btn"))
+            reset_kws = col_reset.form_submit_button(t("page.settings.keywords_reset"))
+
+            if submitted:
+                kw = new_kw.strip().lower()
+                if not kw:
+                    st.error(t("page.settings.keywords_empty"))
+                elif kw in current_kws:
+                    st.warning(t("page.settings.keywords_exists"))
+                else:
+                    set_inbox_keywords(engine, current_kws + [kw])
+                    _set_flash("success", t("page.settings.keywords_saved"))
+                    st.rerun()
+
+            if reset_kws:
+                set_inbox_keywords(engine, DEFAULT_PLAIN_KEYWORDS)
+                _set_flash("success", t("page.settings.keywords_reset_done"))
+                st.rerun()
+
     # ── 🧪 Testing tools ──────────────────────────────────────────────────────
     st.divider()
     st.subheader("🧪 Testing Tools")

@@ -8,29 +8,24 @@ Two-stage approach:
   4. Anything else → leave untouched (unread, unmoved)
 
 This runs before any LLM call so non-financial emails have zero LLM cost.
+
+Keyword filtering is split into two layers:
+  - _AMOUNT_RE  : regex patterns for monetary amounts — hardcoded, always active
+  - _KEYWORD_RE : compiled from the plain-text keyword list — configurable at runtime
+                  via system_settings.INBOX_KEYWORDS_KEY (editable in dashboard)
+                  Falls back to DEFAULT_PLAIN_KEYWORDS when no DB setting exists.
 """
 
 import re
 
-# Keywords that indicate a financial email body
-PAYMENT_KEYWORDS: list[str] = [
-    # Generic
-    "invoice", "receipt", "payment", "paid", "billing", "statement",
-    "transaction", "transfer", "wire transfer", "bank transfer",
-    "order confirmation", "purchase",
-    # Portuguese
-    "fatura", "recibo", "pagamento", "pago", "transferência", "mbway",
-    "multibanco", "referência de pagamento", "comprovativo",
-    "débito", "crédito", "extrato", "liquidação",
-    # Common amount patterns
-    r"\d+[.,]\d{2}\s*(eur|usd|gbp|€|\$|£)",
-    r"total\s*:?\s*\d",
-    r"amount\s*:?\s*\d",
-    r"valor\s*:?\s*\d",
-]
-
-_KEYWORD_RE = re.compile(
-    "|".join(PAYMENT_KEYWORDS),
+# ── Amount patterns — hardcoded, never user-editable ──────────────────────────
+# These catch price patterns (e.g. "12,50 EUR", "total: 99") regardless of
+# whatever keyword list is active.
+_AMOUNT_RE = re.compile(
+    r"\d+[.,]\d{2}\s*(eur|usd|gbp|€|\$|£)"
+    r"|total\s*:?\s*\d"
+    r"|amount\s*:?\s*\d"
+    r"|valor\s*:?\s*\d",
     re.IGNORECASE | re.UNICODE,
 )
 
@@ -47,6 +42,29 @@ _MARKETING_RE = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
+# ── Plain-text keywords — configurable via dashboard ──────────────────────────
+# Imported here so detector.py can build the default regex without a DB call,
+# and so the dashboard can reference the same canonical list.
+from app.core.system_settings import DEFAULT_PLAIN_KEYWORDS
+
+
+def build_keyword_re(keywords: list[str]) -> re.Pattern:
+    """Compile a case-insensitive OR-regex from a list of plain-text keywords.
+
+    Each keyword is re.escape'd so no special regex characters leak through.
+    Returns a never-matching pattern when the list is empty.
+    """
+    escaped = [re.escape(kw.strip()) for kw in keywords if kw and kw.strip()]
+    if not escaped:
+        return re.compile(r"(?!)")   # never matches
+    return re.compile("|".join(escaped), re.IGNORECASE | re.UNICODE)
+
+
+# Default compiled regex — used when the IMAP worker has no DB-loaded override
+_KEYWORD_RE: re.Pattern = build_keyword_re(DEFAULT_PLAIN_KEYWORDS)
+
+
+# ── Public helpers ─────────────────────────────────────────────────────────────
 
 def has_pdf_attachments(parsed_email: dict) -> bool:
     """Return True if the email has at least one PDF attachment."""
@@ -63,7 +81,6 @@ def is_marketing_email(parsed_email: dict) -> bool:
     Return True if the email looks like a newsletter or marketing message.
     Checks both the List-Unsubscribe header and body text.
     """
-    # Check headers (imap parser may expose them as a dict)
     headers: dict = parsed_email.get("headers") or {}
     if headers.get("list-unsubscribe") or headers.get("List-Unsubscribe"):
         return True
@@ -75,18 +92,35 @@ def is_marketing_email(parsed_email: dict) -> bool:
     return bool(_MARKETING_RE.search(text))
 
 
-def has_financial_keywords(parsed_email: dict) -> bool:
-    """Return True if the email body contains payment/invoice keywords."""
+def has_financial_keywords(
+    parsed_email: dict,
+    keyword_re: re.Pattern | None = None,
+) -> bool:
+    """Return True if the email body/subject contains payment/invoice signals.
+
+    Checks two layers:
+      1. _AMOUNT_RE  — hardcoded monetary-amount patterns (always active)
+      2. keyword_re  — plain-text keyword list; uses module default if not given
+    """
     text = " ".join(filter(None, [
         parsed_email.get("subject") or "",
         parsed_email.get("body_text") or "",
     ]))
-    return bool(_KEYWORD_RE.search(text))
+    active_kw_re = keyword_re if keyword_re is not None else _KEYWORD_RE
+    return bool(_AMOUNT_RE.search(text)) or bool(active_kw_re.search(text))
 
 
-def classify_email(parsed_email: dict) -> str | None:
+def classify_email(
+    parsed_email: dict,
+    keyword_re: re.Pattern | None = None,
+) -> str | None:
     """
     Classify an email for the invoice-worker.
+
+    Args:
+        parsed_email: dict from app.ingestion.parser.parse_email
+        keyword_re:   compiled regex built from the active keyword list;
+                      pass None to use the module-level default.
 
     Returns:
       "pdf_invoice"   — has PDF attachment(s) → extract via tool server
@@ -97,6 +131,6 @@ def classify_email(parsed_email: dict) -> str | None:
         return "pdf_invoice"
     if is_marketing_email(parsed_email):
         return None
-    if has_financial_keywords(parsed_email):
+    if has_financial_keywords(parsed_email, keyword_re):
         return "financial_body"
     return None

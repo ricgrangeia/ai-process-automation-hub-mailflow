@@ -16,7 +16,7 @@ from app.messages.storage import save_raw_email, save_attachment
 from app.processing.queue import enqueue_email_job, enqueue_invoice_job
 from app.ingestion.parser import parse_email
 from app.ingestion.imap.client import connect_imap, fetch_unseen_raw_messages, mark_seen
-from app.invoice_worker.detector import classify_email as classify_financial
+from app.invoice_worker.detector import classify_email as classify_financial, build_keyword_re
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ logger = logging.getLogger("imap-worker")
 # ─────────────────────────────────────────────────────────────────────────────
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
-async def process_account_once(settings, session_factory, r, acc: EmailAccount):
+async def process_account_once(settings, session_factory, r, acc: EmailAccount, keyword_re=None):
 
     if acc.provider != "imap":
         return
@@ -92,7 +92,7 @@ async def process_account_once(settings, session_factory, r, acc: EmailAccount):
             # Non-financial emails on invoice accounts are left completely
             # untouched (unread, unmoved, not stored) — intentional behaviour.
             if managed_by == "invoice_worker":
-                classification = classify_financial(parsed)
+                classification = classify_financial(parsed, keyword_re=keyword_re)
                 if classification is None:
                     logger.info(
                         f"[{acc.username}] UID {uid} — not financial, leaving untouched"
@@ -185,6 +185,14 @@ async def worker_loop():
         try:
             logger.info("Polling cycle started.")
 
+            # Load the active keyword list from system_settings once per cycle.
+            # This is a sync DB call; run it in a thread to avoid blocking.
+            from app.core.system_settings import get_inbox_keywords
+            db_url = settings.database_url.replace("+asyncpg", "")
+            keywords = await asyncio.to_thread(get_inbox_keywords, db_url)
+            keyword_re = build_keyword_re(keywords)
+            logger.info(f"Inbox filter: {len(keywords)} keyword(s) active.")
+
             async with session_factory() as session:
                 res = await session.execute(
                     select(EmailAccount).where(
@@ -201,7 +209,9 @@ async def worker_loop():
 
             async def _run(acc):
                 async with sem:
-                    await process_account_once(settings, session_factory, r, acc)
+                    await process_account_once(
+                        settings, session_factory, r, acc, keyword_re=keyword_re
+                    )
 
             await asyncio.gather(*[_run(a) for a in accounts])
 
