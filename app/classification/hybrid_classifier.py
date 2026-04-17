@@ -41,7 +41,17 @@ class HybridClassifier:
                 return llm_result
 
             else:
-                # Conflict — rule and model disagree, escalate to human
+                # Conflict — rule and model disagree.
+                # Special case: if the LLM says "Outros" / "Others" with high
+                # confidence the rule is too broad for this specific email
+                # (e.g. a marketing email from a sender that normally sends
+                # invoices). Trust the AI silently — no human review needed.
+                if llm_result.folder in ("Outros", "Others") and llm_result.confidence >= 0.75:
+                    llm_result.source = "llm"
+                    return llm_result
+
+                # For genuine folder conflicts (rule says A, LLM says B where
+                # B is a real destination folder), escalate to human.
                 conflict = ClassificationResult("NeedsReview", llm_result.confidence)
                 conflict.source = "rule_conflict"
                 conflict.rule_folder = rule_result.folder

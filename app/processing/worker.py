@@ -169,10 +169,9 @@ async def _try_invoice_qr(email, settings, session_factory) -> None:
 
 async def _auto_save_rule(session_factory, email, folder: str, confidence: float) -> None:
     """
-    Auto-save a high-confidence LLM decision as an ai_auto learned rule.
-    Skips generic domains, never overwrites human rules.
+    Auto-save a high-confidence LLM decision as a learned rule (sender_domain condition).
+    Skips generic domains, never overwrites existing rules for the same domain.
     """
-    from sqlalchemy import select, insert
     from app.classification.learned_rules import LearnedRule
 
     domain = None
@@ -183,36 +182,31 @@ async def _auto_save_rule(session_factory, email, folder: str, confidence: float
         logger.debug(f"Auto-learn: skipping generic/missing domain for email {email.id}")
         return
 
+    target_condition = {"type": "sender_domain", "value": domain}
+
     try:
         async with session_factory() as session:
-            # Check if a human rule already exists for this domain+folder combo
-            existing = await session.execute(
+            # Check if any active rule already covers this domain
+            all_rules = (await session.execute(
                 select(LearnedRule).where(
                     LearnedRule.active == True,
                     LearnedRule.tenant_id == email.tenant_id,
-                    LearnedRule.match_field == "sender_domain",
-                    LearnedRule.match_value == domain,
                 )
-            )
-            existing_rule = existing.scalar_one_or_none()
+            )).scalars().all()
 
-            if existing_rule:
-                if existing_rule.source == "human":
-                    logger.debug(f"Auto-learn: human rule already exists for {domain}, skipping.")
-                    return
-                # ai_auto rule exists — update its hit_count but don't duplicate
-                existing_rule.hit_count += 1
-                await session.commit()
-                return
+            for rule in all_rules:
+                for cond in (rule.conditions or []):
+                    if cond.get("type") == "sender_domain" and cond.get("value", "").lower() == domain:
+                        logger.debug(f"Auto-learn: rule already exists for domain {domain}, skipping.")
+                        return
 
-            # Insert new ai_auto rule
+            # Insert new rule using current structured conditions format
             new_rule = LearnedRule(
                 tenant_id=email.tenant_id,
-                match_field="sender_domain",
-                match_value=domain,
+                conditions=[target_condition],
+                min_match=1,
                 actions=[{"type": "move_folder", "folder": folder}],
                 created_from_email_id=email.id,
-                source="ai_auto",
             )
             session.add(new_rule)
             await session.commit()
