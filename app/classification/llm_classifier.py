@@ -1,9 +1,12 @@
 import json
 import logging
+import re
 import time
 import httpx
 from .contracts import ClassificationResult
 from app.core.i18n import t
+
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 logger = logging.getLogger("llm-classifier")
 
@@ -41,7 +44,7 @@ class LLMClassifier:
                         hint_block=hint_block,
                         from_address=email.from_address,
                         subject=email.subject,
-                        body=(email.body_text or "")[:1500],
+                        body=_URL_RE.sub("[url]", (email.body_text or "")[:1500]),
                     ),
                 }
             ],

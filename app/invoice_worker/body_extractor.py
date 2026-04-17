@@ -10,9 +10,12 @@ Returns a dict compatible with the Invoice model (same field names).
 
 import json
 import logging
+import re
 from pathlib import Path
 
 import httpx
+
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 logger = logging.getLogger("invoice_worker.body_extractor")
 
@@ -53,7 +56,7 @@ async def extract_financial_from_body(
     prompt_template = _load_prompt("prompt.invoice.body.txt", language)
     prompt = prompt_template.format(
         subject=subject or "(no subject)",
-        body=body_text or "(empty)",
+        body=_URL_RE.sub("[url]", body_text or "(empty)"),
     )
 
     headers = {"Content-Type": "application/json"}
