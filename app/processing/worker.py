@@ -169,24 +169,21 @@ async def _try_invoice_qr(email, settings, session_factory) -> None:
 
 async def _auto_save_rule(session_factory, email, folder: str, confidence: float) -> None:
     """
-    Auto-save a high-confidence LLM decision as a learned rule (sender_domain condition).
-    Skips generic domains, never overwrites existing rules for the same domain.
+    Auto-save a high-confidence LLM decision as a learned rule (sender_email condition).
+    Rules are always scoped to the exact sender address — never to the domain.
+    Skips if a rule for this exact address already exists.
     """
     from app.classification.learned_rules import LearnedRule
 
-    domain = None
-    if email.from_address and "@" in email.from_address:
-        domain = email.from_address.split("@")[-1].lower()
-
-    if not domain or domain in GENERIC_DOMAINS:
-        logger.debug(f"Auto-learn: skipping generic/missing domain for email {email.id}")
+    if not email.from_address:
+        logger.debug(f"Auto-learn: no from_address on email {email.id}, skipping.")
         return
 
-    target_condition = {"type": "sender_domain", "value": domain}
+    sender = email.from_address.lower()
 
     try:
         async with session_factory() as session:
-            # Check if any active rule already covers this domain
+            # Check if any active rule already covers this exact sender email
             all_rules = (await session.execute(
                 select(LearnedRule).where(
                     LearnedRule.active == True,
@@ -196,21 +193,21 @@ async def _auto_save_rule(session_factory, email, folder: str, confidence: float
 
             for rule in all_rules:
                 for cond in (rule.conditions or []):
-                    if cond.get("type") == "sender_domain" and cond.get("value", "").lower() == domain:
-                        logger.debug(f"Auto-learn: rule already exists for domain {domain}, skipping.")
+                    if cond.get("type") == "sender_email" and cond.get("value", "").lower() == sender:
+                        logger.debug(f"Auto-learn: rule already exists for {sender}, skipping.")
                         return
 
-            # Insert new rule using current structured conditions format
+            # Insert new rule scoped to the exact sender address
             new_rule = LearnedRule(
                 tenant_id=email.tenant_id,
-                conditions=[target_condition],
+                conditions=[{"type": "sender_email", "value": sender}],
                 min_match=1,
                 actions=[{"type": "move_folder", "folder": folder}],
                 created_from_email_id=email.id,
             )
             session.add(new_rule)
             await session.commit()
-            logger.info(f"🤖 Auto-saved rule: sender_domain={domain} → {folder} (confidence={confidence:.2f})")
+            logger.info(f"🤖 Auto-saved rule: sender_email={sender} → {folder} (confidence={confidence:.2f})")
 
     except Exception as e:
         logger.warning(f"Auto-learn rule save failed: {e}")
