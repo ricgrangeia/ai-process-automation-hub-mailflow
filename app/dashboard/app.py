@@ -1804,17 +1804,33 @@ def page_settings(engine):
         if not current_kws:
             st.warning(t("page.settings.keywords_none"))
         else:
-            # Render each keyword as a labelled remove-button row
-            for i, kw in enumerate(current_kws):
-                col_kw, col_del = st.columns([9, 1])
-                col_kw.markdown(f"`{kw}`")
-                if col_del.button("✕", key=f"del_kw_{i}", help=f"Remove '{kw}'"):
-                    updated = [k for k in current_kws if k != kw]
-                    set_inbox_keywords(engine, updated)
+            st.caption(t("page.settings.keywords_pills_hint"))
+            # st.pills returns the currently-selected subset; deselecting = marking for removal
+            remaining = st.pills(
+                label="keywords",
+                options=current_kws,
+                default=current_kws,
+                selection_mode="multi",
+                label_visibility="collapsed",
+                key="kw_pills",
+            )
+            removed = set(current_kws) - set(remaining or [])
+            if removed:
+                removed_list = ", ".join(f"`{k}`" for k in sorted(removed))
+                col_apply, col_cancel = st.columns([3, 1])
+                if col_apply.button(
+                    t("page.settings.keywords_remove_btn", n=len(removed)),
+                    type="primary",
+                    key="btn_kw_apply",
+                ):
+                    set_inbox_keywords(engine, [k for k in current_kws if k not in removed])
                     _set_flash("success", t("page.settings.keywords_saved"))
                     st.rerun()
+                if col_cancel.button(t("page.settings.keywords_cancel"), key="btn_kw_cancel"):
+                    st.rerun()
+                st.caption(f"Will remove: {removed_list}")
 
-        # Add new keyword
+        # Add new keyword + reset
         with st.form("add_keyword_form", clear_on_submit=True):
             new_kw = st.text_input(
                 t("page.settings.keywords_add_label"),
@@ -1985,6 +2001,65 @@ def page_settings(engine):
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ Re-process failed: {e}")
+
+    # ── 🗑️ Full Data Reset ────────────────────────────────────────────────────
+    st.divider()
+    st.subheader(t("page.settings.full_reset_header"))
+    st.caption(t("page.settings.full_reset_caption"))
+
+    # Two-step confirmation: first click expands the form, second click executes.
+    if not st.session_state.get("_full_reset_open"):
+        if st.button(t("page.settings.full_reset_btn"), type="secondary", key="btn_full_reset_open"):
+            st.session_state["_full_reset_open"] = True
+            st.rerun()
+    else:
+        with st.form("full_reset_confirm_form", clear_on_submit=True):
+            st.warning(
+                "⚠️ This will permanently delete:\n"
+                "- All emails and attachments\n"
+                "- All extracted invoices\n"
+                "- All learned classification rules\n"
+                "- The seller / NIF cache\n\n"
+                "**Accounts, companies, folders and keyword settings will NOT be touched.**"
+            )
+            confirm_text = st.text_input(
+                t("page.settings.full_reset_confirm_label"),
+                placeholder="RESET",
+            )
+            col_confirm, col_cancel = st.columns([2, 1])
+            do_reset = col_confirm.form_submit_button(
+                t("page.settings.full_reset_confirm_btn"), type="primary"
+            )
+            do_cancel = col_cancel.form_submit_button(t("page.settings.full_reset_cancel"))
+
+            if do_cancel:
+                st.session_state.pop("_full_reset_open", None)
+                st.rerun()
+
+            if do_reset:
+                if confirm_text.strip() != "RESET":
+                    st.error(t("page.settings.full_reset_wrong"))
+                else:
+                    try:
+                        # 1 — wipe processing tables (FK-safe order)
+                        with engine.begin() as conn:
+                            conn.execute(text("DELETE FROM invoices"))
+                            conn.execute(text("DELETE FROM attachments"))
+                            conn.execute(text("DELETE FROM emails"))
+                            conn.execute(text("DELETE FROM learned_rules"))
+                            conn.execute(text("DELETE FROM sellers"))
+
+                        # 2 — flush Redis queues so stale jobs don't replay
+                        import redis as _redis_sync
+                        _r = _redis_sync.from_url(settings.redis_url, decode_responses=True)
+                        _r.delete("mailai:jobs:email", "mailai:jobs:invoice")
+                        _r.close()
+
+                        st.session_state.pop("_full_reset_open", None)
+                        _set_flash("success", t("page.settings.full_reset_done"))
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Reset failed: {e}")
 
 
 def page_sellers(engine, settings):
