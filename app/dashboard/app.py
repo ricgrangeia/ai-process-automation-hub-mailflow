@@ -968,6 +968,7 @@ def page_learned_rules(engine, settings):
         st.caption("Conditions — one per line, format `type:value`")
         a_cond_text = st.text_area(
             "Conditions",
+            value="sender_email:invoices@company.pt\nkeyword:fatura\ninvoice_document_type:Fatura",
             placeholder="sender_email:invoices@company.pt\nkeyword:fatura\ninvoice_document_type:Fatura",
             help=(
                 "Types: sender_email, sender_domain, keyword, invoice_document_type\n"
