@@ -187,6 +187,7 @@ async def _extract_invoice_for_conflict(email, settings, session_factory) -> dic
             return {
                 "supplier_name": inv.supplier_name,
                 "invoice_number": inv.invoice_number,
+                "document_type_description": inv.document_type_description,
                 "total_amount": float(inv.total_amount) if inv.total_amount is not None else None,
                 "currency": inv.currency,
                 "atcud": inv.atcud,

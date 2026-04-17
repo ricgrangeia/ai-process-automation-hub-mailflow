@@ -96,6 +96,8 @@ async def send_review_request(
                 inv_lines.append(f"🏢 {invoice_info['supplier_name']}")
             if invoice_info.get("invoice_number"):
                 inv_lines.append(f"📋 Nº: {invoice_info['invoice_number']}")
+            if invoice_info.get("document_type_description"):
+                inv_lines.append(f"📄 Tipo: {invoice_info['document_type_description']}")
             if invoice_info.get("total_amount") is not None:
                 currency = invoice_info.get("currency") or "EUR"
                 inv_lines.append(f"💶 Total: {invoice_info['total_amount']} {currency}")
