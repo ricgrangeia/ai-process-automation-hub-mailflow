@@ -260,6 +260,52 @@ def _extract_keywords(subject: str, body: str, max_keywords: int = 3) -> list[st
     return candidates
 
 
+async def _build_rule_keywords(subject: str, body: str, settings) -> list[str]:
+    """
+    Build the keyword list for a new learned rule by combining two sources:
+
+    1. Inbox filter keywords (the configurable list in dashboard settings) that
+       are actually present in this email — these are the strongest signal
+       because they're the terms that caused the email to be ingested.
+
+    2. Generic keywords extracted from subject/body via _extract_keywords —
+       supplement when the filter list has no overlap.
+
+    Deduplication is applied; filter-keyword matches take priority.
+    Result is capped at 5 keywords total.
+    """
+    import asyncio as _asyncio
+
+    # Load configured inbox filter keywords from DB (sync helper, run in thread)
+    try:
+        from app.core.system_settings import get_inbox_keywords
+        db_url = settings.database_url.replace("+asyncpg", "")
+        filter_kws: list[str] = await _asyncio.to_thread(get_inbox_keywords, db_url)
+    except Exception:
+        filter_kws = []
+
+    text = f"{subject} {body}".lower()
+
+    # Which filter keywords actually appear in this email?
+    matched_filter = [kw for kw in filter_kws if kw.lower() in text]
+
+    # Generic extraction as supplement
+    generic = _extract_keywords(subject, body, max_keywords=3)
+
+    # Merge: filter matches first, then generic, deduplicated
+    seen: set[str] = set()
+    combined: list[str] = []
+    for kw in matched_filter + generic:
+        kw_lower = kw.lower()
+        if kw_lower not in seen:
+            seen.add(kw_lower)
+            combined.append(kw_lower)
+        if len(combined) == 5:
+            break
+
+    return combined
+
+
 async def _save_rule(
     session_factory,
     email,
@@ -419,7 +465,7 @@ async def handle_classify(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     qr_info      = await _try_invoice_qr_bot(email, folder, email_id, settings, session_factory) if move_success else ""
     sender_email = (email.from_address or "").lower()
-    keywords     = _extract_keywords(email.subject or "", email.body_text or "")
+    keywords     = await _build_rule_keywords(email.subject or "", email.body_text or "", settings)
     chat_id      = query.message.chat_id
 
     if move_success:
@@ -1155,7 +1201,7 @@ async def handle_rv_set_folder(update: Update, context: ContextTypes.DEFAULT_TYP
     )
     qr_info      = await _try_invoice_qr_bot(email, folder, email_id, settings2, session_factory2)
     sender_email = (email.from_address or "").lower()
-    keywords     = _extract_keywords(email.subject or "", email.body_text or "")
+    keywords     = await _build_rule_keywords(email.subject or "", email.body_text or "", settings2)
     chat_id      = query.message.chat_id
     await _send_rule_card(query, chat_id, email_id, folder, keywords, sender_email, qr_info)
 
@@ -1377,7 +1423,7 @@ async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # the review gate — but only when subject/body also match the same keywords,
     # so a newsletter from the same sender doesn't get auto-moved.
     if email.from_address:
-        keywords = _extract_keywords(email.subject or "", email.body_text or "")
+        keywords = await _build_rule_keywords(email.subject or "", email.body_text or "", settings)
         sender_email = email.from_address.lower()
         conditions = [{"type": "sender_email", "value": sender_email}]
         for kw in keywords:
