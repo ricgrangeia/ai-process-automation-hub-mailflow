@@ -2110,10 +2110,14 @@ def page_settings(engine):
                             conn.execute(text("DELETE FROM learned_rules"))
                             conn.execute(text("DELETE FROM sellers"))
 
-                        # 2 — flush Redis queues so stale jobs don't replay
+                        # 2 — flush Redis queues + skip sets so stale jobs don't replay
                         import redis as _redis_sync
                         _r = _redis_sync.from_url(settings.redis_url, decode_responses=True)
                         _r.delete("mailai:jobs:email", "mailai:jobs:invoice")
+                        # Clear per-account non-financial skip sets so the IMAP worker
+                        # re-evaluates every UNSEEN message from scratch.
+                        for _sk in _r.scan_iter("mailai:skipped:*"):
+                            _r.delete(_sk)
                         _r.close()
 
                         from app.core.audit import log_audit_sync

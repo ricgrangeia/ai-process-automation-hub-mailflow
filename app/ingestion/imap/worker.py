@@ -15,7 +15,7 @@ from app.messages.models import EmailMessage, Attachment
 from app.messages.storage import save_raw_email, save_attachment
 from app.processing.queue import enqueue_email_job, enqueue_invoice_job
 from app.ingestion.parser import parse_email
-from app.ingestion.imap.client import connect_imap, fetch_unseen_raw_messages, mark_seen
+from app.ingestion.imap.client import connect_imap, list_unseen_uids, fetch_messages_by_uids, mark_seen
 from app.invoice_worker.detector import classify_email as classify_financial, build_keyword_re
 
 
@@ -49,27 +49,47 @@ async def process_account_once(settings, session_factory, r, acc: EmailAccount, 
 
     password = decrypt_secret(settings.master_key, acc.password_encrypted)
 
+    # Redis key that tracks UIDs already inspected and found non-financial.
+    # Prevents non-financial emails from blocking the batch every cycle.
+    _skip_key = f"mailai:skipped:{acc.id}"
+
     def _fetch():
         conn = connect_imap(acc.imap_host, acc.imap_port or 993, acc.username, password)
         try:
-            messages = list(fetch_unseen_raw_messages(
-                conn, settings.inbox_folder, settings.max_unseen_per_cycle
-            ))
-            return messages, conn
+            all_uids = list_unseen_uids(conn, settings.inbox_folder)
+            return all_uids, conn
         except Exception:
             conn.logout()
             raise
 
     try:
-        messages, conn = await asyncio.to_thread(_fetch)
+        all_uids, conn = await asyncio.to_thread(_fetch)
     except Exception as e:
         logger.error(f"[{acc.username}] IMAP connection failed: {e}")
         raise
 
-    if not messages:
+    if not all_uids:
         logger.info(f"[{acc.username}] No new messages.")
         return
 
+    # Filter out UIDs already inspected and found non-financial this session.
+    skipped = await r.smembers(_skip_key)
+    pending_uids = [uid for uid in all_uids if uid not in skipped]
+
+    if not pending_uids:
+        logger.info(f"[{acc.username}] No new messages (all {len(all_uids)} UNSEEN already inspected).")
+        return
+
+    batch_uids = pending_uids[:settings.max_unseen_per_cycle]
+    logger.info(
+        f"[{acc.username}] {len(all_uids)} UNSEEN total, "
+        f"{len(pending_uids)} pending, fetching {len(batch_uids)}."
+    )
+
+    def _fetch_batch():
+        return list(fetch_messages_by_uids(conn, settings.inbox_folder, batch_uids))
+
+    messages = await asyncio.to_thread(_fetch_batch)
     logger.info(f"[{acc.username}] Fetched {len(messages)} message(s).")
 
     async with session_factory() as session:
@@ -97,6 +117,8 @@ async def process_account_once(settings, session_factory, r, acc: EmailAccount, 
                     logger.info(
                         f"[{acc.username}] UID {uid} — not financial, leaving untouched"
                     )
+                    # Remember this UID so it doesn't block the batch next cycle.
+                    await r.sadd(_skip_key, uid)
                     continue  # do NOT mark seen, do NOT store, do NOT enqueue
             else:
                 classification = None  # ai-worker: no pre-filter needed

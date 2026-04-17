@@ -40,6 +40,32 @@ def connect_imap(host: str, port: int, username: str, password: str):
 # Fetch messages
 # ------------------------------------------------------------------------------
 
+def list_unseen_uids(conn, folder: str) -> list[str]:
+    """Return all UNSEEN UIDs in the folder without fetching message bodies."""
+    conn.select(folder, readonly=True)
+    status, data = conn.uid("search", None, "UNSEEN")
+    if status != "OK":
+        logger.warning("Failed to search UNSEEN messages.")
+        return []
+    raw = (data[0] or b"").split()
+    return [uid_b.decode() for uid_b in raw]
+
+
+def fetch_messages_by_uids(
+    conn,
+    folder: str,
+    uids: list[str],
+) -> Iterable[Tuple[str, bytes, str]]:
+    """Fetch raw RFC822 bytes for a specific list of UIDs."""
+    conn.select(folder, readonly=True)
+    for uid in uids:
+        status, msg_data = conn.uid("fetch", uid, "(RFC822)")
+        if status != "OK":
+            continue
+        raw = msg_data[0][1]
+        yield uid, raw, uid
+
+
 def fetch_unseen_raw_messages(
     conn,
     folder: str,
