@@ -1373,13 +1373,26 @@ async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Move email
     move_ok = await _do_move(settings, email, account, target_folder)
 
-    # Auto-create sender rule so future invoices from this sender bypass the review gate
+    # Auto-create sender+keyword rule so future invoices from this sender bypass
+    # the review gate — but only when subject/body also match the same keywords,
+    # so a newsletter from the same sender doesn't get auto-moved.
     if email.from_address:
+        keywords = _extract_keywords(email.subject or "", email.body_text or "")
+        sender_email = email.from_address.lower()
+        conditions = [{"type": "sender_email", "value": sender_email}]
+        for kw in keywords:
+            conditions.append({"type": "keyword", "value": kw.lower()})
+        min_match = 1 if not keywords else 2  # sender + at least 1 keyword
         await _save_rule(
             session_factory, email, target_folder,
             actions=[{"type": "move_folder", "folder": target_folder}],
+            conditions=conditions,
+            min_match=min_match,
         )
-        logger.info(f"Auto-created sender rule for {email.from_address!r} → {target_folder}")
+        logger.info(
+            f"Auto-created rule for {email.from_address!r} → {target_folder} "
+            f"(conditions={len(conditions)}, min_match={min_match})"
+        )
 
     # Finalize email status
     async with session_factory() as session:

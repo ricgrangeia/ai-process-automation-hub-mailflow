@@ -280,16 +280,24 @@ async def _finalize_email(
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _is_trusted_sender(session_factory, email_row: EmailMessage) -> bool:
-    """Return True if this sender already has a learned rule (sender_email condition).
+    """Return True if this email fully satisfies a learned rule for this sender.
 
-    A rule is created automatically the first time a human approves an invoice
-    from a new sender.  Its presence means: "I've seen this sender before and
-    confirmed it is legitimate — process without asking again."
+    Rules now include keyword conditions alongside sender_email, so the same
+    sender can have multiple rules for different email types (invoice vs promo).
+    We use the same min_match logic as the rule classifier — first rule that
+    meets its threshold wins.
     """
     if not email_row.from_address:
         return False
-    sender = email_row.from_address.lower()
+
     from app.classification.learned_rules import LearnedRule
+    from app.classification.rule_classifier import _condition_matches
+
+    sender = email_row.from_address.lower()
+    domain = sender.split("@")[-1] if "@" in sender else ""
+    subject = (email_row.subject or "").lower()
+    body    = (email_row.body_text or "").lower()
+
     async with session_factory() as session:
         result = await session.execute(
             select(LearnedRule).where(
@@ -298,9 +306,24 @@ async def _is_trusted_sender(session_factory, email_row: EmailMessage) -> bool:
             )
         )
         for rule in result.scalars():
-            for cond in (rule.conditions or []):
-                if cond.get("type") == "sender_email" and cond.get("value", "").lower() == sender:
-                    return True
+            conditions = rule.conditions or []
+            if not conditions:
+                continue
+            # Rule must have a sender_email condition matching this sender
+            has_sender_cond = any(
+                c.get("type") == "sender_email" and c.get("value", "").lower() == sender
+                for c in conditions
+            )
+            if not has_sender_cond:
+                continue
+            # Evaluate full rule (sender + keywords) with min_match threshold
+            min_match = rule.min_match or 1
+            matched = sum(
+                1 for c in conditions
+                if _condition_matches(c, sender, domain, subject, body)
+            )
+            if matched >= min_match:
+                return True
     return False
 
 
