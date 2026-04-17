@@ -111,27 +111,32 @@ def mark_seen(conn, folder: str, uid: str):
 # ------------------------------------------------------------------------------
 
 def move_message(conn, source_folder: str, target_folder: str, uid: str):
-
     sep = _get_imap_separator(conn)
     target_imap = _normalize_folder(target_folder, sep)
 
     ensure_folder_exists(conn, target_folder)
 
     status, _ = conn.select(source_folder)
-
     if status != "OK":
         raise Exception(f"Failed to select folder {source_folder}")
 
-    result = conn.uid("COPY", uid, target_imap)
+    # Check if the server supports the MOVE capability
+    capabilities = conn.capabilities
+    if b"MOVE" in capabilities:
+        # The MOVE command automatically handles the copy and removal from source
+        result = conn.uid("MOVE", uid, target_imap)
+    else:
+        # Fallback for older servers
+        result = conn.uid("COPY", uid, target_imap)
+        if result[0] == "OK":
+            conn.uid("STORE", uid, "+FLAGS", r"(\Deleted)")
+            conn.expunge()
 
     if result[0] != "OK":
-        logger.error(f"IMAP COPY failed: {result}")
-        raise Exception(f"Failed to copy UID {uid}")
+        logger.error(f"IMAP MOVE/COPY failed: {result}")
+        raise Exception(f"Failed to move UID {uid}")
 
-    conn.uid("STORE", uid, "+FLAGS", r"(\Deleted)")
-    conn.expunge()
-
-    logger.info(f"Moved UID {uid} → {target_imap}")
+    logger.info(f"Moved UID {uid} from {source_folder} to {target_imap}")
 
 
 # ------------------------------------------------------------------------------
