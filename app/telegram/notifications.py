@@ -40,6 +40,7 @@ async def send_review_request(
     llm_folder: str | None = None,
     folders: list[str] | None = None,
     suggested_folder: str | None = None,
+    invoice_info: dict | None = None,
 ) -> bool:
     """
     Sends an inline-button message asking the user to classify the email.
@@ -87,6 +88,25 @@ async def send_review_request(
             llm_folder=llm_folder,
             confidence=confidence_pct,
         )
+
+        # Append extracted invoice data if available
+        if invoice_info:
+            inv_lines = []
+            if invoice_info.get("supplier_name"):
+                inv_lines.append(f"🏢 {invoice_info['supplier_name']}")
+            if invoice_info.get("invoice_number"):
+                inv_lines.append(f"📋 Nº: {invoice_info['invoice_number']}")
+            if invoice_info.get("total_amount") is not None:
+                currency = invoice_info.get("currency") or "EUR"
+                inv_lines.append(f"💶 Total: {invoice_info['total_amount']} {currency}")
+            atcud = invoice_info.get("atcud")
+            if atcud:
+                inv_lines.append(f"✅ ATCUD: `{atcud}`")
+            else:
+                inv_lines.append("⚠️ ATCUD: não encontrado")
+            if inv_lines:
+                text += "\n\n" + "\n".join(inv_lines)
+
         conflict_rows = [
             [{"text": t("telegram.notifications.conflict_rule_btn", folder=rule_folder),   "callback_data": f"classify:{email_id}:{rule_folder}"}],
             [{"text": t("telegram.notifications.conflict_ai_btn",   folder=llm_folder, confidence=confidence_pct), "callback_data": f"classify:{email_id}:{llm_folder}"}],

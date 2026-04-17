@@ -167,6 +167,53 @@ async def _try_invoice_qr(email, settings, session_factory) -> None:
             break
 
 
+async def _extract_invoice_for_conflict(email, settings, session_factory) -> dict | None:
+    """
+    For rule-conflict emails with PDF attachments: try to extract invoice data
+    (supplier, number, total, ATCUD) so it can be shown on the Telegram conflict card.
+
+    Returns a dict with the extracted fields, or None if extraction failed / no PDFs.
+    Reuses an existing Invoice record if one was already saved for this email.
+    """
+    try:
+        # Check if invoice was already extracted (e.g. by a previous cycle)
+        from app.invoices.models import Invoice
+        from sqlalchemy import select as _select
+        async with session_factory() as s:
+            inv = (await s.execute(
+                _select(Invoice).where(Invoice.email_id == email.id)
+            )).scalar_one_or_none()
+        if inv:
+            return {
+                "supplier_name": inv.supplier_name,
+                "invoice_number": inv.invoice_number,
+                "total_amount": float(inv.total_amount) if inv.total_amount is not None else None,
+                "currency": inv.currency,
+                "atcud": inv.atcud,
+                "invoice_origin": inv.invoice_origin,
+            }
+
+        # No existing record — try to extract from PDF
+        if not getattr(settings, "tool_server_url", None) or not email.raw_path:
+            return None
+
+        from pathlib import Path as _Path
+        from app.invoices.service import save_invoice_from_pdf
+
+        att_dir = _Path(email.raw_path).parent / "attachments"
+        pdfs = list(att_dir.glob("*.pdf")) if att_dir.exists() else []
+        for pdf in pdfs:
+            result = await save_invoice_from_pdf(session_factory, email.id, pdf, settings)
+            if result:
+                logger.info(f"Invoice extracted for conflict card: email {email.id} from {pdf.name}")
+                return result
+
+    except Exception as e:
+        logger.warning(f"Invoice extraction for conflict card failed (email {email.id}): {e}")
+
+    return None
+
+
 async def _auto_save_rule(session_factory, email, folder: str, confidence: float) -> None:
     """
     Auto-save a high-confidence LLM decision as a learned rule (sender_email condition).
@@ -361,6 +408,12 @@ async def ai_worker_loop():
 
             # 5️⃣ NeedsReview → delegate to human via Telegram
             if folder == "NeedsReview" and settings.telegram_bot_token and settings.telegram_chat_id:
+                # For rule conflicts with PDF attachments, try to extract invoice
+                # data (ATCUD, supplier, total) to show on the conflict card.
+                invoice_info = None
+                if source == "rule_conflict":
+                    invoice_info = await _extract_invoice_for_conflict(email, settings, session_factory)
+
                 sent = await send_review_request(
                     bot_token=settings.telegram_bot_token,
                     chat_id=settings.telegram_chat_id,
@@ -373,6 +426,7 @@ async def ai_worker_loop():
                     llm_folder=getattr(classification, 'llm_folder', None),
                     folders=active_folders,
                     suggested_folder=getattr(classification, 'suggested_folder', None),
+                    invoice_info=invoice_info,
                 )
                 if sent:
                     async with session_factory() as s:
