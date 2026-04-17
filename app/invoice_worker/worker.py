@@ -276,6 +276,115 @@ async def _finalize_email(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Trusted-sender check
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _is_trusted_sender(session_factory, email_row: EmailMessage) -> bool:
+    """Return True if this sender already has a learned rule (sender_email condition).
+
+    A rule is created automatically the first time a human approves an invoice
+    from a new sender.  Its presence means: "I've seen this sender before and
+    confirmed it is legitimate — process without asking again."
+    """
+    if not email_row.from_address:
+        return False
+    sender = email_row.from_address.lower()
+    from app.classification.learned_rules import LearnedRule
+    async with session_factory() as session:
+        result = await session.execute(
+            select(LearnedRule).where(
+                LearnedRule.tenant_id == email_row.tenant_id,
+                LearnedRule.active == True,
+            )
+        )
+        for rule in result.scalars():
+            for cond in (rule.conditions or []):
+                if cond.get("type") == "sender_email" and cond.get("value", "").lower() == sender:
+                    return True
+    return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Invoice review card (Telegram — Approve / Reject buttons)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _send_invoice_review_card(
+    bot_token: str,
+    chat_id: str,
+    email_row: EmailMessage,
+    invoice_data: dict,
+    target_folder: str,
+) -> None:
+    """Send a Telegram card with extracted invoice data and Approve / Reject buttons."""
+    if not bot_token or not chat_id:
+        return
+
+    parts = [
+        "🧾 *New Invoice — Approval Required*",
+        "",
+        f"📧 {email_row.from_address or '?'}",
+    ]
+    if email_row.subject:
+        parts.append(f"📋 {email_row.subject}")
+    parts.append("─────────────────")
+    if invoice_data.get("seller_name"):
+        parts.append(f"🏪 {invoice_data['seller_name']}")
+    if invoice_data.get("nif_seller"):
+        parts.append(f"🪪 NIF: `{invoice_data['nif_seller']}`")
+    if invoice_data.get("invoice_number"):
+        doc_desc = invoice_data.get("document_type_description") or invoice_data.get("document_type", "")
+        num_line = f"📄 `{invoice_data['invoice_number']}`"
+        if doc_desc:
+            num_line += f" ({doc_desc})"
+        parts.append(num_line)
+    if invoice_data.get("invoice_date"):
+        parts.append(f"📅 {invoice_data['invoice_date']}")
+    if invoice_data.get("total_amount") is not None:
+        currency = invoice_data.get("currency") or "EUR"
+        parts.append(f"💶 Total: *{invoice_data['total_amount']} {currency}*")
+    if invoice_data.get("atcud"):
+        parts.append(f"ATCUD: `{invoice_data['atcud']}`")
+    parts.append("─────────────────")
+    parts.append(f"📁 → `{target_folder}`")
+
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "✅ Approve & Move",  "callback_data": f"inv_approve:{email_row.id}"},
+            {"text": "❌ Reject",           "callback_data": f"inv_reject:{email_row.id}"},
+        ]]
+    }
+
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": "\n".join(parts),
+                    "parse_mode": "Markdown",
+                    "reply_markup": keyboard,
+                },
+            )
+        logger.info(f"Sent invoice review card for email {email_row.id}")
+    except Exception as e:
+        logger.warning(f"Telegram invoice review card failed: {e}")
+
+
+async def _set_pending_review(
+    session_factory, email_id: int, target_folder: str
+) -> None:
+    """Mark email as pending_review and store the resolved target folder."""
+    from datetime import datetime, timezone
+    async with session_factory() as session:
+        row = await session.get(EmailMessage, email_id)
+        if row:
+            row.status = "pending_review"
+            row.classification_label = target_folder
+            await session.commit()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Process a single email (loaded from DB by id)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -328,17 +437,33 @@ async def _process_email_by_id(
             return
 
         if _is_confirmed_at(invoice_data):
-            # Full automation: ATCUD present → genuine AT document
-            await _archive_pdfs(email_row, settings, invoice_data)
+            # Genuine AT document (ATCUD present)
             target = _resolve_folder(invoice_data)
-            await _move_email(email_row, acc, settings, target)
-            msg = _build_invoice_message(
-                email_row, invoice_data,
-                invoice_data.get("invoice_origin", "pt_at"),
-                moved_to=target,
-            )
-            await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
-            await _finalize_email(session_factory, email_row.id, target, invoice_data)
+            trusted = await _is_trusted_sender(session_factory, email_row)
+
+            if trusted:
+                # Known sender — act immediately
+                logger.info(f"Email {email_id}: trusted sender — processing immediately")
+                await _archive_pdfs(email_row, settings, invoice_data)
+                await _move_email(email_row, acc, settings, target)
+                msg = _build_invoice_message(
+                    email_row, invoice_data,
+                    invoice_data.get("invoice_origin", "pt_at"),
+                    moved_to=target,
+                )
+                await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
+                await _finalize_email(session_factory, email_row.id, target, invoice_data)
+            else:
+                # New sender — ask for human approval before acting
+                logger.info(
+                    f"Email {email_id}: new sender {email_row.from_address!r} — "
+                    "sending review card, waiting for approval"
+                )
+                await _send_invoice_review_card(
+                    settings.telegram_bot_token, settings.telegram_chat_id,
+                    email_row, invoice_data, target,
+                )
+                await _set_pending_review(session_factory, email_id, target)
         else:
             # No ATCUD → foreign / unknown PDF — notify for manual review, do not move
             logger.warning(

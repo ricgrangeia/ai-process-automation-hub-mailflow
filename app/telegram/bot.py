@@ -1318,6 +1318,146 @@ async def handle_rv_set_sender(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 # ------------------------------------------------------------------------------
+# Invoice worker review handlers: inv_approve:{email_id} / inv_reject:{email_id}
+#
+# These are sent by the invoice worker when it encounters a new (untrusted) sender.
+# On approve: archive PDFs + move + auto-create sender rule + finalize.
+# On reject:  mark email as rejected, leave in inbox, no rule created.
+# ------------------------------------------------------------------------------
+
+async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await _safe_answer(query)
+
+    email_id = int(query.data.split(":")[1])
+    session_factory, settings = get_session_factory()
+
+    async with session_factory() as session:
+        email = (await session.execute(
+            select(EmailMessage).where(EmailMessage.id == email_id)
+        )).scalar_one_or_none()
+        account = (await session.execute(
+            select(EmailAccount).where(EmailAccount.id == email.account_id)
+        )).scalar_one_or_none() if email else None
+
+    if not email or not account:
+        await query.edit_message_text(f"❌ Email {email_id} not found.")
+        return
+
+    # Target folder was stored in classification_label when the review card was sent
+    target_folder = email.classification_label or "Faturas"
+
+    # Load extracted invoice data from DB
+    from app.invoices.models import Invoice
+    async with session_factory() as session:
+        inv_row = (await session.execute(
+            select(Invoice).where(Invoice.email_id == email_id)
+        )).scalar_one_or_none()
+
+    # Convert Invoice model to plain dict (Decimal → float for archive helpers)
+    if inv_row:
+        invoice_data = {}
+        for col in inv_row.__table__.columns:
+            val = getattr(inv_row, col.name)
+            invoice_data[col.name] = float(val) if hasattr(val, "__float__") and val is not None else val
+    else:
+        invoice_data = {}
+
+    # Archive PDFs
+    try:
+        from app.invoice_worker.worker import _archive_pdfs
+        await _archive_pdfs(email, settings, invoice_data)
+    except Exception as e:
+        logger.warning(f"Archive PDFs failed for email {email_id}: {e}")
+
+    # Move email
+    move_ok = await _do_move(settings, email, account, target_folder)
+
+    # Auto-create sender rule so future invoices from this sender bypass the review gate
+    if email.from_address:
+        await _save_rule(
+            session_factory, email, target_folder,
+            actions=[{"type": "move_folder", "folder": target_folder}],
+        )
+        logger.info(f"Auto-created sender rule for {email.from_address!r} → {target_folder}")
+
+    # Finalize email status
+    async with session_factory() as session:
+        await session.execute(
+            sa_update(EmailMessage)
+            .where(EmailMessage.id == email_id)
+            .values(
+                status="moved" if move_ok else "failed_move",
+                processed_at=datetime.now(timezone.utc),
+                ai_source="invoice_worker",
+                sender_type="company",
+            )
+        )
+        await session.commit()
+
+    await log_audit(
+        session_factory,
+        actor_type="telegram",
+        actor_name=_telegram_actor(query.from_user),
+        action="invoice.approved",
+        entity_type="email",
+        entity_id=email_id,
+        tenant_id=getattr(email, "tenant_id", None),
+        details={"folder": target_folder, "move_ok": move_ok},
+    )
+
+    folder_line = f"→ `{target_folder}`" if move_ok else "_(move failed — check IMAP)_"
+    await query.edit_message_text(
+        f"✅ *Approved!*\n\n"
+        f"📧 `{email.from_address}`\n"
+        f"📁 {folder_line}\n\n"
+        f"📚 Sender rule created — future invoices from this address will be processed automatically.",
+        parse_mode="Markdown",
+    )
+
+
+async def handle_inv_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await _safe_answer(query)
+
+    email_id = int(query.data.split(":")[1])
+    session_factory, _ = get_session_factory()
+
+    async with session_factory() as session:
+        email = (await session.execute(
+            select(EmailMessage).where(EmailMessage.id == email_id)
+        )).scalar_one_or_none()
+
+    async with session_factory() as session:
+        await session.execute(
+            sa_update(EmailMessage)
+            .where(EmailMessage.id == email_id)
+            .values(
+                status="rejected",
+                processed_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+    await log_audit(
+        session_factory,
+        actor_type="telegram",
+        actor_name=_telegram_actor(query.from_user),
+        action="invoice.rejected",
+        entity_type="email",
+        entity_id=email_id,
+        tenant_id=getattr(email, "tenant_id", None),
+        details={},
+    )
+
+    sender = (email.from_address or "?") if email else "?"
+    await query.edit_message_text(
+        f"❌ *Rejected*\n\n📧 `{sender}`\n\n_Email left in inbox. No rule created._",
+        parse_mode="Markdown",
+    )
+
+
+# ------------------------------------------------------------------------------
 # Admin commands: /status, /recover, /restart, /learn
 # ------------------------------------------------------------------------------
 
@@ -1789,6 +1929,9 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_rd_path,         pattern=r"^rd_path$"))
     app.add_handler(CallbackQueryHandler(handle_rd_default_path, pattern=r"^rd_default_path$"))
     app.add_handler(CallbackQueryHandler(handle_rd_newfolder,    pattern=r"^rd_newfolder$"))
+    # Invoice worker review callbacks
+    app.add_handler(CallbackQueryHandler(handle_inv_approve, pattern=r"^inv_approve:"))
+    app.add_handler(CallbackQueryHandler(handle_inv_reject,  pattern=r"^inv_reject:"))
     # Review (learning mode) callbacks
     app.add_handler(CallbackQueryHandler(handle_rv_approve,    pattern=r"^rv_approve:"))
     app.add_handler(CallbackQueryHandler(handle_rv_folder,     pattern=r"^rv_folder:"))
