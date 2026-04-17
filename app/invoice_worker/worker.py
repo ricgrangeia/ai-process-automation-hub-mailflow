@@ -557,6 +557,11 @@ async def worker_loop() -> None:
 
             _, payload_str = job
             payload        = json.loads(payload_str)
+
+            if payload.get("type") == "restart":
+                logger.info("🔄 Restart signal received — exiting for Docker to restart.")
+                import sys; sys.exit(0)
+
             email_id       = payload["email_id"]
             classification = payload.get("classification", "pdf_invoice")
 

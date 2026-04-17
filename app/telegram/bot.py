@@ -39,7 +39,7 @@ from app.accounts.models import EmailAccount
 from app.messages.models import EmailMessage
 from app.classification.learned_rules import LearnedRule
 from app.ingestion.imap.client import connect_imap, move_message
-from app.processing.queue import QUEUE_KEY as EMAIL_QUEUE_KEY
+from app.processing.queue import QUEUE_KEY as EMAIL_QUEUE_KEY, INVOICE_QUEUE_KEY
 from app.query.queue import QUERY_QUEUE_KEY, RESULT_KEY_PREFIX
 from app.review.queue import REVIEW_QUEUE_KEY, LEARNING_MODE_KEY
 from app.core.audit import log_audit, _telegram_actor
@@ -1637,6 +1637,7 @@ async def handle_restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await r.lpush(EMAIL_QUEUE_KEY, restart_job)
     await r.lpush(QUERY_QUEUE_KEY, restart_job)
     await r.lpush(REVIEW_QUEUE_KEY, restart_job)
+    await r.lpush(INVOICE_QUEUE_KEY, restart_job)
     await r.aclose()
 
     session_factory, _ = get_session_factory()
@@ -1646,11 +1647,11 @@ async def handle_restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         actor_name=_telegram_actor(update.effective_user),
         action="system.restart",
         entity_type="system",
-        details={"targets": ["ai-worker", "query-worker", "review-worker"]},
+        details={"targets": ["ai-worker", "query-worker", "review-worker", "invoice-worker"]},
     )
 
     await update.message.reply_text(
-        "🔄 Restart signal sent to *ai-worker*, *query-worker* and *review-worker*.\n"
+        "🔄 Restart signal sent to *ai-worker*, *query-worker*, *review-worker* and *invoice-worker*.\n"
         "Docker will restart them automatically.\n\n"
         "You'll receive a startup notification when ai-worker is back online.",
         parse_mode="Markdown",
