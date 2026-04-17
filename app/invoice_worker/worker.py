@@ -37,6 +37,26 @@ logger = logging.getLogger("invoice-worker")
 
 _DEFAULT_INVOICE_FOLDER = "Invoices"
 
+# Fields that indicate the extraction actually found something real.
+_MEANINGFUL_FIELDS = ("nif_seller", "nif_buyer", "seller_name", "invoice_number", "total_amount")
+
+
+def _has_meaningful_data(invoice_data: dict | None) -> bool:
+    """Return True only if at least one key field is non-null/non-empty.
+
+    The LLM sometimes returns a dict full of string "null" values instead of
+    Python None when it cannot find any financial data in the email body.
+    This guard prevents those ghost extractions from triggering moves and
+    Telegram notifications.
+    """
+    if not invoice_data:
+        return False
+    for field in _MEANINGFUL_FIELDS:
+        val = invoice_data.get(field)
+        if val is not None and str(val).strip().lower() not in ("", "null", "none", "n/a"):
+            return True
+    return False
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Telegram notification
@@ -232,19 +252,22 @@ async def _process_email_by_id(
             if invoice_data:
                 break
 
-        if not invoice_data:
-            logger.warning(f"No invoice data extracted from PDF(s) in email {email_id}")
+        if not _has_meaningful_data(invoice_data):
+            logger.warning(
+                f"No meaningful invoice data extracted from PDF(s) in email {email_id} "
+                f"— leaving untouched"
+            )
+            return
 
-        await _archive_pdfs(email_row, settings, invoice_data or {})
+        await _archive_pdfs(email_row, settings, invoice_data)
 
         target = _DEFAULT_INVOICE_FOLDER
         await _move_email(email_row, acc, settings, target)
 
-        if invoice_data:
-            msg = _build_invoice_message(
-                email_row, invoice_data, invoice_data.get("invoice_origin", "pt_at")
-            )
-            await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
+        msg = _build_invoice_message(
+            email_row, invoice_data, invoice_data.get("invoice_origin", "pt_at")
+        )
+        await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
 
         await _finalize_email(session_factory, email_row.id, target, invoice_data)
 
@@ -259,7 +282,7 @@ async def _process_email_by_id(
             language=os.environ.get("LANGUAGE", "en"),
         )
 
-        if invoice_data:
+        if _has_meaningful_data(invoice_data):
             target = _DEFAULT_INVOICE_FOLDER
             await _move_email(email_row, acc, settings, target)
 
@@ -271,7 +294,7 @@ async def _process_email_by_id(
             await _finalize_email(session_factory, email_row.id, target, invoice_data)
         else:
             logger.warning(
-                f"LLM body extraction returned nothing for email {email_id} — leaving for manual review"
+                f"Body extraction returned no meaningful data for email {email_id} — leaving for manual review"
             )
 
     else:
