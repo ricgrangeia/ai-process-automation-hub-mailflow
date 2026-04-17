@@ -1858,6 +1858,15 @@ def page_settings(engine):
                     key="btn_kw_apply",
                 ):
                     set_inbox_keywords(engine, [k for k in current_kws if k not in removed])
+                    from app.core.audit import log_audit_sync
+                    log_audit_sync(
+                        engine,
+                        actor_type="dashboard",
+                        actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                        action="keywords.removed",
+                        entity_type="system",
+                        details={"removed": sorted(removed)},
+                    )
                     _set_flash("success", t("page.settings.keywords_saved"))
                     st.rerun()
                 if col_cancel.button(t("page.settings.keywords_cancel"), key="btn_kw_cancel"):
@@ -1882,11 +1891,29 @@ def page_settings(engine):
                     st.warning(t("page.settings.keywords_exists"))
                 else:
                     set_inbox_keywords(engine, current_kws + [kw])
+                    from app.core.audit import log_audit_sync
+                    log_audit_sync(
+                        engine,
+                        actor_type="dashboard",
+                        actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                        action="keywords.added",
+                        entity_type="system",
+                        details={"added": kw},
+                    )
                     _set_flash("success", t("page.settings.keywords_saved"))
                     st.rerun()
 
             if reset_kws:
                 set_inbox_keywords(engine, DEFAULT_PLAIN_KEYWORDS)
+                from app.core.audit import log_audit_sync
+                log_audit_sync(
+                    engine,
+                    actor_type="dashboard",
+                    actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                    action="keywords.reset",
+                    entity_type="system",
+                    details={"reset_to": DEFAULT_PLAIN_KEYWORDS},
+                )
                 _set_flash("success", t("page.settings.keywords_reset_done"))
                 st.rerun()
 
