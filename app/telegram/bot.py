@@ -262,21 +262,18 @@ def _extract_keywords(subject: str, body: str, max_keywords: int = 3) -> list[st
 
 async def _build_rule_keywords(subject: str, body: str, settings) -> list[str]:
     """
-    Build the keyword list for a new learned rule by combining two sources:
+    Return the inbox filter keywords that are present in this email.
 
-    1. Inbox filter keywords (the configurable list in dashboard settings) that
-       are actually present in this email — these are the strongest signal
-       because they're the terms that caused the email to be ingested.
+    Only configured financial keywords (from the dashboard keyword list) are
+    used — generic word extraction is intentionally excluded because it
+    produces noise (tracking IDs, random long strings) that makes rules
+    brittle and unlikely to fire on future emails.
 
-    2. Generic keywords extracted from subject/body via _extract_keywords —
-       supplement when the filter list has no overlap.
-
-    Deduplication is applied; filter-keyword matches take priority.
-    Result is capped at 5 keywords total.
+    If no filter keywords match, returns [] so the rule is created with
+    sender_email only (min_match=1), which is still correct and predictable.
     """
     import asyncio as _asyncio
 
-    # Load configured inbox filter keywords from DB (sync helper, run in thread)
     try:
         from app.core.system_settings import get_inbox_keywords
         db_url = settings.database_url.replace("+asyncpg", "")
@@ -285,25 +282,7 @@ async def _build_rule_keywords(subject: str, body: str, settings) -> list[str]:
         filter_kws = []
 
     text = f"{subject} {body}".lower()
-
-    # Which filter keywords actually appear in this email?
-    matched_filter = [kw for kw in filter_kws if kw.lower() in text]
-
-    # Generic extraction as supplement
-    generic = _extract_keywords(subject, body, max_keywords=3)
-
-    # Merge: filter matches first, then generic, deduplicated
-    seen: set[str] = set()
-    combined: list[str] = []
-    for kw in matched_filter + generic:
-        kw_lower = kw.lower()
-        if kw_lower not in seen:
-            seen.add(kw_lower)
-            combined.append(kw_lower)
-        if len(combined) == 5:
-            break
-
-    return combined
+    return [kw.lower() for kw in filter_kws if kw.lower() in text]
 
 
 async def _save_rule(
@@ -505,7 +484,7 @@ async def handle_learn_move(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conditions.append({"type": "keyword", "value": kw.lower()})
 
     # Fire if: email matches OR at least 2 keywords match
-    min_match = 1 if not keywords else 2
+    min_match = 2
 
     saved = await _save_rule(session_factory, email, folder, actions, conditions, min_match)
 
@@ -683,7 +662,7 @@ async def _persist_pdf_rule(query_or_message, email_id: int, folder: str,
     conditions   = [{"type": "sender_email", "value": sender_email}]
     for kw in keywords:
         conditions.append({"type": "keyword", "value": kw.lower()})
-    min_match = 1 if not keywords else 2
+    min_match = 2
 
     saved = await _save_rule(session_factory, email, folder, actions, conditions, min_match)
 
@@ -1420,21 +1399,27 @@ async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
     move_ok = await _do_move(settings, email, account, target_folder)
 
     # Auto-create sender+keyword rule so future invoices from this sender bypass
-    # the review gate — but only when subject/body also match the same keywords,
-    # so a newsletter from the same sender doesn't get auto-moved.
+    # the review gate — requires sender_email AND at least 1 keyword (min_match=2).
+    # If no filter keywords matched this email, skip rule creation: the user will
+    # be asked again next time rather than creating a rule that is too broad.
     if email.from_address:
         keywords = await _build_rule_keywords(email.subject or "", email.body_text or "", settings)
-        sender_email = email.from_address.lower()
-        conditions = [{"type": "sender_email", "value": sender_email}]
-        for kw in keywords:
-            conditions.append({"type": "keyword", "value": kw.lower()})
-        min_match = 1 if not keywords else 2  # sender + at least 1 keyword
-        await _save_rule(
-            session_factory, email, target_folder,
-            actions=[{"type": "move_folder", "folder": target_folder}],
-            conditions=conditions,
-            min_match=min_match,
-        )
+        if not keywords:
+            logger.info(
+                f"Skipping auto-rule for {email.from_address!r}: "
+                "no inbox filter keywords matched — rule would be too broad"
+            )
+        else:
+            sender_email = email.from_address.lower()
+            conditions = [{"type": "sender_email", "value": sender_email}]
+            for kw in keywords:
+                conditions.append({"type": "keyword", "value": kw.lower()})
+            await _save_rule(
+                session_factory, email, target_folder,
+                actions=[{"type": "move_folder", "folder": target_folder}],
+                conditions=conditions,
+                min_match=2,
+            )
         logger.info(
             f"Auto-created rule for {email.from_address!r} → {target_folder} "
             f"(conditions={len(conditions)}, min_match={min_match})"
@@ -1707,7 +1692,7 @@ async def handle_rd_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conditions   = [{"type": "sender_email", "value": sender_email}]
     for kw in keywords:
         conditions.append({"type": "keyword", "value": kw.lower()})
-    min_match = 1 if not keywords else 2
+    min_match = 2
 
     saved = await _save_rule(session_factory, email, folder, actions, conditions, min_match)
 
