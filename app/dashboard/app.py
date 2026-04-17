@@ -1807,39 +1807,35 @@ def page_settings(engine):
             st.caption(t("page.settings.keywords_pills_hint"))
             st.markdown("""
             <style>
-            /* 1. Target the button and any child elements (like the text span) */
-            div[data-testid="stPills"] button[aria-checked="true"],
-            div[data-testid="stPills"] button[aria-checked="true"] span {
-                background-color: #0891b2 !important;
-                color: white !important;
-                border-color: #0891b2 !important;
+            /* 1. The main button container */
+            div[data-testid="stPills"] button[kind="pillsActive"] {
+                background-color: rgba(8, 145, 178, 0.1) !important;
+                border: 1px solid rgb(8, 145, 178) !important;
+                color: rgb(8, 145, 178) !important;
             }
 
-            /* 2. Remove the red outline/border that appears on hover/focus */
-            div[data-testid="stPills"] button[aria-checked="true"]:hover,
-            div[data-testid="stPills"] button[aria-checked="true"]:focus,
-            div[data-testid="stPills"] button[aria-checked="true"]:active {
-                background-color: #0e7490 !important;
-                border-color: #0e7490 !important;
-                color: white !important;
+            /* 2. The inner div and markdown container */
+            div[data-testid="stPills"] button[kind="pillsActive"] div, 
+            div[data-testid="stPills"] button[kind="pillsActive"] p {
+                color: rgb(8, 145, 178) !important;
             }
 
-            /* 3. Handle the 'Deselected' state to ensure NO red borders exist */
-            div[data-testid="stPills"] button[aria-checked="false"] {
+            /* 3. Hover state for the cyan pill */
+            div[data-testid="stPills"] button[kind="pillsActive"]:hover {
+                background-color: rgba(8, 145, 178, 0.2) !important;
+                border-color: rgb(14, 116, 144) !important;
+            }
+
+            /* 4. Ensure inactive pills stay neutral (not red) */
+            div[data-testid="stPills"] button[kind="pillsSecondary"] {
+                border-color: #94a3b8 !important;
+                color: #64748b !important;
                 background-color: transparent !important;
-                border: 1px solid #94a3b8 !important; /* Forces a grey border */
-                color: #94a3b8 !important;
             }
 
-            /* 4. Kill the 'Primary' theme glow (the red ring) */
-            div[data-testid="stPills"] button:focus:not(:active) {
-                box-shadow: none !important;
-                border-color: #0891b2 !important;
-            }
-
-            /* 5. Force the selection indicator (if any) to be cyan */
-            div[data-testid="stPills"] button[aria-checked="true"] div {
-                color: white !important;
+            /* 5. Inactive pill text color */
+            div[data-testid="stPills"] button[kind="pillsSecondary"] p {
+                color: #64748b !important;
             }
             </style>
             """, unsafe_allow_html=True)
