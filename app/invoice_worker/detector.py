@@ -208,10 +208,14 @@ def classify_email(
     # (and its PDF) as an attachment.
     if is_bounce_email(parsed_email):
         return None
-    if is_marketing_email(parsed_email):
-        return None
+    # PDFs take priority over marketing signals — many legitimate invoice
+    # senders (shops, utilities) include List-Unsubscribe headers but still
+    # attach real PDF invoices.
     if has_pdf_attachments(parsed_email):
         return "pdf_invoice"
+    # Only apply the marketing filter to body-only emails (no PDF).
+    if is_marketing_email(parsed_email):
+        return None
     if has_financial_keywords(parsed_email, keyword_re):
         return "financial_body"
     return None

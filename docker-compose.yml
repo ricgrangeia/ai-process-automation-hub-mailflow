@@ -28,6 +28,11 @@ services:
       - mail
       - database
       - ai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
 
   email-worker:
     build: .
@@ -51,6 +56,11 @@ services:
       - mail
       - database
       - ai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
 
   api-worker:
     build: .
@@ -74,6 +84,11 @@ services:
       - mail
       - database
       - ai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
 
   ai-worker:
     build: .
@@ -104,6 +119,11 @@ services:
       - mail
       - database
       - ai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
 
   invoice-worker:
     build: .
@@ -134,6 +154,11 @@ services:
       - mail
       - database
       - ai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
 
   telegram-bot:
     build: .
@@ -161,6 +186,11 @@ services:
       - mail
       - database
       - ai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
 
   review-worker:
     build: .
@@ -181,6 +211,11 @@ services:
       - mail
       - database
       - ai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"  
 
   query-worker:
     build: .
@@ -211,6 +246,11 @@ services:
       - mail
       - database
       - ai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"  
 
   dashboard:
     build:
@@ -246,6 +286,12 @@ services:
       - "traefik.http.routers.mailflow-dash.tls.certresolver=letsencrypt" # O nome do teu resolver no Traefik
       # Porta interna do Streamlit
       - "traefik.http.services.mailflow-dash.loadbalancer.server.port=8501"
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"  
 
 
 volumes:
