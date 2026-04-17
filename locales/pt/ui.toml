@@ -28,6 +28,16 @@ nav_invoices   = "🧾 Faturas"
 nav_audit      = "📋 Registo de Auditoria"
 nav_settings   = "⚙️ Definições"
 logout         = "Sair"
+workers_header      = "**⚙️ Workers**"
+workers_no_docker   = "⚠️ Socket Docker não disponível"
+workers_stop_all    = "🛑 Parar tudo"
+workers_start_all   = "▶️ Iniciar tudo"
+workers_stopped_ok  = "Workers parados."
+workers_started_ok  = "Workers iniciados."
+workers_imap        = "📬 IMAP"
+workers_invoice     = "🧾 Faturas"
+workers_ai          = "🤖 IA"
+workers_review      = "📋 Revisão"
 
 # ── Títulos e cabeçalhos de página ────────────────────────────────────────────
 

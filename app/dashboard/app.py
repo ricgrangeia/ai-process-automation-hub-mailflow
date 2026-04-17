@@ -2089,6 +2089,19 @@ def page_settings(engine):
                         _r.delete("mailai:jobs:email", "mailai:jobs:invoice")
                         _r.close()
 
+                        from app.core.audit import log_audit_sync
+                        log_audit_sync(
+                            engine,
+                            actor_type="dashboard",
+                            actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                            action="system.full_reset",
+                            entity_type="system",
+                            details={
+                                "tables_cleared": ["invoices", "attachments", "emails", "learned_rules", "sellers"],
+                                "queues_flushed": ["mailai:jobs:email", "mailai:jobs:invoice"],
+                            },
+                        )
+
                         st.session_state.pop("_full_reset_open", None)
                         _set_flash("success", t("page.settings.full_reset_done"))
                         st.rerun()
@@ -2586,14 +2599,14 @@ if login_screen():
 
     # ── Workers control panel ─────────────────────────────────────────────────
     st.sidebar.markdown("---")
-    st.sidebar.markdown("**⚙️ Workers**")
+    st.sidebar.markdown(t("sidebar.workers_header"))
 
     # Containers we manage — telegram-bot and query-worker kept running always
     _WORKER_CONTAINERS = [
-        ("mailflow-email-worker",    "📬 IMAP"),
-        ("mailflow-invoice-worker",  "🧾 Invoice"),
-        ("mailflow-ai-worker",       "🤖 AI"),
-        ("mailflow-review-worker",   "📋 Review"),
+        ("mailflow-email-worker",    t("sidebar.workers_imap")),
+        ("mailflow-invoice-worker",  t("sidebar.workers_invoice")),
+        ("mailflow-ai-worker",       t("sidebar.workers_ai")),
+        ("mailflow-review-worker",   t("sidebar.workers_review")),
     ]
 
     def _docker_client():
@@ -2617,7 +2630,7 @@ if login_screen():
     _statuses = _get_statuses(_dc)
 
     if not _dc:
-        st.sidebar.caption("⚠️ Docker socket not available")
+        st.sidebar.caption(t("sidebar.workers_no_docker"))
     else:
         # Status table
         for _cname, _clabel in _WORKER_CONTAINERS:
@@ -2634,34 +2647,58 @@ if login_screen():
 
         _col_stop, _col_start = st.sidebar.columns(2)
 
-        if _col_stop.button("🛑 Stop all", disabled=not _any_running, key="btn_stop_workers"):
+        if _col_stop.button(t("sidebar.workers_stop_all"), disabled=not _any_running, key="btn_stop_workers"):
             _errors = []
+            _stopped = []
             for _cname, _clabel in _WORKER_CONTAINERS:
                 try:
                     _c = _dc.containers.get(_cname)
                     if _c.status == "running":
                         _c.stop(timeout=10)
+                        _stopped.append(_cname)
                 except Exception as _e:
                     _errors.append(f"{_clabel}: {_e}")
             if _errors:
                 st.sidebar.error("\n".join(_errors))
             else:
-                st.sidebar.success("Workers stopped.")
+                st.sidebar.success(t("sidebar.workers_stopped_ok"))
+                if _stopped:
+                    from app.core.audit import log_audit_sync
+                    log_audit_sync(
+                        engine,
+                        actor_type="dashboard",
+                        actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                        action="system.workers_stopped",
+                        entity_type="system",
+                        details={"containers": _stopped},
+                    )
             st.rerun()
 
-        if _col_start.button("▶️ Start all", disabled=not _any_stopped, key="btn_start_workers"):
+        if _col_start.button(t("sidebar.workers_start_all"), disabled=not _any_stopped, key="btn_start_workers"):
             _errors = []
+            _started = []
             for _cname, _clabel in _WORKER_CONTAINERS:
                 try:
                     _c = _dc.containers.get(_cname)
                     if _c.status != "running":
                         _c.start()
+                        _started.append(_cname)
                 except Exception as _e:
                     _errors.append(f"{_clabel}: {_e}")
             if _errors:
                 st.sidebar.error("\n".join(_errors))
             else:
-                st.sidebar.success("Workers started.")
+                st.sidebar.success(t("sidebar.workers_started_ok"))
+                if _started:
+                    from app.core.audit import log_audit_sync
+                    log_audit_sync(
+                        engine,
+                        actor_type="dashboard",
+                        actor_name=os.environ.get("DASHBOARD_USER", "admin"),
+                        action="system.workers_started",
+                        entity_type="system",
+                        details={"containers": _started},
+                    )
             st.rerun()
 
         if _dc:
