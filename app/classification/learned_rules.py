@@ -21,7 +21,7 @@ Matching logic:
 """
 
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import String, Integer, Boolean, DateTime, Text, func
+from sqlalchemy import String, Integer, Boolean, DateTime, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.core.database.base import Base
@@ -48,7 +48,7 @@ class LearnedRule(Base):
     actions: Mapped[dict] = mapped_column(JSONB, default=list)
 
     created_from_email_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    hit_count: Mapped[int] = mapped_column(Integer, server_default=text("0"), default=0)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     source: Mapped[str] = mapped_column(String(16), default="human")  # "human" | "ai_auto"
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
