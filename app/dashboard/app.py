@@ -783,7 +783,7 @@ def page_learned_rules(engine, settings):
 
                 with c1:
                     conditions = row["conditions"] or []
-                    _type_icon = {"sender_email": "📧", "sender_domain": "🌐", "keyword": "🔑"}
+                    _type_icon = {"sender_email": "📧", "sender_domain": "🌐", "keyword": "🔑", "invoice_document_type": "📄"}
                     cond_lines = []
                     for c in conditions:
                         icon = _type_icon.get(c.get("type", ""), "❓")
@@ -844,7 +844,17 @@ def page_learned_rules(engine, settings):
                         cond_text_input = st.text_area(
                             "Conditions",
                             value=cond_text_default,
-                            help="Types: sender_email, sender_domain, keyword\nExample:\nsender_email:invoices@company.pt\nkeyword:Fatura\nkeyword:pagamento",
+                            help=(
+                                "Types: sender_email, sender_domain, keyword, invoice_document_type\n"
+                                "Examples:\n"
+                                "  sender_email:invoices@company.pt\n"
+                                "  keyword:fatura\n"
+                                "  invoice_document_type:Fatura\n\n"
+                                "invoice_document_type matches the AT document type of an extracted invoice.\n"
+                                "Valid values: Fatura, Fatura-Recibo, Fatura Simplificada, Nota de Débito,\n"
+                                "  Nota de Crédito, Recibo, Orçamento, …\n"
+                                "These rules run BEFORE normal rules (priority pass)."
+                            ),
                             key=f"cond_{rule_id}",
                         )
                         new_min_match = st.number_input(
@@ -958,8 +968,16 @@ def page_learned_rules(engine, settings):
         st.caption("Conditions — one per line, format `type:value`")
         a_cond_text = st.text_area(
             "Conditions",
-            placeholder="sender_email:invoices@company.pt\nkeyword:Fatura\nkeyword:pagamento",
-            help="Types: sender_email, sender_domain, keyword",
+            placeholder="sender_email:invoices@company.pt\nkeyword:fatura\ninvoice_document_type:Fatura",
+            help=(
+                "Types: sender_email, sender_domain, keyword, invoice_document_type\n"
+                "Examples:\n"
+                "  sender_email:invoices@company.pt\n"
+                "  keyword:fatura\n"
+                "  invoice_document_type:Fatura\n\n"
+                "invoice_document_type matches the AT document type of an extracted invoice.\n"
+                "These rules run BEFORE normal rules (priority pass)."
+            ),
         )
         a_min_match = st.number_input("Min conditions to match", min_value=1, max_value=10, value=1, step=1)
         ac1, ac2 = st.columns(2)

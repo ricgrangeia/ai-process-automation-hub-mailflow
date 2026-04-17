@@ -442,35 +442,53 @@ async def ai_worker_loop():
                 if source == "rule_conflict":
                     invoice_info = await _extract_invoice_for_conflict(email, settings, session_factory)
 
-                sent = await send_review_request(
-                    bot_token=settings.telegram_bot_token,
-                    chat_id=settings.telegram_chat_id,
-                    email_id=email_id,
-                    subject=email.subject,
-                    sender=email.from_address,
-                    confidence=confidence,
-                    source=source,
-                    rule_folder=getattr(classification, 'rule_folder', None),
-                    llm_folder=getattr(classification, 'llm_folder', None),
-                    folders=active_folders,
-                    suggested_folder=getattr(classification, 'suggested_folder', None),
-                    invoice_info=invoice_info,
-                )
-                if sent:
-                    async with session_factory() as s:
-                        await s.execute(
-                            update(EmailMessage)
-                            .where(EmailMessage.id == email_id)
-                            .values(
-                                status="pending_review",
-                                ai_confidence=float(confidence),
-                                ai_source=str(source),
-                                processing_time_seconds=float(llm_time) if llm_time else None,
-                                prompt_tokens=getattr(classification, 'prompt_tokens', 0),
-                                completion_tokens=getattr(classification, 'completion_tokens', 0),
-                                total_tokens=getattr(classification, 'total_tokens', 0),
+                # Auto-resolve rule conflicts for verified Portuguese invoices:
+                # If the document has a valid ATCUD and is a "Fatura" type,
+                # move it directly to "Faturas" (if that folder exists) without asking.
+                if (
+                    source == "rule_conflict"
+                    and invoice_info
+                    and invoice_info.get("atcud")
+                    and invoice_info.get("document_type_description") == "Fatura"
+                    and "Faturas" in active_folders
+                ):
+                    folder = "Faturas"
+                    logger.info(
+                        f"⚡ Auto-resolved rule conflict for email {email_id}: "
+                        f"ATCUD={invoice_info['atcud']!r}, Tipo=Fatura → Faturas"
+                    )
+                    # Fall through to normal move path (skip Telegram card)
+
+                else:
+                    sent = await send_review_request(
+                        bot_token=settings.telegram_bot_token,
+                        chat_id=settings.telegram_chat_id,
+                        email_id=email_id,
+                        subject=email.subject,
+                        sender=email.from_address,
+                        confidence=confidence,
+                        source=source,
+                        rule_folder=getattr(classification, 'rule_folder', None),
+                        llm_folder=getattr(classification, 'llm_folder', None),
+                        folders=active_folders,
+                        suggested_folder=getattr(classification, 'suggested_folder', None),
+                        invoice_info=invoice_info,
+                    )
+                    if sent:
+                        async with session_factory() as s:
+                            await s.execute(
+                                update(EmailMessage)
+                                .where(EmailMessage.id == email_id)
+                                .values(
+                                    status="pending_review",
+                                    ai_confidence=float(confidence),
+                                    ai_source=str(source),
+                                    processing_time_seconds=float(llm_time) if llm_time else None,
+                                    prompt_tokens=getattr(classification, 'prompt_tokens', 0),
+                                    completion_tokens=getattr(classification, 'completion_tokens', 0),
+                                    total_tokens=getattr(classification, 'total_tokens', 0),
+                                )
                             )
-                        )
                         await s.commit()
                     logger.info(f"📨 Email {email_id} sent to Telegram for review.")
                     continue
