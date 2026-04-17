@@ -213,7 +213,7 @@ services:
       - ai
 
   dashboard:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile.dashboard  # Lembra-te de criar este ficheiro
     container_name: mailflow-dashboard
@@ -231,6 +231,8 @@ services:
       - LLM_MODEL=${LLM_MODEL}
       - MASTER_KEY=${MASTER_KEY}
       - LANGUAGE=${LANGUAGE:-en}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker SDK — worker control
     networks:
       - mail
       - database

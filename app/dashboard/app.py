@@ -2584,6 +2584,92 @@ if login_screen():
         except Exception as _e:
             st.sidebar.error(t("sidebar.mode_error", error=_e))
 
+    # ── Workers control panel ─────────────────────────────────────────────────
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**⚙️ Workers**")
+
+    # Containers we manage — telegram-bot and query-worker kept running always
+    _WORKER_CONTAINERS = [
+        ("mailflow-email-worker",    "📬 IMAP"),
+        ("mailflow-invoice-worker",  "🧾 Invoice"),
+        ("mailflow-ai-worker",       "🤖 AI"),
+        ("mailflow-review-worker",   "📋 Review"),
+    ]
+
+    def _docker_client():
+        try:
+            import docker as _docker
+            return _docker.from_env()
+        except Exception:
+            return None
+
+    def _get_statuses(client):
+        if not client:
+            return {}
+        try:
+            containers = {c.name: c for c in client.containers.list(all=True)}
+            return {name: containers[name].status if name in containers else "not found"
+                    for name, _ in _WORKER_CONTAINERS}
+        except Exception:
+            return {}
+
+    _dc = _docker_client()
+    _statuses = _get_statuses(_dc)
+
+    if not _dc:
+        st.sidebar.caption("⚠️ Docker socket not available")
+    else:
+        # Status table
+        for _cname, _clabel in _WORKER_CONTAINERS:
+            _s = _statuses.get(_cname, "?")
+            _icon = "🟢" if _s == "running" else "🔴" if _s in ("exited", "stopped") else "🟡"
+            st.sidebar.caption(f"{_icon} {_clabel}")
+
+        _any_running = any(
+            _statuses.get(n) == "running" for n, _ in _WORKER_CONTAINERS
+        )
+        _any_stopped = any(
+            _statuses.get(n) in ("exited", "stopped") for n, _ in _WORKER_CONTAINERS
+        )
+
+        _col_stop, _col_start = st.sidebar.columns(2)
+
+        if _col_stop.button("🛑 Stop all", disabled=not _any_running, key="btn_stop_workers"):
+            _errors = []
+            for _cname, _clabel in _WORKER_CONTAINERS:
+                try:
+                    _c = _dc.containers.get(_cname)
+                    if _c.status == "running":
+                        _c.stop(timeout=10)
+                except Exception as _e:
+                    _errors.append(f"{_clabel}: {_e}")
+            if _errors:
+                st.sidebar.error("\n".join(_errors))
+            else:
+                st.sidebar.success("Workers stopped.")
+            st.rerun()
+
+        if _col_start.button("▶️ Start all", disabled=not _any_stopped, key="btn_start_workers"):
+            _errors = []
+            for _cname, _clabel in _WORKER_CONTAINERS:
+                try:
+                    _c = _dc.containers.get(_cname)
+                    if _c.status != "running":
+                        _c.start()
+                except Exception as _e:
+                    _errors.append(f"{_clabel}: {_e}")
+            if _errors:
+                st.sidebar.error("\n".join(_errors))
+            else:
+                st.sidebar.success("Workers started.")
+            st.rerun()
+
+        if _dc:
+            try:
+                _dc.close()
+            except Exception:
+                pass
+
     st.sidebar.markdown("---")
 
     _nav_items = [

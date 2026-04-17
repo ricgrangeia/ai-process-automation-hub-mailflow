@@ -25,3 +25,4 @@ streamlit==1.55.0            # O motor do Dashboard
 pandas==2.2.1                # Manipulação de dados e tabelas
 plotly==5.19.0               # Gráficos interativos (Pie, Bar, ROI)
 streamlit-cookies-controller==0.0.4  # Persistent login cookie
+docker==7.1.0                        # Docker SDK — worker stop/start from dashboard
