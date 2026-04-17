@@ -215,6 +215,43 @@ async def _extract_invoice_for_conflict(email, settings, session_factory) -> dic
     return None
 
 
+async def _find_doc_type_rule_folder(
+    session_factory,
+    tenant_id: int,
+    doc_type_desc: str,
+    active_folders: list[str],
+) -> str | None:
+    """
+    Look up an active invoice_document_type rule that matches doc_type_desc.
+    Returns the target folder if found and it exists in active_folders, else None.
+    """
+    from app.classification.learned_rules import LearnedRule
+
+    try:
+        async with session_factory() as session:
+            rules = (await session.execute(
+                select(LearnedRule).where(
+                    LearnedRule.active == True,
+                    LearnedRule.tenant_id == tenant_id,
+                )
+            )).scalars().all()
+
+        needle = doc_type_desc.lower()
+        for rule in rules:
+            for cond in (rule.conditions or []):
+                if cond.get("type") == "invoice_document_type" and cond.get("value", "").lower() == needle:
+                    target = next(
+                        (a["folder"] for a in (rule.actions or []) if a.get("type") == "move_folder"),
+                        None,
+                    )
+                    if target and target in active_folders:
+                        return target
+    except Exception as e:
+        logger.warning(f"Doc-type rule lookup failed: {e}")
+
+    return None
+
+
 async def _auto_save_rule(session_factory, email, folder: str, confidence: float, settings=None) -> None:
     """
     Auto-save a high-confidence LLM decision as a learned rule.
@@ -442,20 +479,24 @@ async def ai_worker_loop():
                 if source == "rule_conflict":
                     invoice_info = await _extract_invoice_for_conflict(email, settings, session_factory)
 
-                # Auto-resolve rule conflicts for verified Portuguese invoices:
-                # If the document has a valid ATCUD and is a "Fatura" type,
-                # move it directly to "Faturas" (if that folder exists) without asking.
-                if (
-                    source == "rule_conflict"
-                    and invoice_info
-                    and invoice_info.get("atcud")
-                    and invoice_info.get("document_type_description") == "Fatura"
-                    and "Faturas" in active_folders
-                ):
-                    folder = "Faturas"
+                # Auto-resolve rule conflicts using invoice_document_type rules:
+                # If the invoice has a valid ATCUD and there is an active
+                # invoice_document_type rule whose value matches the document type,
+                # move directly to that rule's folder without asking.
+                auto_resolved_folder = None
+                if source == "rule_conflict" and invoice_info and invoice_info.get("atcud"):
+                    doc_type_desc = invoice_info.get("document_type_description")
+                    if doc_type_desc:
+                        auto_resolved_folder = await _find_doc_type_rule_folder(
+                            session_factory, email.tenant_id, doc_type_desc, active_folders
+                        )
+
+                if auto_resolved_folder:
+                    folder = auto_resolved_folder
                     logger.info(
                         f"⚡ Auto-resolved rule conflict for email {email_id}: "
-                        f"ATCUD={invoice_info['atcud']!r}, Tipo=Fatura → Faturas"
+                        f"ATCUD={invoice_info['atcud']!r}, "
+                        f"Tipo={invoice_info['document_type_description']!r} → {folder}"
                     )
                     # Fall through to normal move path (skip Telegram card)
 
