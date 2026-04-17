@@ -1806,24 +1806,33 @@ def page_settings(engine):
         else:
             st.caption(t("page.settings.keywords_pills_hint"))
             st.markdown("""
-<style>
-/* Selected keyword pills — cyan */
-div[data-testid="stPills"] button[aria-checked="true"] {
-    background-color: #0891b2 !important;
-    border-color: #0891b2 !important;
-    color: #ffffff !important;
-}
-div[data-testid="stPills"] button[aria-checked="true"]:hover {
-    background-color: #0e7490 !important;
-    border-color: #0e7490 !important;
-}
-/* Deselected (marked for removal) — keep neutral */
-div[data-testid="stPills"] button[aria-checked="false"] {
-    background-color: transparent !important;
-    border-color: #94a3b8 !important;
-    color: #94a3b8 !important;
-}
-</style>""", unsafe_allow_html=True)
+            <style>
+            /* 1. Target the 'Selected' state - Forced Cyan */
+            div[data-testid="stPills"] [data-testid="stBaseButton-secondary"][aria-checked="true"] {
+                background-color: #0891b2 !important;
+                border-color: #0891b2 !important;
+                color: white !important;
+            }
+
+            /* 2. Hover state for selected pills */
+            div[data-testid="stPills"] [data-testid="stBaseButton-secondary"][aria-checked="true"]:hover {
+                background-color: #0e7490 !important;
+                border-color: #0e7490 !important;
+            }
+
+            /* 3. Target the 'Deselected' state - Neutral/Grey */
+            div[data-testid="stPills"] [data-testid="stBaseButton-secondary"][aria-checked="false"] {
+                background-color: transparent !important;
+                border-color: #94a3b8 !important;
+                color: #94a3b8 !important;
+            }
+
+            /* 4. Optional: Change the focus ring color to Cyan instead of Red */
+            div[data-testid="stPills"] button:focus {
+                box-shadow: 0 0 0 0.2rem rgba(8, 145, 178, 0.5) !important;
+            }
+            </style>
+            """, unsafe_allow_html=True)
             # st.pills returns the currently-selected subset; deselecting = marking for removal
             remaining = st.pills(
                 label="keywords",
