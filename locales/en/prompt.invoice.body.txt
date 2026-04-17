@@ -8,8 +8,8 @@ Body:
 Extract all available financial fields and return ONLY a JSON object with these fields (use null for missing values):
 
 {{
-  "invoice_origin": "<one of: payment_confirmation | bank_transfer | receipt | international>",
-  "seller_name": "<company or person name that received the payment>",
+  "invoice_origin": "<one of: pt_at_invoice | fatura_recibo | receipt | payment_confirmation | bank_transfer | international>",
+  "seller_name": "<company or person name that issued or received the payment>",
   "seller_country": "<2-letter ISO country code or null>",
   "invoice_number": "<invoice or reference number>",
   "receipt_number": "<receipt number if applicable>",
@@ -29,10 +29,24 @@ Extract all available financial fields and return ONLY a JSON object with these 
   "mb_data_limite": "<Multibanco due date YYYY-MM-DD or null>"
 }}
 
-Rules:
-- invoice_origin must be exactly one of: payment_confirmation, bank_transfer, receipt, international
-- Use payment_confirmation for card payments, PayPal, MBWay, and similar confirmations
-- Use bank_transfer for wire transfers and bank statements
-- Use receipt for receipts from physical or online stores
-- Use international for foreign invoices without Portuguese AT/ATCUD
-- Return ONLY the JSON object, no explanation, no markdown fences
+## invoice_origin rules — read carefully, this is the most important field
+
+**UNPAID documents** (money has NOT yet been paid — use these when the document is a request for payment):
+- `pt_at_invoice` — Portuguese "Fatura" (FT) or "Fatura Simplificada" (FS) issued under Portuguese tax law (AT/ATCUD present). Signals: "fatura", "ATCUD", Portuguese NIF, Multibanco reference "para pagamento", "prazo de pagamento", "data limite", "valor a pagar".
+- `international` — Foreign invoice not issued under Portuguese AT rules. Signals: non-PT seller, no ATCUD, amounts in non-EUR or mixed language.
+
+**PAID documents** (money HAS already been received — use these when the document confirms a completed payment):
+- `fatura_recibo` — Portuguese "Fatura-Recibo" (FR): a combined invoice AND receipt issued at point of sale — payment was made immediately. Signals: "fatura-recibo", "fatura recibo", document type FR, "recebido", "liquidado".
+- `receipt` — A receipt or "Recibo" (RC) for a payment already completed. Signals: "recibo", "receipt", "comprovativo", "pago", "paid", store receipt, online shop order confirmed.
+- `payment_confirmation` — Confirmation that a card, MBWay, PayPal, or similar digital payment went through. Signals: "pagamento confirmado", "pagamento efetuado", "payment received", "payment successful", MBWay confirmation.
+- `bank_transfer` — Confirmation of a completed bank transfer. Signals: "transferência efetuada", "wire transfer sent", "bank transfer confirmed".
+
+## Key distinctions (common mistakes to avoid)
+
+- A "Fatura" with a Multibanco reference is UNPAID — it is a payment request, not a receipt. Use `pt_at_invoice`.
+- A "Fatura-Recibo" means both invoice AND receipt in one — it IS paid. Use `fatura_recibo`.
+- "Recibo de pagamento" or "comprovativo de pagamento" = already paid. Use `receipt` or `payment_confirmation`.
+- "Para pagamento", "prazo de pagamento", "referência para pagamento" = NOT yet paid.
+- If the email contains only a Multibanco entity+reference+amount but no confirmation message, the invoice is UNPAID.
+
+Return ONLY the JSON object, no explanation, no markdown fences.

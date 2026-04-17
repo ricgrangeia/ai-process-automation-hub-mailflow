@@ -97,5 +97,88 @@ async def extract_financial_from_body(
         logger.warning(f"LLM body extraction returned non-dict: {result}")
         return None
 
+    result = _infer_payment_status(subject, body_text, result)
     logger.info(f"Body extraction result: { {k: v for k, v in result.items() if v is not None} }")
+    return result
+
+
+def _infer_payment_status(subject: str, body_text: str, result: dict) -> dict:
+    """
+    Rule-based post-processor that validates and corrects invoice_origin.
+
+    Small LLMs frequently confuse paid vs unpaid documents, especially in
+    Portuguese. This function uses unambiguous keyword signals to override
+    a likely-wrong origin value.
+
+    Rules:
+      - fatura_recibo signals  → origin = "fatura_recibo"   (paid)
+      - recibo/receipt signals → origin = "receipt"          (paid)
+      - payment-confirmed      → origin = "payment_confirmation" (paid)
+      - unpaid signals + LLM
+        said it was paid       → origin = "pt_at_invoice"   (not paid)
+    """
+    text = ((subject or "") + " " + (body_text or "")).lower()
+
+    # ── Paid signals ─────────────────────────────────────────────────────────
+
+    # Strongest signal: explicit fatura-recibo document
+    if any(s in text for s in ("fatura-recibo", "fatura recibo")):
+        if result.get("invoice_origin") != "fatura_recibo":
+            logger.info("payment_status_override: fatura-recibo detected → fatura_recibo")
+            result["invoice_origin"] = "fatura_recibo"
+        return result
+
+    confirmed_paid_phrases = [
+        "pagamento confirmado", "pagamento efetuado", "pagamento efectuado",
+        "pagamento realizado", "pagamento recebido", "pagamento concluído",
+        "payment confirmed", "payment received", "payment successful",
+        "comprovativo de pagamento",
+    ]
+    if any(p in text for p in confirmed_paid_phrases):
+        if result.get("invoice_origin") not in ("payment_confirmation", "bank_transfer"):
+            logger.info("payment_status_override: payment-confirmed phrase → payment_confirmation")
+            result["invoice_origin"] = "payment_confirmation"
+        return result
+
+    receipt_phrases = [
+        "recibo de pagamento", "recibo emitido", "receipt issued",
+    ]
+    has_receipt_word = "recibo" in text or "receipt" in text
+    if any(p in text for p in receipt_phrases) or (
+        has_receipt_word
+        and not any(x in text for x in ("fatura", "invoice"))  # standalone recibo only
+    ):
+        if result.get("invoice_origin") not in ("receipt", "fatura_recibo", "payment_confirmation"):
+            logger.info("payment_status_override: recibo/receipt signal → receipt")
+            result["invoice_origin"] = "receipt"
+        return result
+
+    transfer_confirmed = [
+        "transferência efetuada", "transferência efectuada", "transferência concluída",
+        "wire transfer sent", "bank transfer confirmed",
+    ]
+    if any(p in text for p in transfer_confirmed):
+        if result.get("invoice_origin") != "bank_transfer":
+            logger.info("payment_status_override: transfer-confirmed phrase → bank_transfer")
+            result["invoice_origin"] = "bank_transfer"
+        return result
+
+    # ── Unpaid signals ────────────────────────────────────────────────────────
+    # If these appear AND the LLM classified as a paid type, correct it.
+    unpaid_phrases = [
+        "para pagamento", "referência para pagamento", "referencia para pagamento",
+        "prazo de pagamento", "data limite de pagamento", "data limite pagamento",
+        "aguarda pagamento", "aguardamos o seu pagamento",
+        "proceda ao pagamento", "efectue o pagamento", "efetue o pagamento",
+        "due date", "payment due", "amount due",
+    ]
+    _paid_origins = {"receipt", "fatura_recibo", "payment_confirmation", "bank_transfer"}
+    if any(p in text for p in unpaid_phrases):
+        if result.get("invoice_origin") in _paid_origins:
+            logger.info(
+                "payment_status_override: unpaid signal found but LLM said '%s' → pt_at_invoice",
+                result.get("invoice_origin"),
+            )
+            result["invoice_origin"] = "pt_at_invoice"
+
     return result

@@ -35,7 +35,50 @@ logging.basicConfig(
 )
 logger = logging.getLogger("invoice-worker")
 
-_DEFAULT_INVOICE_FOLDER = "Invoices"
+# ── Destination IMAP folders ──────────────────────────────────────────────────
+_FOLDER_FATURAS    = "Faturas"    # unpaid invoices
+_FOLDER_PAGAMENTOS = "Pagamentos" # receipts / payment confirmations
+
+# invoice_origin values that mean "payment already made"
+_PAID_ORIGINS = frozenset({
+    "receipt", "fatura_recibo", "payment_confirmation", "bank_transfer",
+})
+
+# Portuguese AT document_type codes that mean "payment received"
+# FR = Fatura-Recibo, RC = Recibo, RG = Recibo Global
+_PAID_DOC_TYPES = frozenset({"FR", "RC", "RG"})
+
+
+def _resolve_folder(invoice_data: dict) -> str:
+    """Return the target IMAP folder for this invoice.
+
+    Priority:
+      1. document_type from QR code (most reliable — set by AT)
+      2. invoice_origin from LLM extraction / keyword rules
+      3. Fallback to Faturas (safer: better to file as unpaid than to lose it)
+    """
+    doc_type = (invoice_data.get("document_type") or "").upper().strip()
+    if doc_type in _PAID_DOC_TYPES:
+        return _FOLDER_PAGAMENTOS
+
+    origin = (invoice_data.get("invoice_origin") or "").lower().strip()
+    if origin in _PAID_ORIGINS:
+        return _FOLDER_PAGAMENTOS
+
+    return _FOLDER_FATURAS
+
+
+# ── AT certainty gate ─────────────────────────────────────────────────────────
+
+def _is_confirmed_at(invoice_data: dict) -> bool:
+    """Return True only when ATCUD was decoded from the QR code.
+
+    ATCUD (field H) is assigned by the Portuguese Tax Authority and
+    is present in every valid PT AT document since 2023. Its presence
+    is the single reliable proof that the PDF is a genuine AT invoice.
+    """
+    return bool((invoice_data.get("atcud") or "").strip())
+
 
 # Fields that indicate the extraction actually found something real.
 _MEANINGFUL_FIELDS = ("nif_seller", "nif_buyer", "seller_name", "invoice_number", "total_amount")
@@ -76,28 +119,53 @@ async def _notify_telegram(bot_token: str, chat_id: str, message: str) -> None:
         logger.warning(f"Telegram notification failed: {e}")
 
 
-def _build_invoice_message(email_row: EmailMessage, invoice_data: dict, origin: str) -> str:
+def _build_invoice_message(
+    email_row: EmailMessage,
+    invoice_data: dict,
+    origin: str,
+    *,
+    moved_to: str | None = None,
+    needs_review: bool = False,
+) -> str:
     origin_labels = {
-        "pt_at":                "🇵🇹 AT Invoice",
-        "international":        "🌍 International",
-        "payment_confirmation": "💳 Payment Confirmation",
-        "bank_transfer":        "🏦 Bank Transfer",
-        "receipt":              "🧾 Receipt",
+        "pt_at_invoice":        "🇵🇹 Fatura AT",
+        "pt_at":                "🇵🇹 Fatura AT",
+        "fatura_recibo":        "🇵🇹 Fatura-Recibo (pago)",
+        "international":        "🌍 International Invoice",
+        "payment_confirmation": "💳 Pagamento Confirmado",
+        "bank_transfer":        "🏦 Transferência Bancária",
+        "receipt":              "🧾 Recibo",
     }
     label = origin_labels.get(origin, origin)
-    parts = [f"🧾 *Invoice Extracted* — {label}"]
+
+    if needs_review:
+        header = f"⚠️ *Needs Review* — {label}"
+    else:
+        header = f"✅ *Filed* — {label}"
+
+    parts = [header]
     parts.append(f"📧 {email_row.from_address or '?'}")
     if email_row.subject:
         parts.append(f"📋 {email_row.subject}")
+    if invoice_data.get("atcud"):
+        parts.append(f"ATCUD: `{invoice_data['atcud']}`")
+    if invoice_data.get("document_type_description"):
+        parts.append(f"Tipo: {invoice_data['document_type_description']}")
+    elif invoice_data.get("document_type"):
+        parts.append(f"Tipo: {invoice_data['document_type']}")
     if invoice_data.get("nif_seller"):
-        parts.append(f"NIF Seller: `{invoice_data['nif_seller']}`")
+        parts.append(f"NIF: `{invoice_data['nif_seller']}`")
     if invoice_data.get("seller_name"):
-        parts.append(f"Seller: {invoice_data['seller_name']}")
+        parts.append(f"Fornecedor: {invoice_data['seller_name']}")
     if invoice_data.get("invoice_number"):
-        parts.append(f"Invoice #: `{invoice_data['invoice_number']}`")
+        parts.append(f"Nº: `{invoice_data['invoice_number']}`")
     if invoice_data.get("total_amount") is not None:
         currency = invoice_data.get("currency") or "EUR"
         parts.append(f"Total: *{invoice_data['total_amount']} {currency}*")
+    if moved_to:
+        parts.append(f"📁 → `{moved_to}`")
+    elif needs_review:
+        parts.append("_Não movido — verificação manual necessária_")
     return "\n".join(parts)
 
 
@@ -259,17 +327,30 @@ async def _process_email_by_id(
             )
             return
 
-        await _archive_pdfs(email_row, settings, invoice_data)
-
-        target = _DEFAULT_INVOICE_FOLDER
-        await _move_email(email_row, acc, settings, target)
-
-        msg = _build_invoice_message(
-            email_row, invoice_data, invoice_data.get("invoice_origin", "pt_at")
-        )
-        await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
-
-        await _finalize_email(session_factory, email_row.id, target, invoice_data)
+        if _is_confirmed_at(invoice_data):
+            # Full automation: ATCUD present → genuine AT document
+            await _archive_pdfs(email_row, settings, invoice_data)
+            target = _resolve_folder(invoice_data)
+            await _move_email(email_row, acc, settings, target)
+            msg = _build_invoice_message(
+                email_row, invoice_data,
+                invoice_data.get("invoice_origin", "pt_at"),
+                moved_to=target,
+            )
+            await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
+            await _finalize_email(session_factory, email_row.id, target, invoice_data)
+        else:
+            # No ATCUD → foreign / unknown PDF — notify for manual review, do not move
+            logger.warning(
+                f"Email {email_id}: PDF extracted data but no ATCUD — "
+                "notifying only, leaving email untouched"
+            )
+            msg = _build_invoice_message(
+                email_row, invoice_data,
+                invoice_data.get("invoice_origin", "international"),
+                needs_review=True,
+            )
+            await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
 
     # ── Financial body path ───────────────────────────────────────────────────
     elif classification == "financial_body":
@@ -283,15 +364,16 @@ async def _process_email_by_id(
         )
 
         if _has_meaningful_data(invoice_data):
-            target = _DEFAULT_INVOICE_FOLDER
-            await _move_email(email_row, acc, settings, target)
-
+            # Body-only extraction: notify for manual review, never auto-move
+            logger.info(
+                f"Email {email_id}: body extraction successful — notifying for manual review"
+            )
             msg = _build_invoice_message(
                 email_row, invoice_data,
                 invoice_data.get("invoice_origin", "payment_confirmation"),
+                needs_review=True,
             )
             await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
-            await _finalize_email(session_factory, email_row.id, target, invoice_data)
         else:
             logger.warning(
                 f"Body extraction returned no meaningful data for email {email_id} — leaving for manual review"

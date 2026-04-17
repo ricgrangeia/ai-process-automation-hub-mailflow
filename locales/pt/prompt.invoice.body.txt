@@ -8,8 +8,8 @@ Corpo:
 Extrai todos os campos financeiros disponíveis e devolve APENAS um objeto JSON com estes campos (usa null para valores em falta):
 
 {{
-  "invoice_origin": "<um de: payment_confirmation | bank_transfer | receipt | international>",
-  "seller_name": "<nome da empresa ou pessoa que recebeu o pagamento>",
+  "invoice_origin": "<um de: pt_at_invoice | fatura_recibo | receipt | payment_confirmation | bank_transfer | international>",
+  "seller_name": "<nome da empresa ou pessoa que emitiu ou recebeu o pagamento>",
   "seller_country": "<código ISO de 2 letras do país ou null>",
   "invoice_number": "<número de fatura ou referência>",
   "receipt_number": "<número de recibo se aplicável>",
@@ -29,10 +29,24 @@ Extrai todos os campos financeiros disponíveis e devolve APENAS um objeto JSON 
   "mb_data_limite": "<prazo Multibanco AAAA-MM-DD ou null>"
 }}
 
-Regras:
-- invoice_origin deve ser exatamente um de: payment_confirmation, bank_transfer, receipt, international
-- Usa payment_confirmation para pagamentos com cartão, PayPal, MBWay e confirmações similares
-- Usa bank_transfer para transferências bancárias e extratos
-- Usa receipt para recibos de lojas físicas ou online
-- Usa international para faturas estrangeiras sem AT/ATCUD português
-- Devolve APENAS o objeto JSON, sem explicação, sem blocos markdown
+## Regras para invoice_origin — lê com atenção, este é o campo mais importante
+
+**Documentos NÃO PAGOS** (o dinheiro ainda não foi pago — usa quando o documento é um pedido de pagamento):
+- `pt_at_invoice` — "Fatura" (FT) ou "Fatura Simplificada" (FS) portuguesa emitida ao abrigo da legislação fiscal portuguesa (AT/ATCUD presente). Sinais: "fatura", "ATCUD", NIF português, referência Multibanco "para pagamento", "prazo de pagamento", "data limite", "valor a pagar".
+- `international` — Fatura estrangeira não emitida segundo as regras da AT portuguesa. Sinais: vendedor não-PT, sem ATCUD, valores em moeda diferente ou idioma misto.
+
+**Documentos PAGOS** (o dinheiro JÁ foi recebido — usa quando o documento confirma um pagamento concluído):
+- `fatura_recibo` — "Fatura-Recibo" (FR) portuguesa: fatura E recibo num só documento emitido no momento do pagamento — o pagamento foi feito imediatamente. Sinais: "fatura-recibo", "fatura recibo", tipo de documento FR, "recebido", "liquidado".
+- `receipt` — Recibo (RC) de um pagamento já efetuado. Sinais: "recibo", "comprovativo", "pago", "receipt", comprovativo de loja física ou online, encomenda confirmada.
+- `payment_confirmation` — Confirmação de que um pagamento por cartão, MBWay, PayPal ou similar foi concluído. Sinais: "pagamento confirmado", "pagamento efetuado", "pagamento recebido", confirmação MBWay.
+- `bank_transfer` — Confirmação de uma transferência bancária concluída. Sinais: "transferência efetuada", "transferência concluída", "wire transfer confirmed".
+
+## Distinções importantes (erros comuns a evitar)
+
+- Uma "Fatura" com referência Multibanco está NÃO PAGA — é um pedido de pagamento, não um recibo. Usa `pt_at_invoice`.
+- Uma "Fatura-Recibo" significa fatura E recibo num só — está PAGA. Usa `fatura_recibo`.
+- "Recibo de pagamento" ou "comprovativo de pagamento" = já pago. Usa `receipt` ou `payment_confirmation`.
+- "Para pagamento", "prazo de pagamento", "referência para pagamento" = ainda NÃO pago.
+- Se o e-mail contém apenas entidade+referência+montante Multibanco sem mensagem de confirmação, a fatura está NÃO PAGA.
+
+Devolve APENAS o objeto JSON, sem explicação, sem blocos markdown.

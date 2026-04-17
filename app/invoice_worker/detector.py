@@ -29,17 +29,38 @@ _AMOUNT_RE = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
-# Marketing / newsletter signals — any of these → not a financial email
+# Marketing / newsletter signals in body text — any of these → skip
 _MARKETING_RE = re.compile(
-    r"unsubscribe|cancelar\s+subscrição|cancelar\s+inscrição|abmelden"
+    r"unsubscribe|cancelar\s+a?\s*subscrição|cancelar\s+a?\s*inscrição|abmelden"
     r"|list-unsubscribe"          # email header value leaked into body parsers
     r"|opt.?out"
     r"|you('re| are) receiving this"
     r"|esta mensagem foi enviada para"
     r"|if you no longer wish to receive"
     r"|view\s+(this\s+)?(email|message)\s+in\s+(your\s+)?browser"
-    r"|ver\s+no\s+navegador",
+    r"|ver\s+no\s+navegador"
+    r"|manage\s+(your\s+)?notifications?"
+    r"|gerir\s+(as\s+suas\s+)?notificações",
     re.IGNORECASE | re.UNICODE,
+)
+
+# Known social-network / notification-only sender domains that never carry invoices
+_SOCIAL_SENDER_RE = re.compile(
+    r"@(facebookmail\.com"
+    r"|notification\.google\.com"
+    r"|accounts\.google\.com"
+    r"|twitter\.com|x\.com"
+    r"|linkedin\.com"
+    r"|instagram\.com|mail\.instagram\.com"
+    r"|tiktok\.com"
+    r"|pinterest\.com"
+    r"|reddit\.com|redditmail\.com"
+    r"|notification\.apple\.com|appleid\.apple\.com"
+    r"|mail\.youtube\.com"
+    r"|notification\.whatsapp\.com"
+    r"|spotifyemail\.com"
+    r")$",
+    re.IGNORECASE,
 )
 
 # Bounce / delivery-failure signals — check sender address and subject
@@ -124,9 +145,18 @@ def is_bounce_email(parsed_email: dict) -> bool:
 
 def is_marketing_email(parsed_email: dict) -> bool:
     """
-    Return True if the email looks like a newsletter or marketing message.
-    Checks both the List-Unsubscribe header and body text.
+    Return True if the email looks like a newsletter, marketing, or social-
+    network notification — none of which will ever contain invoice data.
+
+    Checks (in order):
+      1. Sender domain against known social/notification platforms
+      2. List-Unsubscribe header
+      3. Body text for unsubscribe / notification management language
     """
+    from_addr = parsed_email.get("from_address") or ""
+    if _SOCIAL_SENDER_RE.search(from_addr):
+        return True
+
     headers: dict = parsed_email.get("headers") or {}
     if headers.get("list-unsubscribe") or headers.get("List-Unsubscribe"):
         return True
