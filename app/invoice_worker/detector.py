@@ -214,8 +214,8 @@ def classify_email(
     if has_pdf_attachments(parsed_email):
         return "pdf_invoice"
     # Only apply the marketing filter to body-only emails (no PDF).
-    if is_marketing_email(parsed_email):
-        return None
-    if has_financial_keywords(parsed_email, keyword_re):
-        return "financial_body"
+    # if is_marketing_email(parsed_email):
+    #     return None
+    # if has_financial_keywords(parsed_email, keyword_re):
+    #     return "financial_body"
     return None
