@@ -1805,6 +1805,25 @@ def page_settings(engine):
             st.warning(t("page.settings.keywords_none"))
         else:
             st.caption(t("page.settings.keywords_pills_hint"))
+            st.markdown("""
+<style>
+/* Selected keyword pills — cyan */
+div[data-testid="stPills"] button[aria-checked="true"] {
+    background-color: #0891b2 !important;
+    border-color: #0891b2 !important;
+    color: #ffffff !important;
+}
+div[data-testid="stPills"] button[aria-checked="true"]:hover {
+    background-color: #0e7490 !important;
+    border-color: #0e7490 !important;
+}
+/* Deselected (marked for removal) — keep neutral */
+div[data-testid="stPills"] button[aria-checked="false"] {
+    background-color: transparent !important;
+    border-color: #94a3b8 !important;
+    color: #94a3b8 !important;
+}
+</style>""", unsafe_allow_html=True)
             # st.pills returns the currently-selected subset; deselecting = marking for removal
             remaining = st.pills(
                 label="keywords",
