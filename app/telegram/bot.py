@@ -269,8 +269,8 @@ async def _build_rule_keywords(subject: str, body: str, settings) -> list[str]:
     produces noise (tracking IDs, random long strings) that makes rules
     brittle and unlikely to fire on future emails.
 
-    If no filter keywords match, returns [] so the rule is created with
-    sender_email only (min_match=1), which is still correct and predictable.
+    If no filter keywords match, returns [] — the caller must skip rule creation
+    entirely (min_match must always be 2: sender_email + at least 1 keyword).
     """
     import asyncio as _asyncio
 

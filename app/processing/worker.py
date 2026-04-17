@@ -215,11 +215,13 @@ async def _extract_invoice_for_conflict(email, settings, session_factory) -> dic
     return None
 
 
-async def _auto_save_rule(session_factory, email, folder: str, confidence: float) -> None:
+async def _auto_save_rule(session_factory, email, folder: str, confidence: float, settings=None) -> None:
     """
-    Auto-save a high-confidence LLM decision as a learned rule (sender_email condition).
-    Rules are always scoped to the exact sender address — never to the domain.
-    Skips if a rule for this exact address already exists.
+    Auto-save a high-confidence LLM decision as a learned rule.
+
+    Rules always use sender_email + at least one inbox-filter keyword (min_match=2).
+    If no configured filter keywords are found in the email, rule creation is skipped
+    to avoid creating broad rules that would fire on unrelated emails from the same sender.
     """
     from app.classification.learned_rules import LearnedRule
 
@@ -228,6 +230,25 @@ async def _auto_save_rule(session_factory, email, folder: str, confidence: float
         return
 
     sender = email.from_address.lower()
+
+    # Require at least one inbox-filter keyword to be present in the email
+    keywords: list[str] = []
+    if settings:
+        try:
+            import asyncio as _asyncio
+            from app.core.system_settings import get_inbox_keywords
+            db_url = settings.database_url.replace("+asyncpg", "")
+            filter_kws: list[str] = await _asyncio.to_thread(get_inbox_keywords, db_url)
+            text = f"{email.subject or ''} {email.body_text or ''}".lower()
+            keywords = [kw.lower() for kw in filter_kws if kw.lower() in text]
+        except Exception as e:
+            logger.warning(f"Auto-learn: keyword lookup failed: {e}")
+
+    if not keywords:
+        logger.info(
+            f"Auto-learn: skipping rule for {sender!r} — no inbox filter keywords matched email {email.id}"
+        )
+        return
 
     try:
         async with session_factory() as session:
@@ -245,17 +266,23 @@ async def _auto_save_rule(session_factory, email, folder: str, confidence: float
                         logger.debug(f"Auto-learn: rule already exists for {sender}, skipping.")
                         return
 
-            # Insert new rule scoped to the exact sender address
+            conditions = [{"type": "sender_email", "value": sender}]
+            for kw in keywords:
+                conditions.append({"type": "keyword", "value": kw})
+
             new_rule = LearnedRule(
                 tenant_id=email.tenant_id,
-                conditions=[{"type": "sender_email", "value": sender}],
-                min_match=1,
+                conditions=conditions,
+                min_match=2,
                 actions=[{"type": "move_folder", "folder": folder}],
                 created_from_email_id=email.id,
             )
             session.add(new_rule)
             await session.commit()
-            logger.info(f"🤖 Auto-saved rule: sender_email={sender} → {folder} (confidence={confidence:.2f})")
+            logger.info(
+                f"🤖 Auto-saved rule: sender_email={sender} + {len(keywords)} keyword(s) → {folder} "
+                f"(confidence={confidence:.2f})"
+            )
 
     except Exception as e:
         logger.warning(f"Auto-learn rule save failed: {e}")
@@ -525,7 +552,7 @@ async def ai_worker_loop():
                         and source != "rule"
                         and confidence >= AUTO_LEARN_CONFIDENCE_THRESHOLD
                     ):
-                        await _auto_save_rule(session_factory, email, folder, confidence)
+                        await _auto_save_rule(session_factory, email, folder, confidence, settings)
                 else:
                     logger.error(f"❌ DB Update failed: No row with ID {email_id} was affected.")
 
