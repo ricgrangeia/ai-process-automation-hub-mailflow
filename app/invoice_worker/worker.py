@@ -465,17 +465,18 @@ async def _process_email_by_id(
                 )
                 await _set_pending_review(session_factory, email_id, target)
         else:
-            # No ATCUD → foreign / unknown PDF — notify for manual review, do not move
-            logger.warning(
-                f"Email {email_id}: PDF extracted data but no ATCUD — "
-                "notifying only, leaving email untouched"
+            # No ATCUD → foreign / unknown PDF — send review card so user can
+            # approve (move + archive) or reject manually.
+            logger.info(
+                f"Email {email_id}: PDF extracted but no ATCUD "
+                f"(international/unknown) — sending review card"
             )
-            msg = _build_invoice_message(
-                email_row, invoice_data,
-                invoice_data.get("invoice_origin", "international"),
-                needs_review=True,
+            target = _resolve_folder(invoice_data)
+            await _send_invoice_review_card(
+                settings.telegram_bot_token, settings.telegram_chat_id,
+                email_row, invoice_data, target,
             )
-            await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
+            await _set_pending_review(session_factory, email_id, target)
 
     # ── Financial body path ───────────────────────────────────────────────────
     elif classification == "financial_body":
