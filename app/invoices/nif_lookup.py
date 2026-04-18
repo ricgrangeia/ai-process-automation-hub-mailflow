@@ -94,6 +94,9 @@ async def resolve_seller_name(
     cached = await asyncio.to_thread(_db_lookup)
     if cached:
         logger.debug(f"NIF {nif} cached as '{cached}'")
+        # Always backfill — older invoices may have been saved before this NIF
+        # was resolved, leaving seller_name = NULL even though the name is known.
+        await asyncio.to_thread(_db_update_invoices, cached)
         return cached
 
     # 2. Call ai-api tool server
