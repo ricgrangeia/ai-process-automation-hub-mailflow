@@ -1739,6 +1739,31 @@ def page_settings(engine):
         st.error(f"❌ Could not import system_settings: {e}")
         return
 
+    # ── Month name language ───────────────────────────────────────────────────
+    locale_options = list(MONTH_LOCALES.keys())
+    locale_labels  = [f"{code} — {MONTH_LOCALES[code][0]}  ({MONTH_LOCALES[code][1][0]})" for code in locale_options]
+    current_idx    = locale_options.index(current_locale) if current_locale in locale_options else 0
+
+    with st.form("month_locale_form"):
+        selected_idx = st.selectbox(
+            "📅 Month name language",
+            options=range(len(locale_options)),
+            format_func=lambda i: locale_labels[i],
+            index=current_idx,
+            help="Controls the language of {month_name} in the folder path (e.g. April → Abril → Avril).",
+        )
+        if st.form_submit_button("💾 Save language"):
+            try:
+                set_setting(engine, MONTH_LOCALE_KEY, locale_options[selected_idx])
+                _set_flash("success", t("page.settings.saved"))
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ {e}")
+
+    # derive preview month_name from whatever is currently saved
+    _preview_locale = get_setting(engine, MONTH_LOCALE_KEY) or MONTH_LOCALE_DEFAULT
+    _preview_month_name = MONTH_LOCALES.get(_preview_locale, MONTH_LOCALES["en"])[1][3]  # April = index 3
+
     # ── Folder Structure ──────────────────────────────────────────────────────
     st.subheader(t("page.settings.archive_header"))
 
@@ -1800,30 +1825,7 @@ def page_settings(engine):
             except Exception as e:
                 st.error(f"❌ {e}")
 
-    # ── Month name language ───────────────────────────────────────────────────
-    locale_options = list(MONTH_LOCALES.keys())
-    locale_labels  = [f"{code} — {MONTH_LOCALES[code][0]}  ({MONTH_LOCALES[code][1][0]})" for code in locale_options]
-    current_idx    = locale_options.index(current_locale) if current_locale in locale_options else 0
-
-    with st.form("month_locale_form"):
-        selected_idx = st.selectbox(
-            "📅 Month name language",
-            options=range(len(locale_options)),
-            format_func=lambda i: locale_labels[i],
-            index=current_idx,
-            help="Controls the language of {month_name} in the folder path (e.g. April → Abril → Avril).",
-        )
-        if st.form_submit_button("💾 Save language"):
-            try:
-                set_setting(engine, MONTH_LOCALE_KEY, locale_options[selected_idx])
-                _set_flash("success", t("page.settings.saved"))
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ {e}")
-
-    # derive preview month_name from whatever is currently saved
-    _preview_locale = get_setting(engine, MONTH_LOCALE_KEY) or MONTH_LOCALE_DEFAULT
-    _preview_month_name = MONTH_LOCALES.get(_preview_locale, MONTH_LOCALES["en"])[1][3]  # April = index 3
+   
 
     # ── Folder structure preview ──────────────────────────────────────────────
     _preview_tokens_folder = {
