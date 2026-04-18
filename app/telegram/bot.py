@@ -58,6 +58,7 @@ _pending_path: dict[int, tuple] = {}
 _pending_keywords: dict[int, tuple] = {}
 # Stores pending new-folder name input per chat: {chat_id: email_id}
 _pending_new_folder: dict[int, int] = {}
+_pending_inv_folder: dict[int, int] = {}  # {chat_id: email_id} for invoice new-folder flow
 
 # ── Rule draft card state ──────────────────────────────────────────────────────
 # Single interactive card that the user configures before saving a rule.
@@ -855,6 +856,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _ask_keywords_step(update.message, chat_id, email_id, folder, with_move, text, keywords)
         return
 
+    # New folder for invoice approval
+    if chat_id in _pending_inv_folder:
+        email_id = _pending_inv_folder.pop(chat_id)
+        folder_name = text.strip()
+        if not folder_name:
+            await update.message.reply_text(t("telegram.folder.empty_name_error"))
+            return
+        session_factory, settings = get_session_factory()
+        result = await _execute_inv_approve(
+            session_factory, settings, email_id, folder_name, _telegram_actor(update.effective_user)
+        )
+        await update.message.reply_text(_inv_approve_reply(result), parse_mode="Markdown")
+        return
+
     # New folder name input
     if chat_id in _pending_new_folder:
         email_id = _pending_new_folder.pop(chat_id)
@@ -1343,20 +1358,21 @@ async def handle_rv_set_sender(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 # ------------------------------------------------------------------------------
-# Invoice worker review handlers: inv_approve:{email_id} / inv_reject:{email_id}
+# Invoice worker review handlers
 #
-# These are sent by the invoice worker when it encounters a new (untrusted) sender.
-# On approve: archive PDFs + move + auto-create sender rule + finalize.
-# On reject:  mark email as rejected, leave in inbox, no rule created.
+# inv_approve:{email_id}           — approve to the pre-resolved folder
+# inv_approve_to:{email_id}:{folder} — approve to a user-selected folder
+# inv_folder_new_request:{email_id}  — ask user to type a new folder name
+# inv_reject:{email_id}            — reject, leave in inbox
 # ------------------------------------------------------------------------------
 
-async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await _safe_answer(query)
-
-    email_id = int(query.data.split(":")[1])
-    session_factory, settings = get_session_factory()
-
+async def _execute_inv_approve(
+    session_factory, settings, email_id: int, target_folder: str, actor_name: str
+) -> dict:
+    """
+    Core invoice approval logic shared by all inv_approve* handlers.
+    Returns a result dict; callers handle the Telegram reply.
+    """
     async with session_factory() as session:
         email = (await session.execute(
             select(EmailMessage).where(EmailMessage.id == email_id)
@@ -1366,39 +1382,30 @@ async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )).scalar_one_or_none() if email else None
 
     if not email or not account:
-        await query.edit_message_text(f"❌ Email {email_id} not found.")
-        return
+        return {"ok": False, "error": f"Email {email_id} not found"}
 
-    # Target folder was stored in classification_label when the review card was sent
-    target_folder = email.classification_label or "Faturas"
-
-    # Load extracted invoice data from DB
     from app.invoices.models import Invoice
     async with session_factory() as session:
         inv_row = (await session.execute(
             select(Invoice).where(Invoice.email_id == email_id)
         )).scalar_one_or_none()
 
-    # Convert Invoice model to plain dict (Decimal → float for archive helpers)
     if inv_row:
-        invoice_data = {}
-        for col in inv_row.__table__.columns:
-            val = getattr(inv_row, col.name)
-            invoice_data[col.name] = float(val) if hasattr(val, "__float__") and val is not None else val
+        invoice_data = {
+            col.name: (float(v) if hasattr(v := getattr(inv_row, col.name), "__float__") and v is not None else v)
+            for col in inv_row.__table__.columns
+        }
     else:
         invoice_data = {}
 
-    # Archive PDFs
     try:
         from app.invoice_worker.worker import _archive_pdfs
         await _archive_pdfs(email, settings, invoice_data)
     except Exception as e:
         logger.warning(f"Archive PDFs failed for email {email_id}: {e}")
 
-    # Move email
     move_ok = await _do_move(settings, email, account, target_folder)
 
-    # Mark seller as trusted so future invoices from this NIF bypass the review gate
     if inv_row and inv_row.nif_seller:
         from app.sellers.models import Seller
         async with session_factory() as session:
@@ -1418,13 +1425,13 @@ async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await session.commit()
         logger.info(f"Marked seller NIF {inv_row.nif_seller!r} as trusted")
 
-    # Finalize email status
     async with session_factory() as session:
         await session.execute(
             sa_update(EmailMessage)
             .where(EmailMessage.id == email_id)
             .values(
                 status="moved" if move_ok else "failed_move",
+                classification_label=target_folder,
                 processed_at=datetime.now(timezone.utc),
                 ai_source="invoice_worker",
                 sender_type="company",
@@ -1435,7 +1442,7 @@ async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await log_audit(
         session_factory,
         actor_type="telegram",
-        actor_name=_telegram_actor(query.from_user),
+        actor_name=actor_name,
         action="invoice.approved",
         entity_type="email",
         entity_id=email_id,
@@ -1443,14 +1450,112 @@ async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
         details={"folder": target_folder, "move_ok": move_ok},
     )
 
-    folder_line = f"→ `{target_folder}`" if move_ok else "_(move failed — check IMAP)_"
+    return {"ok": True, "email": email, "inv_row": inv_row, "target_folder": target_folder, "move_ok": move_ok}
+
+
+def _inv_approve_reply(result: dict) -> str:
+    if not result["ok"]:
+        return f"❌ {result['error']}"
+    inv_row = result["inv_row"]
+    folder_line = f"→ `{result['target_folder']}`" if result["move_ok"] else "_(move failed — check IMAP)_"
     seller_line = f"🏢 NIF `{inv_row.nif_seller}` trusted" if (inv_row and inv_row.nif_seller) else ""
-    await query.edit_message_text(
+    return (
         f"✅ *Approved!*\n\n"
-        f"📧 `{email.from_address}`\n"
+        f"📧 `{result['email'].from_address}`\n"
         f"📁 {folder_line}\n"
         + (f"{seller_line}\n\n" if seller_line else "\n")
-        + f"Future invoices from this seller will be processed automatically.",
+        + "Future invoices from this seller will be processed automatically."
+    )
+
+
+async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await _safe_answer(query)
+    email_id = int(query.data.split(":")[1])
+    session_factory, settings = get_session_factory()
+
+    async with session_factory() as session:
+        email = (await session.execute(
+            select(EmailMessage).where(EmailMessage.id == email_id)
+        )).scalar_one_or_none()
+
+    if not email:
+        await query.edit_message_text(f"❌ Email {email_id} not found.")
+        return
+
+    target_folder = email.classification_label or "Faturas"
+    result = await _execute_inv_approve(
+        session_factory, settings, email_id, target_folder, _telegram_actor(query.from_user)
+    )
+    await query.edit_message_text(_inv_approve_reply(result), parse_mode="Markdown")
+
+
+async def handle_inv_approve_to(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """User picked a different folder from the approval card grid."""
+    query = update.callback_query
+    await _safe_answer(query)
+    parts = query.data.split(":", 2)
+    email_id = int(parts[1])
+    target_folder = parts[2]
+    session_factory, settings = get_session_factory()
+    result = await _execute_inv_approve(
+        session_factory, settings, email_id, target_folder, _telegram_actor(query.from_user)
+    )
+    await query.edit_message_text(_inv_approve_reply(result), parse_mode="Markdown")
+
+
+async def handle_inv_recheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Re-queue an invoice for processing after the user adds a routing rule."""
+    query = update.callback_query
+    await _safe_answer(query)
+
+    email_id = int(query.data.split(":")[1])
+    session_factory, settings = get_session_factory()
+
+    async with session_factory() as session:
+        email = (await session.execute(
+            select(EmailMessage).where(EmailMessage.id == email_id)
+        )).scalar_one_or_none()
+
+    if not email:
+        await query.edit_message_text(f"❌ Email {email_id} not found.")
+        return
+
+    # Reset status to new so the worker processes it fresh
+    async with session_factory() as session:
+        await session.execute(
+            sa_update(EmailMessage)
+            .where(EmailMessage.id == email_id)
+            .values(status="new")
+        )
+        await session.commit()
+
+    # Re-enqueue to invoice worker
+    r = aioredis.from_url(settings.redis_url, decode_responses=True)
+    import json as _json
+    await r.lpush(INVOICE_QUEUE_KEY, _json.dumps({
+        "tenant_id":      email.tenant_id,
+        "email_id":       email_id,
+        "type":           "process_invoice",
+        "classification": "pdf_invoice",
+    }))
+    await r.aclose()
+
+    await log_audit(
+        session_factory,
+        actor_type="telegram",
+        actor_name=_telegram_actor(query.from_user),
+        action="invoice.recheck",
+        entity_type="email",
+        entity_id=email_id,
+        tenant_id=getattr(email, "tenant_id", None),
+        details={"reason": "unknown_doc_type"},
+    )
+
+    await query.edit_message_text(
+        f"🔄 *Rechecking invoice #{email_id}*\n\n"
+        f"📧 `{email.from_address}`\n\n"
+        f"The invoice has been re-queued. You'll receive a new notification shortly.",
         parse_mode="Markdown",
     )
 
@@ -1919,6 +2024,21 @@ async def handle_folder_new_request(update: Update, context: ContextTypes.DEFAUL
     )
 
 
+async def handle_inv_folder_new_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """User tapped ➕ New Folder on an invoice approval card."""
+    query = update.callback_query
+    await _safe_answer(query)
+
+    email_id = int(query.data.split(":")[1])
+    chat_id = update.effective_chat.id
+
+    _pending_inv_folder[chat_id] = email_id
+    await query.edit_message_text(
+        f"✏️ Type the new folder name to approve and move invoice #{email_id} there:\n\n"
+        f"(e.g. Faturas/2025, Fornecedores)"
+    )
+
+
 # ------------------------------------------------------------------------------
 # Entrypoint
 # ------------------------------------------------------------------------------
@@ -1970,8 +2090,11 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_rd_default_path, pattern=r"^rd_default_path$"))
     app.add_handler(CallbackQueryHandler(handle_rd_newfolder,    pattern=r"^rd_newfolder$"))
     # Invoice worker review callbacks
-    app.add_handler(CallbackQueryHandler(handle_inv_approve, pattern=r"^inv_approve:"))
-    app.add_handler(CallbackQueryHandler(handle_inv_reject,  pattern=r"^inv_reject:"))
+    app.add_handler(CallbackQueryHandler(handle_inv_approve,            pattern=r"^inv_approve:[^:]+$"))
+    app.add_handler(CallbackQueryHandler(handle_inv_approve_to,         pattern=r"^inv_approve_to:"))
+    app.add_handler(CallbackQueryHandler(handle_inv_folder_new_request, pattern=r"^inv_folder_new_request:"))
+    app.add_handler(CallbackQueryHandler(handle_inv_recheck,            pattern=r"^inv_recheck:"))
+    app.add_handler(CallbackQueryHandler(handle_inv_reject,             pattern=r"^inv_reject:"))
     # Review (learning mode) callbacks
     app.add_handler(CallbackQueryHandler(handle_rv_approve,    pattern=r"^rv_approve:"))
     app.add_handler(CallbackQueryHandler(handle_rv_folder,     pattern=r"^rv_folder:"))

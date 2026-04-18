@@ -35,37 +35,53 @@ logging.basicConfig(
 )
 logger = logging.getLogger("invoice-worker")
 
-# ── Destination IMAP folders ──────────────────────────────────────────────────
-_FOLDER_FATURAS    = "Faturas"    # unpaid invoices
-_FOLDER_PAGAMENTOS = "Pagamentos" # receipts / payment confirmations
-
-# invoice_origin values that mean "payment already made"
-_PAID_ORIGINS = frozenset({
-    "receipt", "fatura_recibo", "payment_confirmation", "bank_transfer",
-})
-
-# Portuguese AT document_type codes that mean "payment received"
-# FR = Fatura-Recibo, RC = Recibo, RG = Recibo Global
-_PAID_DOC_TYPES = frozenset({"FR", "RC", "RG"})
-
-
-def _resolve_folder(invoice_data: dict) -> str:
-    """Return the target IMAP folder for this invoice.
-
-    Priority:
-      1. document_type from QR code (most reliable — set by AT)
-      2. invoice_origin from LLM extraction / keyword rules
-      3. Fallback to Faturas (safer: better to file as unpaid than to lose it)
+async def _resolve_folder(session_factory, invoice_data: dict) -> str | None:
     """
-    doc_type = (invoice_data.get("document_type") or "").upper().strip()
-    if doc_type in _PAID_DOC_TYPES:
-        return _FOLDER_PAGAMENTOS
+    Return the target IMAP folder for this invoice using the document_type_routing table.
 
-    origin = (invoice_data.get("invoice_origin") or "").lower().strip()
-    if origin in _PAID_ORIGINS:
-        return _FOLDER_PAGAMENTOS
+    - Looks up the document_type code (e.g. "FT", "FR") in the routing table.
+    - If the seller NIF matches one of the buyer's own companies → folder_internal.
+    - Otherwise → folder_external.
+    - Returns None when the document type is not found in the routing table
+      (caller should alert the user and wait for them to add the routing rule).
+    - Falls back to "Faturas" on DB errors (fail-safe).
+    """
+    from app.invoices.document_routing import DocumentTypeRouting
+    from app.companies.models import Company
 
-    return _FOLDER_FATURAS
+    doc_type   = (invoice_data.get("document_type") or "").upper().strip()
+    nif_seller = (invoice_data.get("nif_seller") or "").strip()
+
+    if not doc_type:
+        return "Faturas"
+
+    try:
+        async with session_factory() as session:
+            routing = (await session.execute(
+                select(DocumentTypeRouting).where(
+                    DocumentTypeRouting.code == doc_type,
+                    DocumentTypeRouting.active == True,
+                )
+            )).scalar_one_or_none()
+
+            if not routing:
+                return None  # unknown type — caller must alert
+
+            is_internal = False
+            if nif_seller:
+                is_internal = (await session.execute(
+                    select(Company.id).where(
+                        Company.nif == nif_seller,
+                        Company.active == True,
+                    )
+                )).scalar_one_or_none() is not None
+
+        folder = routing.folder_internal if is_internal else routing.folder_external
+        return folder or "Faturas"
+
+    except Exception as e:
+        logger.warning(f"Document type routing lookup failed: {e} — falling back to Faturas")
+        return "Faturas"
 
 
 # ── AT certainty gate ─────────────────────────────────────────────────────────
@@ -102,71 +118,93 @@ def _has_meaningful_data(invoice_data: dict | None) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Telegram notification
+# Invoice Telegram card (unified — filed notification + approval request)
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _notify_telegram(bot_token: str, chat_id: str, message: str) -> None:
+async def _send_invoice_card(
+    bot_token: str,
+    chat_id: str,
+    email_row: EmailMessage,
+    invoice_data: dict,
+    target_folder: str,
+    *,
+    needs_approval: bool = False,
+    active_folders: list[str] | None = None,
+) -> None:
+    """
+    Single card for all invoice Telegram notifications.
+
+    needs_approval=False  →  ✅ Filed — no buttons (trusted seller, auto-processed)
+    needs_approval=True   →  🧾 Approval Required — Approve / Reject + folder grid + New Folder
+    """
     if not bot_token or not chat_id:
         return
+
+    header = "🧾 *New Invoice — Approval Required*" if needs_approval else "✅ *Invoice Filed*"
+
+    parts = [header, "", f"📧 {email_row.from_address or '?'}"]
+    if email_row.subject:
+        parts.append(f"📋 {email_row.subject}")
+    parts.append("─────────────────")
+    if invoice_data.get("seller_name"):
+        parts.append(f"🏪 {invoice_data['seller_name']}")
+    if invoice_data.get("nif_seller"):
+        parts.append(f"🪪 NIF: `{invoice_data['nif_seller']}`")
+    if invoice_data.get("invoice_number"):
+        doc_desc = invoice_data.get("document_type_description") or invoice_data.get("document_type", "")
+        num_line = f"📄 `{invoice_data['invoice_number']}`"
+        if doc_desc:
+            num_line += f" ({doc_desc})"
+        parts.append(num_line)
+    if invoice_data.get("invoice_date"):
+        parts.append(f"📅 {invoice_data['invoice_date']}")
+    if invoice_data.get("total_amount") is not None:
+        currency = invoice_data.get("currency") or "EUR"
+        parts.append(f"💶 Total: *{invoice_data['total_amount']} {currency}*")
+    if invoice_data.get("atcud"):
+        parts.append(f"ATCUD: `{invoice_data['atcud']}`")
+    parts.append("─────────────────")
+    parts.append(f"📁 → `{target_folder}`")
+
+    payload: dict = {
+        "chat_id": chat_id,
+        "text": "\n".join(parts),
+        "parse_mode": "Markdown",
+    }
+    if needs_approval:
+        keyboard = []
+        # Row 1: quick approve to resolved folder + reject
+        keyboard.append([
+            {"text": f"✅ Approve → {target_folder}", "callback_data": f"inv_approve:{email_row.id}"},
+            {"text": "❌ Reject", "callback_data": f"inv_reject:{email_row.id}"},
+        ])
+        # Folder grid: move to a different folder (excludes current target)
+        if active_folders:
+            other = [f for f in active_folders if f != target_folder]
+            for i in range(0, len(other), 2):
+                keyboard.append([
+                    {"text": f, "callback_data": f"inv_approve_to:{email_row.id}:{f}"}
+                    for f in other[i:i + 2]
+                ])
+        # New folder button
+        keyboard.append([
+            {"text": "➕ New Folder", "callback_data": f"inv_folder_new_request:{email_row.id}"}
+        ])
+        payload["reply_markup"] = {"inline_keyboard": keyboard}
+
     try:
         import httpx
         async with httpx.AsyncClient(timeout=15) as client:
             await client.post(
                 f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                json={"chat_id": chat_id, "text": message, "parse_mode": "Markdown"},
+                json=payload,
             )
+        logger.info(
+            f"Sent invoice card for email {email_row.id} "
+            f"({'approval required' if needs_approval else 'filed'})"
+        )
     except Exception as e:
-        logger.warning(f"Telegram notification failed: {e}")
-
-
-def _build_invoice_message(
-    email_row: EmailMessage,
-    invoice_data: dict,
-    origin: str,
-    *,
-    moved_to: str | None = None,
-    needs_review: bool = False,
-) -> str:
-    origin_labels = {
-        "pt_at_invoice":        "🇵🇹 Fatura AT",
-        "pt_at":                "🇵🇹 Fatura AT",
-        "fatura_recibo":        "🇵🇹 Fatura-Recibo (pago)",
-        "international":        "🌍 International Invoice",
-        "payment_confirmation": "💳 Pagamento Confirmado",
-        "bank_transfer":        "🏦 Transferência Bancária",
-        "receipt":              "🧾 Recibo",
-    }
-    label = origin_labels.get(origin, origin)
-
-    if needs_review:
-        header = f"⚠️ *Needs Review* — {label}"
-    else:
-        header = f"✅ *Filed* — {label}"
-
-    parts = [header]
-    parts.append(f"📧 {email_row.from_address or '?'}")
-    if email_row.subject:
-        parts.append(f"📋 {email_row.subject}")
-    if invoice_data.get("atcud"):
-        parts.append(f"ATCUD: `{invoice_data['atcud']}`")
-    if invoice_data.get("document_type_description"):
-        parts.append(f"Tipo: {invoice_data['document_type_description']}")
-    elif invoice_data.get("document_type"):
-        parts.append(f"Tipo: {invoice_data['document_type']}")
-    if invoice_data.get("nif_seller"):
-        parts.append(f"NIF: `{invoice_data['nif_seller']}`")
-    if invoice_data.get("seller_name"):
-        parts.append(f"Fornecedor: {invoice_data['seller_name']}")
-    if invoice_data.get("invoice_number"):
-        parts.append(f"Nº: `{invoice_data['invoice_number']}`")
-    if invoice_data.get("total_amount") is not None:
-        currency = invoice_data.get("currency") or "EUR"
-        parts.append(f"Total: *{invoice_data['total_amount']} {currency}*")
-    if moved_to:
-        parts.append(f"📁 → `{moved_to}`")
-    elif needs_review:
-        parts.append("_Não movido — verificação manual necessária_")
-    return "\n".join(parts)
+        logger.warning(f"Telegram invoice card failed: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -296,22 +334,30 @@ async def _is_trusted_seller(session_factory, invoice_data: dict) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Invoice review card (Telegram — Approve / Reject buttons)
-# ─────────────────────────────────────────────────────────────────────────────
 
-async def _send_invoice_review_card(
+async def _send_unknown_doctype_alert(
     bot_token: str,
     chat_id: str,
     email_row: EmailMessage,
     invoice_data: dict,
-    target_folder: str,
 ) -> None:
-    """Send a Telegram card with extracted invoice data and Approve / Reject buttons."""
+    """
+    Sent when an invoice has a valid ATCUD but its document type code is not
+    in the document_type_routing table. Asks the user to add the routing rule
+    and then recheck the invoice.
+    """
     if not bot_token or not chat_id:
         return
 
+    doc_type = invoice_data.get("document_type") or "?"
+    doc_desc = invoice_data.get("document_type_description") or ""
+
     parts = [
-        "🧾 *New Invoice — Approval Required*",
+        "⚠️ *Unknown Document Type*",
+        "",
+        f"An invoice arrived with ATCUD but document type `{doc_type}`"
+        + (f" ({doc_desc})" if doc_desc else "")
+        + " has no routing rule configured.",
         "",
         f"📧 {email_row.from_address or '?'}",
     ]
@@ -323,26 +369,22 @@ async def _send_invoice_review_card(
     if invoice_data.get("nif_seller"):
         parts.append(f"🪪 NIF: `{invoice_data['nif_seller']}`")
     if invoice_data.get("invoice_number"):
-        doc_desc = invoice_data.get("document_type_description") or invoice_data.get("document_type", "")
-        num_line = f"📄 `{invoice_data['invoice_number']}`"
-        if doc_desc:
-            num_line += f" ({doc_desc})"
-        parts.append(num_line)
-    if invoice_data.get("invoice_date"):
-        parts.append(f"📅 {invoice_data['invoice_date']}")
+        parts.append(f"📄 `{invoice_data['invoice_number']}`")
     if invoice_data.get("total_amount") is not None:
         currency = invoice_data.get("currency") or "EUR"
         parts.append(f"💶 Total: *{invoice_data['total_amount']} {currency}*")
     if invoice_data.get("atcud"):
         parts.append(f"ATCUD: `{invoice_data['atcud']}`")
     parts.append("─────────────────")
-    parts.append(f"📁 → `{target_folder}`")
+    parts.append("👉 Add a routing rule for this type in the dashboard, then tap *Recheck*.")
 
-    keyboard = {
-        "inline_keyboard": [[
-            {"text": "✅ Approve & Move",  "callback_data": f"inv_approve:{email_row.id}"},
-            {"text": "❌ Reject",           "callback_data": f"inv_reject:{email_row.id}"},
-        ]]
+    payload = {
+        "chat_id": chat_id,
+        "text": "\n".join(parts),
+        "parse_mode": "Markdown",
+        "reply_markup": {"inline_keyboard": [[
+            {"text": "🔄 Recheck Invoice", "callback_data": f"inv_recheck:{email_row.id}"},
+        ]]},
     }
 
     try:
@@ -350,16 +392,11 @@ async def _send_invoice_review_card(
         async with httpx.AsyncClient(timeout=15) as client:
             await client.post(
                 f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                json={
-                    "chat_id": chat_id,
-                    "text": "\n".join(parts),
-                    "parse_mode": "Markdown",
-                    "reply_markup": keyboard,
-                },
+                json=payload,
             )
-        logger.info(f"Sent invoice review card for email {email_row.id}")
+        logger.info(f"Sent unknown doc-type alert for email {email_row.id} (type={doc_type})")
     except Exception as e:
-        logger.warning(f"Telegram invoice review card failed: {e}")
+        logger.warning(f"Telegram unknown doc-type alert failed: {e}")
 
 
 async def _set_pending_review(
@@ -433,31 +470,50 @@ async def _process_email_by_id(
             )
             return
 
-        # Genuine AT document confirmed — resolve folder and act
-        target = _resolve_folder(invoice_data)
+        # Genuine AT document confirmed — resolve folder via routing table
+        target = await _resolve_folder(session_factory, invoice_data)
+
+        if target is None:
+            # Document type not in routing table — alert user and wait
+            doc_type = invoice_data.get("document_type", "?")
+            logger.warning(
+                f"Email {email_id}: document type '{doc_type}' has no routing rule — "
+                "sending alert, waiting for user to configure"
+            )
+            await _send_unknown_doctype_alert(
+                settings.telegram_bot_token, settings.telegram_chat_id,
+                email_row, invoice_data,
+            )
+            await _set_pending_review(session_factory, email_id, "Faturas")
+            return
+
         trusted = await _is_trusted_seller(session_factory, invoice_data)
 
         if trusted:
-            # Known sender — act immediately
-            logger.info(f"Email {email_id}: trusted sender — processing immediately")
+            # Trusted seller — act immediately, notify as filed
+            logger.info(f"Email {email_id}: trusted seller — processing immediately")
             await _archive_pdfs(email_row, settings, invoice_data)
             await _move_email(email_row, acc, settings, target)
-            msg = _build_invoice_message(
-                email_row, invoice_data,
-                invoice_data.get("invoice_origin", "pt_at"),
-                moved_to=target,
-            )
-            await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
-            await _finalize_email(session_factory, email_row.id, target, invoice_data)
-        else:
-            # New sender — ask for human approval before acting
-            logger.info(
-                f"Email {email_id}: new sender {email_row.from_address!r} — "
-                "sending review card, waiting for approval"
-            )
-            await _send_invoice_review_card(
+            await _send_invoice_card(
                 settings.telegram_bot_token, settings.telegram_chat_id,
                 email_row, invoice_data, target,
+                needs_approval=False,
+            )
+            await _finalize_email(session_factory, email_row.id, target, invoice_data)
+        else:
+            # New seller — ask for human approval before acting
+            logger.info(
+                f"Email {email_id}: new seller {email_row.from_address!r} — "
+                "sending approval card, waiting for human"
+            )
+            from app.folders.repository import get_active_folder_names as _get_folders
+            async with session_factory() as _s:
+                active_folders = await _get_folders(_s)
+            await _send_invoice_card(
+                settings.telegram_bot_token, settings.telegram_chat_id,
+                email_row, invoice_data, target,
+                needs_approval=True,
+                active_folders=active_folders,
             )
             await _set_pending_review(session_factory, email_id, target)
 

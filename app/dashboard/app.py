@@ -2470,6 +2470,157 @@ def page_companies(engine):
                         st.error(f"❌ {e}")
 
 
+def page_document_routing(engine):
+    st.title("📄 Document Type Routing")
+    st.caption(
+        "Define which IMAP folder each Portuguese AT document type is filed to. "
+        "Set separate folders for external suppliers and your own companies (internal NIFs)."
+    )
+    _show_flash()
+
+    # ── Load active folders for dropdowns ────────────────────────────────────
+    try:
+        folder_rows = pd.read_sql(
+            "SELECT name FROM folders WHERE is_active = true ORDER BY name", engine
+        )
+        folder_options = [""] + folder_rows["name"].tolist()
+    except Exception:
+        folder_options = ["", "Faturas", "Pagamentos"]
+
+    # ── Load routing table ────────────────────────────────────────────────────
+    try:
+        df = pd.read_sql(
+            "SELECT id, code, description, folder_external, folder_internal, active "
+            "FROM document_type_routing ORDER BY code",
+            engine,
+        )
+    except Exception as e:
+        st.error(f"❌ Could not load routing table: {e}")
+        return
+
+    if df.empty:
+        st.info("No document types configured. Run database migrations to populate defaults.")
+        return
+
+    st.markdown(
+        "**folder_external** — seller is an outside supplier  \n"
+        "**folder_internal** — seller NIF matches one of your Companies"
+    )
+
+    # ── Add new document type ─────────────────────────────────────────────────
+    with st.expander("➕ Add new document type", expanded=False):
+        with st.form("add_doc_routing", clear_on_submit=True):
+            col_code, col_desc = st.columns([1, 3])
+            new_code = col_code.text_input("Code *", placeholder="FT", max_chars=10)
+            new_desc = col_desc.text_input("Description *", placeholder="Fatura")
+            col_ext, col_int = st.columns(2)
+            add_ext_idx = 0
+            add_int_idx = 0
+            add_ext = col_ext.selectbox("External folder", options=folder_options, index=add_ext_idx, key="add_ext")
+            add_int = col_int.selectbox("Internal folder", options=folder_options, index=add_int_idx, key="add_int")
+            if st.form_submit_button("Add"):
+                if not new_code.strip() or not new_desc.strip():
+                    st.error("Code and Description are required.")
+                else:
+                    try:
+                        with engine.connect() as conn:
+                            conn.execute(
+                                text("""
+                                    INSERT INTO document_type_routing
+                                        (code, description, folder_external, folder_internal, active)
+                                    VALUES (:code, :desc, :ext, :int, true)
+                                """),
+                                {
+                                    "code": new_code.strip().upper(),
+                                    "desc": new_desc.strip(),
+                                    "ext":  add_ext or None,
+                                    "int":  add_int or None,
+                                },
+                            )
+                            conn.commit()
+                        _set_flash("success", f"✅ Added {new_code.strip().upper()}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+    st.markdown("---")
+
+    # ── Editable rows ─────────────────────────────────────────────────────────
+    for _, row in df.iterrows():
+        rid         = int(row["id"])
+        code        = row["code"]
+        description = row["description"]
+        f_ext       = row["folder_external"] or ""
+        f_int       = row["folder_internal"] or ""
+        active      = bool(row["active"])
+
+        status_icon = "🟢" if active else "🔴"
+        with st.expander(f"{status_icon} **{code}** — {description}", expanded=False):
+            with st.form(f"doc_routing_{rid}"):
+                col_ext, col_int, col_act = st.columns([3, 3, 1])
+
+                ext_idx = folder_options.index(f_ext) if f_ext in folder_options else 0
+                int_idx = folder_options.index(f_int) if f_int in folder_options else 0
+
+                new_ext = col_ext.selectbox(
+                    "External supplier folder",
+                    options=folder_options,
+                    index=ext_idx,
+                    key=f"ext_{rid}",
+                    help="Folder used when the seller NIF is an outside supplier",
+                )
+                new_int = col_int.selectbox(
+                    "Internal company folder",
+                    options=folder_options,
+                    index=int_idx,
+                    key=f"int_{rid}",
+                    help="Folder used when the seller NIF is one of your own companies",
+                )
+                new_active = col_act.checkbox("Active", value=active, key=f"act_{rid}")
+
+                col_save, col_del = st.columns([4, 1])
+                save_clicked   = col_save.form_submit_button("💾 Save")
+                delete_clicked = col_del.form_submit_button("🗑️ Delete", type="secondary")
+
+                if save_clicked:
+                    try:
+                        with engine.connect() as conn:
+                            conn.execute(
+                                text("""
+                                    UPDATE document_type_routing
+                                    SET folder_external = :ext,
+                                        folder_internal = :int,
+                                        active          = :active,
+                                        updated_at      = now()
+                                    WHERE id = :id
+                                """),
+                                {
+                                    "ext":    new_ext or None,
+                                    "int":    new_int or None,
+                                    "active": new_active,
+                                    "id":     rid,
+                                },
+                            )
+                            conn.commit()
+                        _set_flash("success", f"✅ {code} — {description} updated")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+                if delete_clicked:
+                    try:
+                        with engine.connect() as conn:
+                            conn.execute(
+                                text("DELETE FROM document_type_routing WHERE id = :id"),
+                                {"id": rid},
+                            )
+                            conn.commit()
+                        _set_flash("success", f"🗑️ {code} — {description} deleted")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+
 def page_audit_log(engine):
     st.title(t("page.audit.title"))
     _page_help("audit")
@@ -2767,6 +2918,7 @@ if login_screen():
         t("sidebar.nav_companies"),
         t("sidebar.nav_sellers"),
         t("sidebar.nav_invoices"),
+        "📄 Document Routing",
         t("sidebar.nav_audit"),
         t("sidebar.nav_settings"),
     ]
@@ -2798,6 +2950,8 @@ if login_screen():
         page_sellers(engine, settings)
     elif page == t("sidebar.nav_invoices"):
         page_invoices(engine)
+    elif page == "📄 Document Routing":
+        page_document_routing(engine)
     elif page == t("sidebar.nav_audit"):
         page_audit_log(engine)
     elif page == t("sidebar.nav_settings"):
