@@ -296,20 +296,27 @@ async def _finalize_email(
     if invoice_data:
         sender_name = invoice_data.get("seller_name") or invoice_data.get("nif_seller")
 
+    now = datetime.now(timezone.utc)
+
     async with session_factory() as session:
         row = await session.get(EmailMessage, email_id)
         if row:
-            row.status               = "moved"
-            row.classification_label = folder
-            row.processed_at         = datetime.now(timezone.utc)
-            row.ai_source            = "invoice_worker"
-            row.sender_type          = "company"
+            elapsed = (now - row.created_at).total_seconds() if row.created_at else None
+            row.status                  = "moved"
+            row.classification_label    = folder
+            row.processed_at            = now
+            row.ai_source               = "invoice_worker"
+            row.ai_confidence           = 1.0   # ATCUD confirmed = certain
+            row.processing_time_seconds = elapsed
+            row.sender_type             = "company"
             if sender_name and not row.sender_name:
                 row.sender_name = sender_name
             await session.commit()
             logger.info(
                 f"Finalized email {email_id} → {folder} "
-                f"(sender: company / {sender_name or '?'})"
+                f"(sender: company / {sender_name or '?'}, "
+                f"time: {elapsed:.1f}s)" if elapsed else
+                f"Finalized email {email_id} → {folder}"
             )
 
 
@@ -400,15 +407,21 @@ async def _send_unknown_doctype_alert(
 
 
 async def _set_pending_review(
-    session_factory, email_id: int, target_folder: str
+    session_factory, email_id: int, target_folder: str, *, ai_confidence: float | None = None
 ) -> None:
-    """Mark email as pending_review and store the resolved target folder."""
+    """Mark email as pending_review, store resolved folder, confidence, and time-to-pending."""
     from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
     async with session_factory() as session:
         row = await session.get(EmailMessage, email_id)
         if row:
-            row.status = "pending_review"
-            row.classification_label = target_folder
+            elapsed = (now - row.created_at).total_seconds() if row.created_at else None
+            row.status                  = "pending_review"
+            row.classification_label    = target_folder
+            row.ai_source               = "invoice_worker"
+            row.processing_time_seconds = elapsed   # time until human review needed
+            if ai_confidence is not None:
+                row.ai_confidence = ai_confidence
             await session.commit()
 
 
@@ -484,7 +497,7 @@ async def _process_email_by_id(
                 settings.telegram_bot_token, settings.telegram_chat_id,
                 email_row, invoice_data,
             )
-            await _set_pending_review(session_factory, email_id, "Faturas")
+            await _set_pending_review(session_factory, email_id, "Faturas", ai_confidence=0.0)
             return
 
         trusted = await _is_trusted_seller(session_factory, invoice_data)
@@ -515,7 +528,7 @@ async def _process_email_by_id(
                 needs_approval=True,
                 active_folders=active_folders,
             )
-            await _set_pending_review(session_factory, email_id, target)
+            await _set_pending_review(session_factory, email_id, target, ai_confidence=0.95)
 
     # ── Financial body path (temporarily disabled) ────────────────────────────
     elif classification == "financial_body":

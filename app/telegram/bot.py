@@ -1425,6 +1425,9 @@ async def _execute_inv_approve(
             await session.commit()
         logger.info(f"Marked seller NIF {inv_row.nif_seller!r} as trusted")
 
+    now = datetime.now(timezone.utc)
+    elapsed = (now - email.created_at).total_seconds() if email.created_at else None
+
     async with session_factory() as session:
         await session.execute(
             sa_update(EmailMessage)
@@ -1432,8 +1435,10 @@ async def _execute_inv_approve(
             .values(
                 status="moved" if move_ok else "failed_move",
                 classification_label=target_folder,
-                processed_at=datetime.now(timezone.utc),
+                processed_at=now,
                 ai_source="invoice_worker",
+                ai_confidence=1.0,
+                processing_time_seconds=elapsed,
                 sender_type="company",
             )
         )
