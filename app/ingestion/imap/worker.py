@@ -106,6 +106,11 @@ async def process_account_once(settings, session_factory, r, acc: EmailAccount, 
             )
             if exists.scalar_one_or_none() is not None:
                 logger.info(f"[{acc.username}] Skipping duplicate UID {uid}")
+                # For invoice_worker accounts, add to skip cache so this UID
+                # is not re-fetched on future cycles (e.g. when marked unread
+                # by the invoice worker after failing the ATCUD gate).
+                if managed_by == "invoice_worker":
+                    await r.sadd(_skip_key, uid)
                 continue
 
             parsed = parse_email(raw_bytes)

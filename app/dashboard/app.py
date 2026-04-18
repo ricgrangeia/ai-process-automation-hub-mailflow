@@ -2402,12 +2402,12 @@ def page_sellers(engine, settings):
     try:
         df = _sql(engine, """
             SELECT
-                s.nif, s.name, s.activity, s.cae, s.address, s.situation,
+                s.nif, s.name, s.trusted, s.activity, s.cae, s.address, s.situation,
                 COUNT(i.id) AS invoice_count,
                 MAX(i.invoice_date) AS last_invoice
             FROM sellers s
             LEFT JOIN invoices i ON i.nif_seller = s.nif
-            GROUP BY s.id, s.nif, s.name, s.activity, s.cae, s.address, s.situation
+            GROUP BY s.id, s.nif, s.name, s.trusted, s.activity, s.cae, s.address, s.situation
             ORDER BY invoice_count DESC, s.name
         """)
     except Exception as e:
@@ -2441,13 +2441,14 @@ def page_sellers(engine, settings):
     df_page["invoice_count"] = df_page["invoice_count"].fillna(0).astype(int)
     df_page.insert(0, "🗑️", False)
 
-    # Editable cols: name, activity, cae, address, situation (nif is the key — keep disabled)
-    _editable = ["🗑️", "name", "activity", "cae", "address", "situation"]
+    # Editable cols: trusted, name, activity, cae, address, situation (nif is the key)
+    _editable = ["🗑️", "trusted", "name", "activity", "cae", "address", "situation"]
     _disabled = [c for c in df_page.columns if c not in _editable]
 
     col_labels = {
         "nif":           t("page.sellers.col_nif"),
         "name":          t("page.sellers.col_name"),
+        "trusted":       "✅ Trusted",
         "activity":      t("page.sellers.col_activity"),
         "cae":           t("page.sellers.col_cae"),
         "address":       t("page.sellers.col_address"),
@@ -2460,7 +2461,8 @@ def page_sellers(engine, settings):
     edited = st.data_editor(
         df_page.rename(columns=col_labels),
         column_config={
-            "🗑️": st.column_config.CheckboxColumn("🗑️", help=t("dashboard.invoices.delete_col_help"), width="small"),
+            "🗑️":        st.column_config.CheckboxColumn("🗑️", help=t("dashboard.invoices.delete_col_help"), width="small"),
+            "✅ Trusted": st.column_config.CheckboxColumn("✅ Trusted", help="Trusted sellers are auto-filed without approval", width="small"),
         },
         disabled=[col_labels.get(c, c) for c in _disabled],
         use_container_width=True,
@@ -2476,7 +2478,7 @@ def page_sellers(engine, settings):
     changed_rows = []
     for idx in df_page.index:
         pos = df_page.index.get_loc(idx)
-        for col in ["name", "activity", "cae", "address", "situation"]:
+        for col in ["trusted", "name", "activity", "cae", "address", "situation"]:
             orig_val = df_page.at[idx, col]
             new_val  = edited_orig.iloc[pos][col] if col in edited_orig.columns else orig_val
             # Treat NaN and None as equal
@@ -2496,6 +2498,7 @@ def page_sellers(engine, settings):
                         nif_key = df_page.at[idx, "nif"]
                         conn.execute(text("""
                             UPDATE sellers SET
+                                trusted   = :trusted,
                                 name      = :name,
                                 activity  = :activity,
                                 cae       = :cae,
@@ -2505,6 +2508,7 @@ def page_sellers(engine, settings):
                             WHERE nif = :nif
                         """), {
                             "nif":       nif_key,
+                            "trusted":   bool(row.get("trusted")),
                             "name":      row.get("name") or None,
                             "activity":  row.get("activity") or None,
                             "cae":       row.get("cae") or None,

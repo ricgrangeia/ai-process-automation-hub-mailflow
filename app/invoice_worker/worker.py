@@ -26,7 +26,7 @@ from app.core.crypto import decrypt_secret
 from app.accounts.models import EmailAccount
 from app.messages.models import EmailMessage, Attachment
 from app.invoices.service import extract_invoice_from_pdf, save_invoice_from_pdf, save_invoice_from_body
-from app.ingestion.imap.client import connect_imap, move_message
+from app.ingestion.imap.client import connect_imap, move_message, mark_unseen
 from app.processing.queue import INVOICE_QUEUE_KEY
 
 logging.basicConfig(
@@ -296,6 +296,29 @@ async def _archive_pdfs(email_row: EmailMessage, settings, invoice_data: dict) -
 # Move email to IMAP folder
 # ─────────────────────────────────────────────────────────────────────────────
 
+async def _mark_email_unseen(
+    email_row: EmailMessage, acc: EmailAccount, settings
+) -> None:
+    """Mark the email as UNSEEN (unread) in IMAP so the user sees it needs attention."""
+    password = decrypt_secret(settings.master_key, acc.password_encrypted)
+
+    def _do_unseen():
+        conn = connect_imap(acc.imap_host, acc.imap_port or 993, acc.username, password)
+        try:
+            mark_unseen(conn, settings.inbox_folder, email_row.imap_uid)
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+
+    try:
+        await asyncio.to_thread(_do_unseen)
+        logger.info(f"Marked email {email_row.id} (UID {email_row.imap_uid}) as unread")
+    except Exception as e:
+        logger.error(f"IMAP mark-unseen failed for email {email_row.id}: {e}")
+
+
 async def _move_email(
     email_row: EmailMessage, acc: EmailAccount, settings, target_folder: str
 ) -> None:
@@ -524,8 +547,14 @@ async def _process_email_by_id(
 
         if not invoice_data:
             logger.info(
-                f"Email {email_id}: no PDF with ATCUD found — leaving untouched"
+                f"Email {email_id}: no PDF with ATCUD found — marking unread for manual review"
             )
+            await _mark_email_unseen(email_row, acc, settings)
+            async with session_factory() as session:
+                row = await session.get(EmailMessage, email_id)
+                if row:
+                    row.status = "skipped"
+                    await session.commit()
             return
 
         # ATCUD confirmed — now persist and enrich
