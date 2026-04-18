@@ -1,7 +1,0 @@
-
-Uma regra aprendida — baseada numa decisão humana confirmada anteriormente para este remetente — sugere que este email pertence a: {rule_hint}
-Valida cuidadosamente:
-- Se o conteúdo do email corresponde ao que esperarias para "{rule_hint}", devolve "{rule_hint}" com confiança >= 0,90.
-- Se o conteúdo parecer diferente do que a regra espera
-  (ex: mesmo domínio do remetente mas este email é uma newsletter, não uma fatura),
-  devolve a pasta correta de forma independente com a tua confiança real.

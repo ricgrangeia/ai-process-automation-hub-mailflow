@@ -382,35 +382,10 @@ async def ai_worker_loop():
 
                 active_folders = await get_active_folder_names(session)
 
-            # 3️⃣ Classify
+            # 3️⃣ Classify — LLM with sender context
+            # Rules inform as memory; LLM always makes the final decision.
             op_mode = await get_mode(r)
-
-            if op_mode == "rules_only":
-                # Legacy mode: deterministic rule match, no LLM
-                classification = await rule.classify(email)
-                if not classification:
-                    from app.classification.contracts import ClassificationResult
-                    classification = ClassificationResult("NeedsReview", 0.0)
-                    classification.source = "rules_only_nomatch"
-                else:
-                    classification.source = "rule"
-            elif op_mode == "llm_only":
-                # Legacy mode: LLM with no context injection
-                classification = await llm.classify(email, folders=active_folders)
-                if classification.confidence < 0.75:
-                    from app.classification.contracts import ClassificationResult
-                    low = ClassificationResult("NeedsReview", classification.confidence)
-                    low.source = getattr(classification, 'source', 'llm')
-                    low.sender_type = getattr(classification, 'sender_type', None)
-                    low.sender_name = getattr(classification, 'sender_name', None)
-                    low.prompt_tokens = getattr(classification, 'prompt_tokens', 0)
-                    low.completion_tokens = getattr(classification, 'completion_tokens', 0)
-                    low.total_tokens = getattr(classification, 'total_tokens', 0)
-                    classification = low
-            else:
-                # hybrid / auto_learn — LLM with sender context (recommended)
-                # Rules inform the LLM as memory; LLM always makes the final decision.
-                classification = await classifier.classify(email, folders=active_folders)
+            classification = await classifier.classify(email, folders=active_folders)
 
             # Validate the returned folder is in the active list.
             # If the LLM suggested an unknown name, preserve it as a suggestion for the human.
@@ -511,8 +486,6 @@ async def ai_worker_loop():
                         sender=email.from_address,
                         confidence=confidence,
                         source=source,
-                        rule_folder=getattr(classification, 'rule_folder', None),
-                        llm_folder=getattr(classification, 'llm_folder', None),
                         folders=active_folders,
                         suggested_folder=getattr(classification, 'suggested_folder', None),
                         invoice_info=invoice_info,

@@ -24,7 +24,7 @@ def _build_context_block(context: dict) -> str:
     """
     lines = []
 
-    history = context.get("sender_history") or []
+    history  = context.get("sender_history") or []
     keywords = context.get("matched_keywords") or []
 
     if history:
@@ -60,19 +60,9 @@ class LLMClassifier:
         email,
         context: dict | None = None,
         folders: list[str] | None = None,
-        # kept for backward compat (rules_only mode passes rule_hint)
-        rule_hint: str | None = None,
     ):
         folder_list = ", ".join(folders) if folders else "Invoices, Work, Personal, Marketing, Spam, Other"
-
-        # Context block: rich sender history + keywords (new default path)
-        if context is not None:
-            hint_block = _build_context_block(context)
-        elif rule_hint:
-            # Legacy path — rules_only mode or direct calls with rule_hint
-            hint_block = t("prompt.classifier.rule_hint", rule_hint=rule_hint)
-        else:
-            hint_block = ""
+        hint_block  = _build_context_block(context) if context else ""
 
         payload = {
             "model": self.settings.llm_model,
@@ -102,9 +92,7 @@ class LLMClassifier:
                 response = await client.post(
                     f"{self.settings.llm_base_url}/chat/completions",
                     json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.settings.llm_api_key}"
-                    }
+                    headers={"Authorization": f"Bearer {self.settings.llm_api_key}"}
                 )
             _llm_time = time.perf_counter() - _t0
 
@@ -123,22 +111,20 @@ class LLMClassifier:
                 return ClassificationResult("NeedsReview", 0.0)
 
             content = data["choices"][0]["message"]["content"]
-
             if not content:
                 logger.error("Empty content from LLM")
                 return ClassificationResult("NeedsReview", 0.0)
 
             try:
-                start = content.find("{")
-                end = content.rfind("}") + 1
-                json_str = content[start:end]
-                parsed = json.loads(json_str)
+                start    = content.find("{")
+                end      = content.rfind("}") + 1
+                parsed   = json.loads(content[start:end])
             except Exception:
-                logger.error(f"Failed to parse LLM JSON content: {content}")
+                logger.error(f"Failed to parse LLM JSON: {content}")
                 return ClassificationResult("NeedsReview", 0.0)
 
-            folder     = parsed.get("folder", "NeedsReview")
-            confidence = parsed.get("confidence", 0.0)
+            folder      = parsed.get("folder", "NeedsReview")
+            confidence  = parsed.get("confidence", 0.0)
             sender_type = parsed.get("sender_type")
             sender_name = parsed.get("sender_name")
 
@@ -155,18 +141,17 @@ class LLMClassifier:
                 sender_name = None
 
             result = ClassificationResult(folder, confidence)
-            result.source = "llm"
-            result.sender_type = sender_type
-            result.sender_name = sender_name
+            result.source           = "llm"
+            result.sender_type      = sender_type
+            result.sender_name      = sender_name
             result.llm_time_seconds = round(_llm_time, 3)
 
-            has_history = bool((context or {}).get("sender_history"))
-            has_keywords = bool((context or {}).get("matched_keywords"))
-            if has_history or has_keywords:
+            n_history  = len((context or {}).get("sender_history", []))
+            n_keywords = len((context or {}).get("matched_keywords", []))
+            if n_history or n_keywords:
                 logger.info(
                     f"LLM classified with context "
-                    f"(history={len((context or {}).get('sender_history', []))} entries, "
-                    f"keywords={len((context or {}).get('matched_keywords', []))}) "
+                    f"(history={n_history}, keywords={n_keywords}) "
                     f"→ {folder} ({int(confidence*100)}%)"
                 )
             else:
@@ -177,7 +162,6 @@ class LLMClassifier:
         except httpx.RequestError as e:
             logger.error(f"LLM request failed: {type(e).__name__}: {e}")
             return ClassificationResult("NeedsReview", 0.0)
-
         except Exception as e:
             logger.error(f"Unexpected LLM error: {type(e).__name__}: {e}")
             return ClassificationResult("NeedsReview", 0.0)

@@ -269,9 +269,6 @@ worker_started        = "🚀 AI Worker ativo — a aguardar tarefas."
 needs_review          = "🤔 Revisão necessária — confiança da IA: {confidence}%\n\nDe: {sender}\nAssunto: {subject}\n\nClassifica este e-mail:"
 suggested_folder      = "🆕 A IA sugere uma nova pasta\n\nDe: {sender}\nAssunto: {subject}\n\n🧠 A IA classificou como: {folder} ({confidence}%)\nEsta pasta ainda não existe.\n\nCria-a e move para lá, ou escolhe uma pasta existente:"
 add_and_move          = "➕ Adicionar '{folder}' e mover"
-rule_conflict         = "⚠️ Conflito de regra — intervenção humana necessária\n\nDe: {sender}\nAssunto: {subject}\n\n📚 Regra aprendida diz: {rule_folder}\n🧠 IA diz: {llm_folder} ({confidence}%)\n\nQual é o correto?"
-conflict_rule_btn     = "✅ {folder}  (regra)"
-conflict_ai_btn       = "✅ {folder}  (IA · {confidence}%)"
 
 # ── Etiquetas dos botões do Telegram ─────────────────────────────────────────
 
@@ -459,6 +456,4 @@ As alterações ficam ativas imediatamente — não é necessário reiniciar. Us
 
 [help.sidebar]
 hybrid     = "As regras disparam primeiro; e-mails incertos vão para o LLM. Melhor equilíbrio entre custo e precisão."
-rules_only = "Só as regras aprendidas são executadas. E-mails sem correspondência vão para o Telegram. Custo zero de LLM."
-llm_only   = "Todos os e-mails vão para o LLM, ignorando as regras. Útil para auditar a qualidade do modelo."
 auto_learn = "Modo híbrido + decisões LLM com alta confiança são guardadas automaticamente como novas regras."

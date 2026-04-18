@@ -1,19 +1,16 @@
 """
-Operation Mode — controls how the AI worker classifies emails.
+Operation Mode — controls auto-learn behaviour.
 
-The current mode is stored in Redis under OPERATION_MODE_KEY.
-The worker reads it once per job so mode changes take effect
-on the next email without a restart.
+Stored in Redis under OPERATION_MODE_KEY.
+Read once per job — mode changes take effect on the next email, no restart needed.
 
 Modes
 -----
 hybrid      LLM with sender context — rules inform, LLM decides (default)
 auto_learn  Same as hybrid + high-confidence decisions auto-saved as rules
-rules_only  [legacy] Only learned rules fire; unmatched → NeedsReview
-llm_only    [legacy] LLM with no context injection (rules ignored entirely)
 
-The primary distinction is now the supervised/autonomous toggle (Learning Mode),
-not the operation mode. hybrid and auto_learn are the recommended modes.
+The key operational distinction is the supervised/autonomous toggle (Learning Mode),
+not the operation mode. Use hybrid unless you want automatic rule creation.
 """
 
 OPERATION_MODE_KEY = "mailai:operation_mode"
@@ -36,13 +33,11 @@ GENERIC_DOMAINS = {
 MODES = {
     "hybrid":     "🔀 Hybrid — LLM with sender context (recommended)",
     "auto_learn": "🤖 Auto-Learn — Hybrid + auto-save high-confidence decisions",
-    "rules_only": "📚 Rules Only — legacy, no LLM",
-    "llm_only":   "🧠 LLM Only — legacy, no context injection",
 }
 
 
 async def get_mode(r) -> str:
-    """Read current mode from Redis. Returns DEFAULT_MODE if not set."""
+    """Read current mode from Redis. Returns DEFAULT_MODE if not set or unrecognised."""
     val = await r.get(OPERATION_MODE_KEY)
     if val and val in MODES:
         return val
@@ -51,5 +46,5 @@ async def get_mode(r) -> str:
 
 async def set_mode(r, mode: str) -> None:
     if mode not in MODES:
-        raise ValueError(f"Unknown mode: {mode}. Valid: {list(MODES)}")
+        raise ValueError(f"Unknown mode: {mode!r}. Valid: {list(MODES)}")
     await r.set(OPERATION_MODE_KEY, mode)

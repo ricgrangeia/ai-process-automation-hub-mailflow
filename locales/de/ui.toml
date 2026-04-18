@@ -269,9 +269,6 @@ worker_started        = "🚀 KI-Worker aktiv — wartet auf Aufgaben."
 needs_review          = "🤔 Überprüfung erforderlich — Konfidenz: {confidence}%\n\nVon: {sender}\nBetreff: {subject}\n\nBitte klassifizieren:"
 suggested_folder      = "🆕 KI schlägt neuen Ordner vor\n\nVon: {sender}\nBetreff: {subject}\n\n🧠 KI: {folder} ({confidence}%)\nDieser Ordner existiert nicht.\n\nErstellen und verschieben, oder vorhandenen wählen:"
 add_and_move          = "➕ '{folder}' hinzufügen & verschieben"
-rule_conflict         = "⚠️ Regelkonflikt\n\nVon: {sender}\nBetreff: {subject}\n\n📚 Regel: {rule_folder}\n🧠 KI: {llm_folder} ({confidence}%)\n\nWas ist korrekt?"
-conflict_rule_btn     = "✅ {folder}  (Regel)"
-conflict_ai_btn       = "✅ {folder}  (KI · {confidence}%)"
 
 # ── Telegram-Schaltflächen ────────────────────────────────────────────────────
 
@@ -411,6 +408,4 @@ Beispiel: `{company}/{year}/{month}-{month_name}/{category}/{supplier}`
 
 [help.sidebar]
 hybrid     = "Regeln zuerst, dann LLM. Bestes Gleichgewicht."
-rules_only = "Nur Regeln. Unbekannte → Telegram. Keine LLM-Kosten."
-llm_only   = "Immer LLM, Regeln überspringen. Für Modell-Audits."
 auto_learn = "Hybrid + hochkonfidente Entscheidungen werden als Regeln gespeichert."

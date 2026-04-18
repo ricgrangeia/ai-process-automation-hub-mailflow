@@ -269,9 +269,6 @@ worker_started        = "🚀 AI Worker is active — listening for jobs."
 needs_review          = "🤔 NeedsReview — AI confidence: {confidence}%\n\nFrom: {sender}\nSubject: {subject}\n\nPlease classify this email:"
 suggested_folder      = "🆕 AI suggests a new folder\n\nFrom: {sender}\nSubject: {subject}\n\n🧠 AI classified as: {folder} ({confidence}%)\nThis folder does not exist yet.\n\nCreate it and move there, or pick an existing folder:"
 add_and_move          = "➕ Add '{folder}' & move"
-rule_conflict         = "⚠️ Rule Conflict — human input needed\n\nFrom: {sender}\nSubject: {subject}\n\n📚 Learned rule says: {rule_folder}\n🧠 AI says: {llm_folder} ({confidence}%)\n\nWhich is correct?"
-conflict_rule_btn     = "✅ {folder}  (rule)"
-conflict_ai_btn       = "✅ {folder}  (AI · {confidence}%)"
 
 # ── Telegram button labels ────────────────────────────────────────────────────
 
@@ -459,6 +456,4 @@ Changes take effect immediately — no restart needed. Use **↩️ Reset** to g
 
 [help.sidebar]
 hybrid     = "Rules fire first; uncertain emails go to LLM. Best balance of cost and accuracy."
-rules_only = "Only learned rules run. Unmatched emails go to Telegram for manual review. Zero LLM cost."
-llm_only   = "Every email goes to the LLM, skipping rules. Useful for auditing model quality."
 auto_learn = "Hybrid mode + high-confidence LLM decisions are automatically saved as new rules."
