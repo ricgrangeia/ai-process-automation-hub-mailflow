@@ -1740,6 +1740,17 @@ def page_settings(engine):
         return
 
     # ── Month name language ───────────────────────────────────────────────────
+    try:
+        from app.core.system_settings import (
+            MONTH_LOCALE_KEY, MONTH_LOCALE_DEFAULT, MONTH_LOCALES,
+        )
+    except ImportError:
+        MONTH_LOCALE_KEY = "month_locale"
+        MONTH_LOCALE_DEFAULT = "en"
+        MONTH_LOCALES = {"en": ("English", ["January","February","March","April","May","June",
+                                             "July","August","September","October","November","December"])}
+
+    current_locale = get_setting(engine, MONTH_LOCALE_KEY) or MONTH_LOCALE_DEFAULT
     locale_options = list(MONTH_LOCALES.keys())
     locale_labels  = [f"{code} — {MONTH_LOCALES[code][0]}  ({MONTH_LOCALES[code][1][0]})" for code in locale_options]
     current_idx    = locale_options.index(current_locale) if current_locale in locale_options else 0
@@ -1750,7 +1761,7 @@ def page_settings(engine):
             options=range(len(locale_options)),
             format_func=lambda i: locale_labels[i],
             index=current_idx,
-            help="Controls the language of {month_name} in the folder path (e.g. April → Abril → Avril).",
+            help="Controls the language of {month_name} in folder paths and filenames (e.g. April → Abril → Avril).",
         )
         if st.form_submit_button("💾 Save language"):
             try:
@@ -1766,18 +1777,6 @@ def page_settings(engine):
 
     # ── Folder Structure ──────────────────────────────────────────────────────
     st.subheader(t("page.settings.archive_header"))
-
-    try:
-        from app.core.system_settings import (
-            MONTH_LOCALE_KEY, MONTH_LOCALE_DEFAULT, MONTH_LOCALES,
-        )
-    except ImportError:
-        MONTH_LOCALE_KEY = "month_locale"
-        MONTH_LOCALE_DEFAULT = "en"
-        MONTH_LOCALES = {"en": ("English", ["January","February","March","April","May","June",
-                                             "July","August","September","October","November","December"])}
-
-    current_locale = get_setting(engine, MONTH_LOCALE_KEY) or MONTH_LOCALE_DEFAULT
 
     current = get_setting(engine, FOLDER_STRUCTURE_KEY)
 
@@ -1824,8 +1823,6 @@ def page_settings(engine):
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ {e}")
-
-   
 
     # ── Folder structure preview ──────────────────────────────────────────────
     _preview_tokens_folder = {
