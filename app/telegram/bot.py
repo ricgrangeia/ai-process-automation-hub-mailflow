@@ -1420,10 +1420,10 @@ async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 conditions=conditions,
                 min_match=2,
             )
-        logger.info(
-            f"Auto-created rule for {email.from_address!r} → {target_folder} "
-            f"(conditions={len(conditions)}, min_match={min_match})"
-        )
+            logger.info(
+                f"Auto-created rule for {email.from_address!r} → {target_folder} "
+                f"(conditions={len(conditions)}, min_match=2)"
+            )
 
     # Finalize email status
     async with session_factory() as session:
