@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.database.engine import make_engine, make_session_factory
 from app.core.database.init import init_db
 from app.core.crypto import decrypt_secret
+from app.core.migrations import run_migrations
 from app.accounts.models import EmailAccount
 from app.messages.models import EmailMessage, Attachment
 from app.messages.storage import save_raw_email, save_attachment
@@ -249,6 +250,7 @@ async def worker_loop():
 
 
 def main():
+    run_migrations()
     asyncio.run(worker_loop())
 
 

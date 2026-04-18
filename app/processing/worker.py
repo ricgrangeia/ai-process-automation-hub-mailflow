@@ -26,7 +26,6 @@ from app.processing.queue import QUEUE_KEY
 from app.processing.actions.base import get_action
 from app.telegram.notifications import send_review_request, send_worker_started, send_sender_identification
 from app.review.queue import REVIEW_QUEUE_KEY, LEARNING_MODE_KEY
-from app.core.migrations import run_migrations
 from app.core.audit import log_audit
 from app.core.operation_mode import (
     get_mode, OPERATION_MODE_KEY, MODES,
@@ -614,10 +613,6 @@ async def ai_worker_loop():
 
 
 def main():
-    # Run migrations synchronously before the event loop starts.
-    # asyncio.run() cannot be called from within a running loop, so this
-    # must happen here rather than inside ai_worker_loop().
-    run_migrations()
     try:
         asyncio.run(ai_worker_loop())
     except KeyboardInterrupt:
