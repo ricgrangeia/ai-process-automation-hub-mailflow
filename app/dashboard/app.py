@@ -1842,7 +1842,7 @@ def page_settings(engine):
         files_root_env = os.environ.get("FILES_ROOT", "/files")
 
     # ── File Name Template ────────────────────────────────────────────────────
-    st.subheader("📄 " + t("page.settings.archive_header") + " — File name")
+    st.subheader("📄 File Name Structure")
 
     try:
         from app.core.system_settings import FILE_NAME_KEY, FILE_NAME_DEFAULT, FILE_NAME_TOKENS
