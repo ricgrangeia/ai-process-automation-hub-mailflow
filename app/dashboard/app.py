@@ -1843,7 +1843,6 @@ def page_settings(engine):
         files_root_env = os.environ.get("FILES_ROOT", "/files")
 
     # ── File Name Template ────────────────────────────────────────────────────
-    st.divider()
     st.subheader("📄 " + t("page.settings.archive_header") + " — File name")
 
     try:
