@@ -31,15 +31,46 @@ from app.core.system_settings import (
     get_setting,
     FOLDER_STRUCTURE_KEY,
     FOLDER_STRUCTURE_DEFAULT,
+    MONTH_LOCALE_KEY,
+    MONTH_LOCALE_DEFAULT,
+    MONTH_LOCALES,
+    FILE_NAME_KEY,
+    FILE_NAME_DEFAULT,
 )
 
 logger = logging.getLogger("action.export_pdf")
 
-_MONTH_NAMES = {
-    1: "January", 2: "February", 3: "March", 4: "April",
-    5: "May", 6: "June", 7: "July", 8: "August",
-    9: "September", 10: "October", 11: "November", 12: "December",
-}
+
+def _get_month_name(month: int, locale: str) -> str:
+    """Return the month name for 1-based month index in the given locale code."""
+    _, names = MONTH_LOCALES.get(locale) or MONTH_LOCALES.get(MONTH_LOCALE_DEFAULT)
+    return names[month - 1]
+
+
+def _resolve_filename(att_name: str, template: str, tokens: dict) -> str:
+    """
+    Build a destination filename from a template.
+
+    The template uses the same {token} syntax as the folder structure.
+    The file extension is always taken from the original attachment name.
+    {original} expands to the original filename stem (no extension).
+
+    Example:
+        att_name = "FT2025-0001.pdf"
+        template = "{document_type}_{invoice_number}_{seller_nif}"
+        → "FT_FT2025-0001_508517592.pdf"
+    """
+    stem = Path(att_name).stem
+    ext  = Path(att_name).suffix or ".pdf"
+    resolved = {**tokens, "original": _safe_name(stem, stem)}
+    tpl = (template or FILE_NAME_DEFAULT).strip()
+    try:
+        name = tpl.format_map(resolved)
+    except KeyError as e:
+        logger.warning(f"Unknown token {e} in file name template — using original name")
+        name = stem
+    name = _safe_name(name, stem)
+    return name + ext
 
 
 def _safe_name(value: str, fallback: str = "Unknown") -> str:
@@ -55,11 +86,12 @@ def _resolve_dest(
     supplier_name: str,
     received_at: datetime | None,
     template: str | None = None,
+    month_locale: str | None = None,
 ) -> Path:
     now        = received_at or datetime.now(timezone.utc)
     year       = now.strftime("%Y")
     month      = now.strftime("%m")
-    month_name = _MONTH_NAMES.get(now.month, now.strftime("%B"))
+    month_name = _get_month_name(now.month, month_locale or MONTH_LOCALE_DEFAULT)
     tokens = {
         "company":    _safe_name(company_name, "Company"),
         "year":       year,
@@ -187,11 +219,17 @@ class ExportPdfAction(EmailAction):
         files_root       = getattr(settings, "files_root", "/files")
         fallback_company = getattr(settings, "company_name", "Company")
 
-        # Fetch folder structure template from DB (falls back to default if not set)
+        # Fetch folder structure template + month locale from DB
         db_url = os.environ.get("DATABASE_URL", "").replace("+asyncpg", "")
         folder_template = await asyncio.to_thread(
             get_setting, db_url, FOLDER_STRUCTURE_KEY
         ) if db_url else FOLDER_STRUCTURE_DEFAULT
+        month_locale = await asyncio.to_thread(
+            get_setting, db_url, MONTH_LOCALE_KEY
+        ) if db_url else MONTH_LOCALE_DEFAULT
+        file_name_template = await asyncio.to_thread(
+            get_setting, db_url, FILE_NAME_KEY
+        ) if db_url else FILE_NAME_DEFAULT
         supplier     = getattr(email, "sender_name", None) or (
             (email.from_address or "").split("@")[0] if email.from_address else "Unknown"
         )
@@ -238,16 +276,37 @@ class ExportPdfAction(EmailAction):
             if att_src.exists():
                 att_files = [(p, p.name) for p in att_src.glob("*.pdf")]
 
+        # Build filename tokens available on the AI-worker path (no invoice_data)
+        now = received_at or datetime.now(timezone.utc)
+        _fn_tokens_base: dict = {
+            "document_type":  "",
+            "invoice_number": "",
+            "seller_nif":     invoice_nif_seller or "",
+            "seller":         _safe_name(supplier, "Unknown"),
+            "atcud":          "",
+            "total":          "",
+            "date":           now.strftime("%Y-%m-%d"),
+            "year":           now.strftime("%Y"),
+            "month":          now.strftime("%m"),
+            "month_name":     _get_month_name(now.month, month_locale),
+            "day":            now.strftime("%d"),
+            "category":       _safe_name(self.category, "Attachments"),
+            "supplier":       _safe_name(supplier, "Unknown"),
+        }
+
         for company_name in company_names:
-            dest = _resolve_dest(files_root, company_name, self.category, supplier, received_at, folder_template)
+            dest = _resolve_dest(files_root, company_name, self.category, supplier, received_at, folder_template, month_locale)
             dest.mkdir(parents=True, exist_ok=True)
+
+            _fn_tokens = {**_fn_tokens_base, "company": _safe_name(company_name, "Company")}
 
             copied = 0
             for att_path, att_name in att_files:
-                result = _copy_no_duplicate(att_path, dest, att_name)
+                dest_name = _resolve_filename(att_name, file_name_template, _fn_tokens)
+                result = _copy_no_duplicate(att_path, dest, dest_name)
                 if result == "copied":
                     copied += 1
-                    logger.info(f"Archived {att_name} → {dest}")
+                    logger.info(f"Archived {att_name} → {dest / dest_name}")
                 else:
                     logger.info(f"Skipped {att_name} ({result}) in {dest}")
 

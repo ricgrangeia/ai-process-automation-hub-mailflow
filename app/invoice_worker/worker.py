@@ -214,10 +214,15 @@ async def _send_invoice_card(
 async def _archive_pdfs(email_row: EmailMessage, settings, invoice_data: dict) -> None:
     import asyncio
     from app.processing.actions.export_pdf import (
-        _resolve_dest, _copy_no_duplicate, _lookup_companies,
-        _fetch_pdf_attachments,
+        _resolve_dest, _resolve_filename, _copy_no_duplicate,
+        _lookup_companies, _fetch_pdf_attachments, _safe_name,
     )
-    from app.core.system_settings import get_setting, FOLDER_STRUCTURE_KEY, FOLDER_STRUCTURE_DEFAULT
+    from app.core.system_settings import (
+        get_setting,
+        FOLDER_STRUCTURE_KEY, FOLDER_STRUCTURE_DEFAULT,
+        MONTH_LOCALE_KEY, MONTH_LOCALE_DEFAULT,
+        FILE_NAME_KEY, FILE_NAME_DEFAULT,
+    )
 
     files_root       = getattr(settings, "files_root", "/files")
     fallback_company = getattr(settings, "company_name", "Company")
@@ -227,6 +232,12 @@ async def _archive_pdfs(email_row: EmailMessage, settings, invoice_data: dict) -
     folder_template = await asyncio.to_thread(
         get_setting, db_url, FOLDER_STRUCTURE_KEY
     ) if db_url else FOLDER_STRUCTURE_DEFAULT
+    month_locale = await asyncio.to_thread(
+        get_setting, db_url, MONTH_LOCALE_KEY
+    ) if db_url else MONTH_LOCALE_DEFAULT
+    file_name_template = await asyncio.to_thread(
+        get_setting, db_url, FILE_NAME_KEY
+    ) if db_url else FILE_NAME_DEFAULT
 
     nif_buyer  = invoice_data.get("nif_buyer")
     nif_seller = invoice_data.get("nif_seller")
@@ -240,18 +251,45 @@ async def _archive_pdfs(email_row: EmailMessage, settings, invoice_data: dict) -
         if att_src.exists():
             att_files = [(p, p.name) for p in att_src.glob("*.pdf")]
 
-    supplier   = (email_row.from_address or "Unknown").split("@")[0]
+    supplier    = invoice_data.get("seller_name") or (email_row.from_address or "Unknown").split("@")[0]
     received_at = getattr(email_row, "received_at", None)
-    category   = invoice_data.get("invoice_origin", "Invoices").replace("_", " ").title()
+    category    = invoice_data.get("invoice_origin", "Invoices").replace("_", " ").title()
+
+    # Build filename tokens from the full invoice_data available here
+    from datetime import datetime as _dt, timezone as _tz
+    _date_src = received_at or _dt.now(_tz.utc)
+    _inv_date = invoice_data.get("invoice_date") or _date_src.strftime("%Y-%m-%d")
+    try:
+        _d = _dt.strptime(str(_inv_date)[:10], "%Y-%m-%d")
+    except (ValueError, TypeError):
+        _d = _date_src
+    from app.processing.actions.export_pdf import _get_month_name
+    _fn_tokens_base: dict = {
+        "document_type":  (invoice_data.get("document_type") or "").upper(),
+        "invoice_number": _safe_name(str(invoice_data.get("invoice_number") or ""), ""),
+        "seller_nif":     (invoice_data.get("nif_seller") or ""),
+        "seller":         _safe_name(supplier, "Unknown"),
+        "atcud":          (invoice_data.get("atcud") or ""),
+        "total":          str(invoice_data.get("total_amount") or ""),
+        "date":           _d.strftime("%Y-%m-%d"),
+        "year":           _d.strftime("%Y"),
+        "month":          _d.strftime("%m"),
+        "month_name":     _get_month_name(_d.month, month_locale),
+        "day":            _d.strftime("%d"),
+        "category":       _safe_name(category, "Invoices"),
+        "supplier":       _safe_name(supplier, "Unknown"),
+    }
 
     for company_name in company_names:
         dest = _resolve_dest(
-            files_root, company_name, category, supplier, received_at, folder_template
+            files_root, company_name, category, supplier, received_at, folder_template, month_locale
         )
         dest.mkdir(parents=True, exist_ok=True)
+        _fn_tokens = {**_fn_tokens_base, "company": _safe_name(company_name, "Company")}
         for att_path, att_name in att_files:
-            result = _copy_no_duplicate(att_path, dest, att_name)
-            logger.info(f"Archive {att_name} → {dest} ({result})")
+            dest_name = _resolve_filename(att_name, file_name_template, _fn_tokens)
+            result = _copy_no_duplicate(att_path, dest, dest_name)
+            logger.info(f"Archive {att_name} → {dest / dest_name} ({result})")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

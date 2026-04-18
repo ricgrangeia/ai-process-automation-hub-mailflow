@@ -18,6 +18,12 @@ logger = logging.getLogger("core.system_settings")
 FOLDER_STRUCTURE_KEY = "folder_structure"
 FOLDER_STRUCTURE_DEFAULT = "{company}/{year}/{month}-{month_name}/{category}/{supplier}"
 
+MONTH_LOCALE_KEY = "month_locale"
+MONTH_LOCALE_DEFAULT = "en"
+
+FILE_NAME_KEY = "file_name_template"
+FILE_NAME_DEFAULT = "{original}"
+
 INBOX_KEYWORDS_KEY = "inbox_filter_keywords"
 
 # Plain-string keywords that humans can read and edit.
@@ -35,6 +41,48 @@ DEFAULT_PLAIN_KEYWORDS: list[str] = [
 
 DEFAULTS: dict[str, str] = {
     FOLDER_STRUCTURE_KEY: FOLDER_STRUCTURE_DEFAULT,
+    MONTH_LOCALE_KEY:     MONTH_LOCALE_DEFAULT,
+    FILE_NAME_KEY:        FILE_NAME_DEFAULT,
+}
+
+# Available tokens for file name template (superset of folder tokens)
+FILE_NAME_TOKENS = [
+    # ── Original name ──
+    ("{original}",       "Original attachment filename without extension (e.g. FT2025-0001)"),
+    # ── Invoice-specific ──
+    ("{document_type}",  "AT document type code (e.g. FT, FR, RG)"),
+    ("{invoice_number}", "Invoice number from the document"),
+    ("{seller_nif}",     "Seller NIF"),
+    ("{atcud}",          "ATCUD code"),
+    ("{total}",          "Total invoice amount (e.g. 123.45)"),
+    # ── Shared with folder structure ──
+    ("{company}",        "Company name resolved from NIF (e.g. Acme Lda)"),
+    ("{category}",       "Export path / document category (e.g. Faturas)"),
+    ("{supplier}",       "Seller / supplier name (safe for filenames)"),
+    ("{seller}",         "Same as {supplier}"),
+    ("{year}",           "4-digit year"),
+    ("{month}",          "2-digit month"),
+    ("{month_name}",     "Month name in the configured language (e.g. April / Abril)"),
+    ("{day}",            "2-digit day"),
+    ("{date}",           "Invoice date as YYYY-MM-DD"),
+]
+
+# Supported month-name locales: code → (label, [Jan..Dec])
+MONTH_LOCALES: dict[str, tuple[str, list[str]]] = {
+    "en": ("English",    ["January","February","March","April","May","June",
+                          "July","August","September","October","November","December"]),
+    "pt": ("Português",  ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                          "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]),
+    "es": ("Español",    ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
+                          "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]),
+    "fr": ("Français",   ["Janvier","Février","Mars","Avril","Mai","Juin",
+                          "Juillet","Août","Septembre","Octobre","Novembre","Décembre"]),
+    "de": ("Deutsch",    ["Januar","Februar","März","April","Mai","Juni",
+                          "Juli","August","September","Oktober","November","Dezember"]),
+    "it": ("Italiano",   ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
+                          "Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"]),
+    "nl": ("Nederlands", ["Januari","Februari","Maart","April","Mei","Juni",
+                          "Juli","Augustus","September","Oktober","November","December"]),
 }
 
 # Available tokens for folder structure (used in UI hints)
@@ -42,7 +90,7 @@ FOLDER_TOKENS = [
     ("{company}",    "Company name resolved from NIF (e.g. Acme Lda)"),
     ("{year}",       "4-digit year of the email (e.g. 2025)"),
     ("{month}",      "2-digit month (e.g. 04)"),
-    ("{month_name}", "Month name (e.g. April)"),
+    ("{month_name}", "Month name in the configured language (e.g. April / Abril / Avril)"),
     ("{category}",   "Export path from the rule (e.g. Faturas, Water)"),
     ("{supplier}",   "Sender company / person name"),
 ]

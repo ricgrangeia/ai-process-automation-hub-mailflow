@@ -1742,6 +1742,18 @@ def page_settings(engine):
     # ── Folder Structure ──────────────────────────────────────────────────────
     st.subheader(t("page.settings.archive_header"))
 
+    try:
+        from app.core.system_settings import (
+            MONTH_LOCALE_KEY, MONTH_LOCALE_DEFAULT, MONTH_LOCALES,
+        )
+    except ImportError:
+        MONTH_LOCALE_KEY = "month_locale"
+        MONTH_LOCALE_DEFAULT = "en"
+        MONTH_LOCALES = {"en": ("English", ["January","February","March","April","May","June",
+                                             "July","August","September","October","November","December"])}
+
+    current_locale = get_setting(engine, MONTH_LOCALE_KEY) or MONTH_LOCALE_DEFAULT
+
     current = get_setting(engine, FOLDER_STRUCTURE_KEY)
 
     with st.expander(t("page.settings.tokens_expander"), expanded=False):
@@ -1788,20 +1800,131 @@ def page_settings(engine):
             except Exception as e:
                 st.error(f"❌ {e}")
 
-    st.markdown(t("page.settings.preview_label"))
-    preview_tokens = {
-        "company": "Acme Lda",
-        "year": "2025",
-        "month": "04",
-        "month_name": "April",
-        "category": "Faturas",
-        "supplier": "EDP Comercial",
+    # ── Month name language ───────────────────────────────────────────────────
+    locale_options = list(MONTH_LOCALES.keys())
+    locale_labels  = [f"{code} — {MONTH_LOCALES[code][0]}  ({MONTH_LOCALES[code][1][0]})" for code in locale_options]
+    current_idx    = locale_options.index(current_locale) if current_locale in locale_options else 0
+
+    with st.form("month_locale_form"):
+        selected_idx = st.selectbox(
+            "📅 Month name language",
+            options=range(len(locale_options)),
+            format_func=lambda i: locale_labels[i],
+            index=current_idx,
+            help="Controls the language of {month_name} in the folder path (e.g. April → Abril → Avril).",
+        )
+        if st.form_submit_button("💾 Save language"):
+            try:
+                set_setting(engine, MONTH_LOCALE_KEY, locale_options[selected_idx])
+                _set_flash("success", t("page.settings.saved"))
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ {e}")
+
+    # derive preview month_name from whatever is currently saved
+    _preview_locale = get_setting(engine, MONTH_LOCALE_KEY) or MONTH_LOCALE_DEFAULT
+    _preview_month_name = MONTH_LOCALES.get(_preview_locale, MONTH_LOCALES["en"])[1][3]  # April = index 3
+
+    # ── Folder structure preview ──────────────────────────────────────────────
+    _preview_tokens_folder = {
+        "company":    "Acme Lda",
+        "year":       "2025",
+        "month":      "04",
+        "month_name": _preview_month_name,
+        "category":   "Faturas",
+        "supplier":   "EDP Comercial",
     }
     tpl = current.strip("/")
     try:
-        preview = tpl.format_map(preview_tokens)
-        files_root = os.environ.get("FILES_ROOT", "/files")
-        st.code(f"{files_root}/{preview}/invoice.pdf")
+        preview_folder = tpl.format_map(_preview_tokens_folder)
+        files_root_env = os.environ.get("FILES_ROOT", "/files")
+    except Exception:
+        preview_folder = current
+        files_root_env = os.environ.get("FILES_ROOT", "/files")
+
+    # ── File Name Template ────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("📄 " + t("page.settings.archive_header") + " — File name")
+
+    try:
+        from app.core.system_settings import FILE_NAME_KEY, FILE_NAME_DEFAULT, FILE_NAME_TOKENS
+    except ImportError:
+        FILE_NAME_KEY     = "file_name_template"
+        FILE_NAME_DEFAULT = "{original}"
+        FILE_NAME_TOKENS  = [("{original}", "Original attachment filename without extension")]
+
+    current_fn = get_setting(engine, FILE_NAME_KEY) or FILE_NAME_DEFAULT
+
+    with st.expander("Available tokens", expanded=False):
+        for token, desc in FILE_NAME_TOKENS:
+            st.markdown(f"- `{token}` — {desc}")
+        st.caption("The file extension (.pdf) is always preserved from the original attachment.")
+
+    with st.form("file_name_template_form"):
+        new_fn_template = st.text_input(
+            "Filename template",
+            value=current_fn,
+            help="Tokens separated by _ or - (no slashes). Extension is added automatically. "
+                 "Example: {document_type}_{invoice_number}_{seller_nif}",
+        )
+        col_fn_save, col_fn_reset = st.columns([3, 1])
+        fn_save  = col_fn_save.form_submit_button("💾 Save")
+        fn_reset = col_fn_reset.form_submit_button("↩️ Reset to default")
+
+        if fn_save:
+            val = new_fn_template.strip()
+            if not val:
+                st.error("Filename template cannot be empty.")
+            elif "/" in val or "\\" in val:
+                st.error("Filename template cannot contain path separators (/ or \\).")
+            else:
+                import string as _string
+                tokens_used = [f[1] for f in _string.Formatter().parse(val) if f[1]]
+                valid_fn    = {tk.strip("{}") for tk, _ in FILE_NAME_TOKENS}
+                bad_fn      = [tk for tk in tokens_used if tk not in valid_fn]
+                if bad_fn:
+                    st.error(f"Unknown token(s): {', '.join('{'+tk+'}' for tk in bad_fn)}")
+                else:
+                    try:
+                        set_setting(engine, FILE_NAME_KEY, val)
+                        _set_flash("success", t("page.settings.saved"))
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+        if fn_reset:
+            try:
+                set_setting(engine, FILE_NAME_KEY, FILE_NAME_DEFAULT)
+                _set_flash("success", t("page.settings.reset_done"))
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ {e}")
+
+    # ── Combined path + filename preview ─────────────────────────────────────
+    st.markdown(t("page.settings.preview_label"))
+    _preview_tokens_fn = {
+        "original":       "FT2025-0001",
+        "document_type":  "FT",
+        "invoice_number": "FT2025-0001",
+        "seller_nif":     "508517592",
+        "seller":         "EDP_Comercial",
+        "supplier":       "EDP_Comercial",
+        "atcud":          "AAAA0000.1",
+        "total":          "123.45",
+        "date":           "2025-04-18",
+        "year":           "2025",
+        "month":          "04",
+        "month_name":     _preview_month_name,
+        "day":            "18",
+        "company":        "Acme_Lda",
+        "category":       "Faturas",
+    }
+    try:
+        import re as _re
+        current_fn_tpl = get_setting(engine, FILE_NAME_KEY) or FILE_NAME_DEFAULT
+        _stem = current_fn_tpl.format_map(_preview_tokens_fn)
+        _stem = _re.sub(r'[\\/*?:"<>|]', "_", _stem)[:80] or "invoice"
+        st.code(f"{files_root_env}/{preview_folder}/{_stem}.pdf")
     except Exception as e:
         st.warning(f"Preview error: {e}")
 
@@ -2102,6 +2225,23 @@ def page_settings(engine):
                 "- The seller / NIF cache\n\n"
                 "**Accounts, companies, folders and keyword settings will NOT be touched.**"
             )
+
+            delete_files = st.checkbox(
+                "🗂️ Also delete archived files on disk",
+                value=False,
+                help=(
+                    f"Wipes **{settings.files_root}** (structured invoice PDF archive) "
+                    f"and **{settings.storage_root}** (raw email + attachment cache). "
+                    "Use this for a full dev/test environment wipe. "
+                    "**Do NOT enable in production — archived PDFs cannot be recovered.**"
+                ),
+            )
+            if delete_files:
+                st.error(
+                    f"⚠️ **Archived files will be deleted** — "
+                    f"`{settings.files_root}` and `{settings.storage_root}` will be wiped from disk."
+                )
+
             confirm_text = st.text_input(
                 t("page.settings.full_reset_confirm_label"),
                 placeholder="RESET",
@@ -2132,28 +2272,57 @@ def page_settings(engine):
                         # 2 — flush Redis queues + skip sets so stale jobs don't replay
                         import redis as _redis_sync
                         _r = _redis_sync.from_url(settings.redis_url, decode_responses=True)
-                        _r.delete("mailai:jobs:email", "mailai:jobs:invoice")
+                        _r.delete(
+                            "mailai:jobs:email",
+                            "mailai:jobs:invoice",
+                            "mailai:keywords_fingerprint",  # force keyword recheck next cycle
+                        )
                         # Clear per-account non-financial skip sets so the IMAP worker
                         # re-evaluates every UNSEEN message from scratch.
                         for _sk in _r.scan_iter("mailai:skipped:*"):
                             _r.delete(_sk)
                         _r.close()
 
+                        # 3 — optionally wipe file archives from disk
+                        files_deleted: dict[str, int] = {}
+                        if delete_files:
+                            import shutil
+                            for label, root in [
+                                ("files_root",    settings.files_root),
+                                ("storage_root",  settings.storage_root),
+                            ]:
+                                root_path = Path(root)
+                                if root_path.exists():
+                                    count = sum(1 for _ in root_path.rglob("*") if _.is_file())
+                                    shutil.rmtree(root_path, ignore_errors=True)
+                                    root_path.mkdir(parents=True, exist_ok=True)
+                                    files_deleted[label] = count
+
                         from app.core.audit import log_audit_sync
+                        audit_details: dict = {
+                            "tables_cleared": ["invoices", "attachments", "emails", "learned_rules", "sellers"],
+                            "queues_flushed": ["mailai:jobs:email", "mailai:jobs:invoice"],
+                        }
+                        if files_deleted:
+                            audit_details["files_deleted"] = files_deleted
+
                         log_audit_sync(
                             engine,
                             actor_type="dashboard",
                             actor_name=os.environ.get("DASHBOARD_USER", "admin"),
                             action="system.full_reset",
                             entity_type="system",
-                            details={
-                                "tables_cleared": ["invoices", "attachments", "emails", "learned_rules", "sellers"],
-                                "queues_flushed": ["mailai:jobs:email", "mailai:jobs:invoice"],
-                            },
+                            details=audit_details,
                         )
 
                         st.session_state.pop("_full_reset_open", None)
-                        _set_flash("success", t("page.settings.full_reset_done"))
+                        if files_deleted:
+                            summary = ", ".join(
+                                f"{v} file(s) from {k}" for k, v in files_deleted.items()
+                            )
+                            _set_flash("success", f"{t('page.settings.full_reset_done')} Also deleted: {summary}.")
+                        else:
+                            _set_flash("success", t("page.settings.full_reset_done"))
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ Reset failed: {e}")
