@@ -2,7 +2,9 @@ class ClassificationResult:
     def __init__(self, folder: str, confidence: float):
         self.folder = folder
         self.confidence = confidence
-        # Set by classifiers — one of: "rule", "rule_confirmed", "rule_conflict", "llm", "rules_only_nomatch"
+        # Set by classifiers — one of: "rule", "llm", "rules_only_nomatch"
+        # "rule_confirmed" and "rule_conflict" are no longer generated;
+        # kept in this comment for historical reference only.
         self.source = "llm"
         # Sender identity — extracted by LLM
         self.sender_type = None

@@ -7,10 +7,13 @@ on the next email without a restart.
 
 Modes
 -----
-hybrid      Rules first → LLM fallback (default)
-rules_only  Only learned rules fire; unmatched → NeedsReview (zero LLM cost)
-llm_only    Always call LLM, skip rule lookup (useful to audit model quality)
-auto_learn  Hybrid + high-confidence LLM decisions auto-saved as ai_auto rules
+hybrid      LLM with sender context — rules inform, LLM decides (default)
+auto_learn  Same as hybrid + high-confidence decisions auto-saved as rules
+rules_only  [legacy] Only learned rules fire; unmatched → NeedsReview
+llm_only    [legacy] LLM with no context injection (rules ignored entirely)
+
+The primary distinction is now the supervised/autonomous toggle (Learning Mode),
+not the operation mode. hybrid and auto_learn are the recommended modes.
 """
 
 OPERATION_MODE_KEY = "mailai:operation_mode"
@@ -18,10 +21,9 @@ OPERATION_MODE_KEY = "mailai:operation_mode"
 DEFAULT_MODE = "hybrid"
 
 # Confidence threshold for auto-saving a rule in auto_learn mode.
-# Stricter than the 0.75 move threshold — only very confident decisions.
 AUTO_LEARN_CONFIDENCE_THRESHOLD = 0.90
 
-# Domains too generic to create meaningful rules for.
+# Freemail domains — too generic for meaningful sender-scoped rules
 GENERIC_DOMAINS = {
     "gmail.com", "googlemail.com",
     "hotmail.com", "hotmail.co.uk",
@@ -32,10 +34,10 @@ GENERIC_DOMAINS = {
 }
 
 MODES = {
-    "hybrid":     "🔀 Hybrid — Rules first, LLM fallback",
-    "rules_only": "📚 Rules Only — No LLM, unmatched → NeedsReview",
-    "llm_only":   "🧠 LLM Only — Always call LLM, skip rules",
+    "hybrid":     "🔀 Hybrid — LLM with sender context (recommended)",
     "auto_learn": "🤖 Auto-Learn — Hybrid + auto-save high-confidence decisions",
+    "rules_only": "📚 Rules Only — legacy, no LLM",
+    "llm_only":   "🧠 LLM Only — legacy, no context injection",
 }
 
 

@@ -382,10 +382,11 @@ async def ai_worker_loop():
 
                 active_folders = await get_active_folder_names(session)
 
-            # 3️⃣ Classify (mode-aware)
+            # 3️⃣ Classify
             op_mode = await get_mode(r)
 
             if op_mode == "rules_only":
+                # Legacy mode: deterministic rule match, no LLM
                 classification = await rule.classify(email)
                 if not classification:
                     from app.classification.contracts import ClassificationResult
@@ -394,6 +395,7 @@ async def ai_worker_loop():
                 else:
                     classification.source = "rule"
             elif op_mode == "llm_only":
+                # Legacy mode: LLM with no context injection
                 classification = await llm.classify(email, folders=active_folders)
                 if classification.confidence < 0.75:
                     from app.classification.contracts import ClassificationResult
@@ -405,7 +407,9 @@ async def ai_worker_loop():
                     low.completion_tokens = getattr(classification, 'completion_tokens', 0)
                     low.total_tokens = getattr(classification, 'total_tokens', 0)
                     classification = low
-            else:  # hybrid or auto_learn
+            else:
+                # hybrid / auto_learn — LLM with sender context (recommended)
+                # Rules inform the LLM as memory; LLM always makes the final decision.
                 classification = await classifier.classify(email, folders=active_folders)
 
             # Validate the returned folder is in the active list.
@@ -473,18 +477,16 @@ async def ai_worker_loop():
 
             # 5️⃣ NeedsReview → delegate to human via Telegram
             if folder == "NeedsReview" and settings.telegram_bot_token and settings.telegram_chat_id:
-                # For rule conflicts with PDF attachments, try to extract invoice
-                # data (ATCUD, supplier, total) to show on the conflict card.
-                invoice_info = None
-                if source == "rule_conflict":
-                    invoice_info = await _extract_invoice_for_conflict(email, settings, session_factory)
+                # Try to extract invoice data for any NeedsReview email with a PDF —
+                # shows ATCUD, supplier, total on the Telegram card so the human has
+                # enough information to decide without opening their inbox.
+                invoice_info = await _extract_invoice_for_conflict(email, settings, session_factory)
 
-                # Auto-resolve rule conflicts using invoice_document_type rules:
-                # If the invoice has a valid ATCUD and there is an active
-                # invoice_document_type rule whose value matches the document type,
-                # move directly to that rule's folder without asking.
+                # Auto-resolve using invoice_document_type rules:
+                # If the invoice has a valid ATCUD and an active invoice_document_type
+                # rule matches, move directly without asking the human.
                 auto_resolved_folder = None
-                if source == "rule_conflict" and invoice_info and invoice_info.get("atcud"):
+                if invoice_info and invoice_info.get("atcud"):
                     doc_type_desc = invoice_info.get("document_type_description")
                     if doc_type_desc:
                         auto_resolved_folder = await _find_doc_type_rule_folder(
@@ -605,10 +607,11 @@ async def ai_worker_loop():
                         await _try_invoice_qr(email, settings, session_factory)
 
                     # 8️⃣ Auto-learn: save high-confidence LLM decisions as rules
+                    # source == "llm" covers all context-aware decisions (hybrid/auto_learn)
                     if (
                         op_mode == "auto_learn"
                         and new_status == "moved"
-                        and source != "rule"
+                        and source == "llm"
                         and confidence >= AUTO_LEARN_CONFIDENCE_THRESHOLD
                     ):
                         await _auto_save_rule(session_factory, email, folder, confidence, settings)

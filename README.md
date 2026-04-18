@@ -200,7 +200,8 @@ The `invoice-worker` lets you use one mailbox for both human email and automated
 - Set `managed_by = invoice_worker` on any account from the dashboard
 - The IMAP worker (email-worker) handles all accounts; for `invoice_worker` accounts it pre-screens emails before storing and routes the job to `mailai:jobs:invoice`
 - The invoice-worker is a **Redis consumer** (BRPOP on `mailai:jobs:invoice`) — no IMAP polling; loads the stored email from DB by `email_id`
-- **Marketing gate** — `is_marketing_email()` checks `List-Unsubscribe` header and body for unsubscribe links before any keyword matching; newsletters and promotional emails are left completely untouched (unread, unmoved), even if they contain words like "payment"
+- **Marketing gate** — `is_marketing_email()` checks `List-Unsubscribe` header and body for unsubscribe links before any keyword matching;
+  newsletters and promotional emails are left completely untouched (unread, unmoved), even if they contain words like "payment"
 - **PDF emails** → tool server QR decode → LLM merge → save DB → archive PDF → move to `Invoices` folder → Telegram notification
 - **Body-only financial emails** (payment confirmations, bank transfers, receipts) → keyword scan (free, zero LLM) → if matched: LLM body extraction → save DB → move
 - **NIF lookup** — after saving, calls `ai-api /tools/nif/lookup` to resolve seller name; upserts into `sellers` table; backfills `invoices.seller_name`
@@ -534,6 +535,71 @@ Automatically populated when PDF attachments are decoded or financial emails are
 | `/recover` | Re-queue all `needs_review` emails stuck in the pipeline |
 | `/restart` | Gracefully restart the ai-worker |
 | Any free text | Natural language query — "show me invoices from EDP last month" |
+
+---
+
+## Operation Modes
+
+The mode is stored in Redis and read **per email job** — switching takes effect on the next email with no restart needed. Change it from the dashboard sidebar or via `/mode` in Telegram.
+
+### 🔀 `hybrid` (default) · 🤖 `auto_learn`
+
+**LLM with sender memory — rules inform, LLM decides**
+
+The LLM is always the decision maker. Rules are not a competing classifier —
+they act as memory that is injected into the prompt as context, the same way a
+human recalls past experience before judging a new email.
+
+Flow:
+
+1. Build context from the rule store: sender history (which folders past emails
+   from this sender were confirmed into, and how often) + inbox filter keywords
+   present in this email
+2. LLM classifies with that context
+3. Confidence ≥ 0.75 → move directly
+4. Confidence < 0.75 → `NeedsReview` → Telegram review card
+
+This means the system naturally handles sender changes: if a company switches
+email addresses or document format, the LLM still classifies correctly on content —
+and new confirmed decisions update the context over time.
+
+`auto_learn` is identical to `hybrid` with one addition: after a successful move
+with confidence ≥ **0.90** and at least one matched inbox filter keyword, the
+decision is saved as a rule (`sender_email` + keywords, `min_match=2`). These rules
+accumulate as the context store, making future classifications faster as the LLM
+has richer history to draw from.
+
+### 📚 `rules_only` *(legacy)*
+
+- Only the rule classifier runs, no LLM is called
+- Emails that don't match any rule → `NeedsReview` immediately
+- Kept for environments where LLM access is unavailable or must be minimised
+
+### 🧠 `llm_only` *(legacy)*
+
+- LLM runs with no context injection — rules are completely ignored
+- Useful to audit raw model quality without any accumulated history
+- Low-confidence results (< 0.75) still go to `NeedsReview`
+
+### Learning Mode (separate toggle — `/learn on|off`)
+
+Orthogonal to the operation mode; works on top of any of the above.
+
+When **ON**: any LLM decision that isn't already matched by a rule is sent to the
+review-worker (`pending_review`) first. You confirm or correct via Telegram before
+the move happens. Used during onboarding to verify the AI is behaving correctly
+before trusting it autonomously.
+
+When **OFF**: the AI moves emails directly without waiting for confirmation.
+
+### Summary
+
+| Mode | Uses Rules | Uses LLM | Auto-saves rules | Human review triggered by |
+|---|---|---|---|---|
+| `hybrid` | ✅ first | ✅ fallback | ❌ | conflict or low confidence |
+| `auto_learn` | ✅ first | ✅ fallback | ✅ ≥ 90% + keywords | conflict or low confidence |
+| `rules_only` | ✅ only | ❌ | ❌ | no rule match |
+| `llm_only` | ❌ | ✅ always | ❌ | low confidence |
 
 ---
 
