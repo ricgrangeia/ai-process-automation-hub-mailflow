@@ -25,7 +25,7 @@ from app.core.database.init import init_db
 from app.core.crypto import decrypt_secret
 from app.accounts.models import EmailAccount
 from app.messages.models import EmailMessage, Attachment
-from app.invoices.service import save_invoice_from_pdf, save_invoice_from_body
+from app.invoices.service import extract_invoice_from_pdf, save_invoice_from_pdf, save_invoice_from_body
 from app.ingestion.imap.client import connect_imap, move_message
 from app.processing.queue import INVOICE_QUEUE_KEY
 
@@ -504,21 +504,36 @@ async def _process_email_by_id(
             logger.info(f"Email {email_id}: no PDF attachments — leaving untouched")
             return
 
-        # Scan all PDFs — only proceed if one has a valid ATCUD
+        # Scan all PDFs — extract only (no DB write) until ATCUD is confirmed.
+        # Persisting before the ATCUD check would create orphaned invoice rows
+        # for foreign PDFs that the tool server can parse but that have no ATCUD.
         invoice_data = None
+        confirmed_path = None
         for att_path, att_name in att_files:
-            data = await save_invoice_from_pdf(
-                session_factory, email_row.id, att_path, settings
-            )
+            data = await extract_invoice_from_pdf(att_path, settings)
             if data and _is_confirmed_at(data):
                 invoice_data = data
+                confirmed_path = att_path
                 logger.info(f"Email {email_id}: ATCUD found in {att_name}")
                 break
+            elif data:
+                logger.info(
+                    f"Email {email_id}: {att_name} parsed but no ATCUD "
+                    f"(origin={data.get('invoice_origin')!r}) — skipping without saving"
+                )
 
         if not invoice_data:
             logger.info(
                 f"Email {email_id}: no PDF with ATCUD found — leaving untouched"
             )
+            return
+
+        # ATCUD confirmed — now persist and enrich
+        invoice_data = await save_invoice_from_pdf(
+            session_factory, email_row.id, confirmed_path, settings
+        )
+        if not invoice_data:
+            logger.error(f"Email {email_id}: persist failed after ATCUD confirmation — skipping")
             return
 
         # Genuine AT document confirmed — resolve folder via routing table

@@ -48,19 +48,17 @@ async def _enrich_seller_name(invoice_data: dict, settings) -> None:
         logger.warning(f"NIF enrichment failed for {nif}: {e}")
 
 
-async def save_invoice_from_pdf(
-    session_factory,
-    email_id: int,
+async def extract_invoice_from_pdf(
     pdf_path: str | Path,
     settings,
 ) -> dict | None:
     """
-    Extract invoice data from a PDF via the tool server QR endpoint,
-    persist to DB, and return the invoice dict.
+    Extract invoice data from a PDF via the tool server QR endpoint.
+    Does NOT persist anything to the DB — use this for pre-checks (e.g. ATCUD gate).
 
-    Returns None if extraction fails or produces no data.
+    Returns the raw invoice dict, or None if extraction fails / produces no data.
     """
-    from app.invoices.extractor import extract_qr_from_pdf, persist_invoice
+    from app.invoices.extractor import extract_qr_from_pdf
 
     if not getattr(settings, "tool_server_url", None):
         logger.debug("tool_server_url not configured — skipping PDF extraction")
@@ -78,16 +76,33 @@ async def save_invoice_from_pdf(
             getattr(settings, "tool_server_api_key", "") or "",
         )
     except Exception as e:
-        logger.warning(f"PDF extraction error for email {email_id} ({pdf_path.name}): {e}")
+        logger.warning(f"PDF extraction error ({pdf_path.name}): {e}")
         return None
 
-    if not results:
+    return results[0] if results else None
+
+
+async def save_invoice_from_pdf(
+    session_factory,
+    email_id: int,
+    pdf_path: str | Path,
+    settings,
+) -> dict | None:
+    """
+    Extract invoice data from a PDF via the tool server QR endpoint,
+    persist to DB, and return the invoice dict.
+
+    Returns None if extraction fails or produces no data.
+    """
+    from app.invoices.extractor import persist_invoice
+
+    invoice_data = await extract_invoice_from_pdf(pdf_path, settings)
+    if not invoice_data:
         return None
 
-    invoice_data = results[0]
     try:
         await persist_invoice(session_factory, email_id, invoice_data)
-        logger.info(f"Invoice persisted from PDF — email_id={email_id}, file={pdf_path.name}")
+        logger.info(f"Invoice persisted from PDF — email_id={email_id}, file={Path(pdf_path).name}")
     except Exception as e:
         logger.error(f"persist_invoice failed for email {email_id}: {e}")
         return None
