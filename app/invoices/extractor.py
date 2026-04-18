@@ -49,21 +49,27 @@ async def extract_qr_from_pdf(pdf_path: str, tool_server_url: str, api_key: str 
     logger.info(f"Tool server response status: {resp.status_code}")
     logger.debug(f"Tool server raw response: {data}")
 
-    invoice = data.get("invoice", {})
-    if not invoice or not any(invoice.values()):
+    invoices = data.get("invoices", [])
+    if not invoices:
         logger.warning(f"No invoice data found in {path.name} — raw response keys: {list(data.keys())}")
         return []
 
-    populated = {k: v for k, v in invoice.items() if v is not None}
-    logger.info(f"Invoice extracted from {path.name}: {populated}")
+    results = []
+    for invoice in invoices:
+        if not invoice or not any(invoice.values()):
+            continue
+        populated = {k: v for k, v in invoice.items() if v is not None}
+        logger.info(f"Invoice extracted from {path.name}: {populated}")
 
-    # document_type_description is derived from document_type — no LLM needed
-    doc_type = invoice.get("document_type")
-    if doc_type and not invoice.get("document_type_description"):
-        from app.invoices.document_types import DOCUMENT_TYPES
-        invoice["document_type_description"] = DOCUMENT_TYPES.get(doc_type)
+        # document_type_description is derived from document_type — no LLM needed
+        doc_type = invoice.get("document_type")
+        if doc_type and not invoice.get("document_type_description"):
+            from app.invoices.document_types import DOCUMENT_TYPES
+            invoice["document_type_description"] = DOCUMENT_TYPES.get(doc_type)
 
-    return [invoice]
+        results.append(invoice)
+
+    return results
 
 
 PAYMENT_FIELDS = {
