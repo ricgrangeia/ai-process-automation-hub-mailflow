@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 
@@ -189,6 +190,59 @@ async def process_account_once(settings, session_factory, r, acc: EmailAccount, 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Keyword fingerprint helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FINGERPRINT_KEY = "mailai:keywords_fingerprint"
+
+
+def _keywords_fingerprint(keywords: list[str]) -> str:
+    """Stable 8-char hash of the sorted keyword list."""
+    blob = ",".join(sorted(k.lower() for k in keywords))
+    return hashlib.md5(blob.encode()).hexdigest()[:8]
+
+
+async def _invalidate_skip_caches_if_keywords_changed(
+    r, session_factory, keywords: list[str]
+) -> None:
+    """
+    Compare the current keyword list against the last-seen fingerprint.
+    If they differ, clear every account's skip cache so the next cycle
+    re-evaluates all UNSEEN emails with the updated keywords.
+    """
+    fingerprint = _keywords_fingerprint(keywords)
+    stored = await r.get(_FINGERPRINT_KEY)
+
+    if stored == fingerprint:
+        return  # nothing changed
+
+    if stored is not None:
+        # Keywords changed — find all invoice_worker accounts and drop their skip sets.
+        async with session_factory() as session:
+            res = await session.execute(
+                select(EmailAccount).where(
+                    EmailAccount.active == True,
+                    EmailAccount.provider == "imap",
+                    EmailAccount.managed_by == "invoice_worker",
+                )
+            )
+            accounts = list(res.scalars().all())
+
+        keys_to_delete = [f"mailai:skipped:{acc.id}" for acc in accounts]
+        if keys_to_delete:
+            await r.delete(*keys_to_delete)
+            logger.info(
+                f"Keywords changed ({stored!r} → {fingerprint!r}). "
+                f"Cleared skip cache for {len(keys_to_delete)} account(s). "
+                f"All UNSEEN emails will be re-evaluated this cycle."
+            )
+    else:
+        logger.info(f"Keywords fingerprint initialised: {fingerprint!r}")
+
+    await r.set(_FINGERPRINT_KEY, fingerprint)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Worker loop — polls ALL active IMAP accounts
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -215,6 +269,12 @@ async def worker_loop():
             keywords = await asyncio.to_thread(get_inbox_keywords, db_url)
             keyword_re = build_keyword_re(keywords)
             logger.info(f"Inbox filter: {len(keywords)} keyword(s) active.")
+
+            # If keywords changed since last cycle, clear skip caches so
+            # previously-skipped emails are re-evaluated with the new list.
+            await _invalidate_skip_caches_if_keywords_changed(
+                r, session_factory, keywords
+            )
 
             async with session_factory() as session:
                 res = await session.execute(
