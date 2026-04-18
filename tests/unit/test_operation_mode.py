@@ -52,13 +52,13 @@ async def test_garbage_redis_value_falls_back_to_default(r):
 
 
 async def test_overwrite_mode(r):
-    await set_mode(r, "llm_only")
-    await set_mode(r, "rules_only")
-    assert await get_mode(r) == "rules_only"
+    await set_mode(r, "hybrid")
+    await set_mode(r, "auto_learn")
+    assert await get_mode(r) == "auto_learn"
 
 
-async def test_all_four_modes_defined():
-    assert set(MODES.keys()) == {"hybrid", "rules_only", "llm_only", "auto_learn"}
+async def test_all_modes_defined():
+    assert set(MODES.keys()) == {"hybrid", "auto_learn"}
 
 
 async def test_mode_labels_are_non_empty():

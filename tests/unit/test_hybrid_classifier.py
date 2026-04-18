@@ -1,12 +1,12 @@
 """
 Tests for app/classification/hybrid_classifier.py
 
-All external classifiers are mocked — only the orchestration logic is tested.
+Architecture: rules provide context, LLM always decides.
 
-v2.0 behaviour: rules are hints, LLM always validates when a rule matches.
-  - Rule + LLM agree  → source="rule_confirmed", confidence ≥ 0.95, folder moved
-  - Rule + LLM differ → source="rule_conflict",  folder="NeedsReview"
-  - No rule           → pure LLM, threshold applies as before
+  rule.get_context(email) → dict of sender history + matched keywords
+  llm.classify(email, context=...) → ClassificationResult
+  confidence >= threshold → return result as-is
+  confidence <  threshold → NeedsReview (with original metadata copied)
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock
@@ -19,12 +19,6 @@ from app.classification.contracts import ClassificationResult
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _rule_hit(folder="Invoices"):
-    r = ClassificationResult(folder, 1.0)
-    r.source = "rule"
-    return r
-
-
 def _llm_hit(folder="Work", confidence=0.9):
     r = ClassificationResult(folder, confidence)
     r.source = "llm"
@@ -33,135 +27,128 @@ def _llm_hit(folder="Work", confidence=0.9):
     r.prompt_tokens = 100
     r.completion_tokens = 20
     r.total_tokens = 120
+    r.llm_time_seconds = 0.5
     return r
 
 
-def _make_clf(rule_result, llm_result, threshold=0.75):
+def _make_clf(llm_result, context=None, threshold=0.75):
     rule = MagicMock()
-    rule.classify = AsyncMock(return_value=rule_result)
+    rule.get_context = AsyncMock(return_value=context or {})
     llm = MagicMock()
     llm.classify = AsyncMock(return_value=llm_result)
     return HybridClassifier(rule, llm, threshold=threshold), rule, llm
 
 
 # ---------------------------------------------------------------------------
-# Rule + LLM agree → rule_confirmed
+# LLM above / at / below threshold
 # ---------------------------------------------------------------------------
 
-async def test_rule_confirmed_when_llm_agrees():
-    """Rule matches + LLM returns same folder → rule_confirmed, email moved."""
-    clf, _, llm = _make_clf(_rule_hit("Invoices"), _llm_hit("Invoices", 0.85))
-    result = await clf.classify(MagicMock())
-    assert result.folder == "Invoices"
-    assert result.source == "rule_confirmed"
-    llm.classify.assert_called_once()
-
-
-async def test_rule_confirmed_confidence_boosted():
-    """Confidence is boosted to at least 0.95 on agreement."""
-    clf, _, _ = _make_clf(_rule_hit("Invoices"), _llm_hit("Invoices", 0.80))
-    result = await clf.classify(MagicMock())
-    assert result.confidence >= 0.95
-
-
-async def test_rule_confirmed_high_llm_confidence_kept():
-    """If LLM confidence is already above 0.95, it is preserved."""
-    clf, _, _ = _make_clf(_rule_hit("Invoices"), _llm_hit("Invoices", 0.98))
-    result = await clf.classify(MagicMock())
-    assert result.confidence == 0.98
-
-
-async def test_rule_confirmed_rule_folder_set():
-    clf, _, _ = _make_clf(_rule_hit("Invoices"), _llm_hit("Invoices", 0.9))
-    result = await clf.classify(MagicMock())
-    assert result.rule_folder == "Invoices"
-
-
-async def test_llm_always_called_when_rule_matches():
-    """LLM is always invoked for validation — never bypassed by a rule."""
-    clf, _, llm = _make_clf(_rule_hit("Invoices"), _llm_hit("Invoices", 0.9))
-    await clf.classify(MagicMock())
-    llm.classify.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# Rule + LLM disagree → rule_conflict → NeedsReview
-# ---------------------------------------------------------------------------
-
-async def test_rule_conflict_when_llm_disagrees():
-    """Rule says Invoices, LLM says Marketing → NeedsReview."""
-    clf, _, _ = _make_clf(_rule_hit("Invoices"), _llm_hit("Marketing", 0.88))
-    result = await clf.classify(MagicMock())
-    assert result.folder == "NeedsReview"
-    assert result.source == "rule_conflict"
-
-
-async def test_rule_conflict_stores_both_folders():
-    clf, _, _ = _make_clf(_rule_hit("Invoices"), _llm_hit("Marketing", 0.88))
-    result = await clf.classify(MagicMock())
-    assert result.rule_folder == "Invoices"
-    assert result.llm_folder == "Marketing"
-
-
-async def test_rule_conflict_preserves_llm_confidence():
-    clf, _, _ = _make_clf(_rule_hit("Invoices"), _llm_hit("Spam", 0.82))
-    result = await clf.classify(MagicMock())
-    assert result.confidence == 0.82
-
-
-async def test_rule_conflict_preserves_sender_identity():
-    llm = _llm_hit("Marketing", 0.88)
-    llm.sender_type = "company"
-    llm.sender_name = "Amazon"
-    clf, _, _ = _make_clf(_rule_hit("Invoices"), llm)
-    result = await clf.classify(MagicMock())
-    assert result.sender_type == "company"
-    assert result.sender_name == "Amazon"
-
-
-# ---------------------------------------------------------------------------
-# No rule → pure LLM (unchanged from v1)
-# ---------------------------------------------------------------------------
-
-async def test_no_rule_falls_through_to_llm():
-    clf, _, llm = _make_clf(None, _llm_hit("Work", 0.9))
+async def test_llm_above_threshold_folder_returned():
+    clf, _, _ = _make_clf(_llm_hit("Work", 0.9))
     result = await clf.classify(MagicMock())
     assert result.folder == "Work"
-    llm.classify.assert_called_once()
-
-
-async def test_llm_above_threshold_is_accepted():
-    clf, _, _ = _make_clf(None, _llm_hit("Spam", 0.76))
-    result = await clf.classify(MagicMock())
-    assert result.folder == "Spam"
 
 
 async def test_llm_at_threshold_is_accepted():
-    clf, _, _ = _make_clf(None, _llm_hit("Marketing", 0.75))
+    clf, _, _ = _make_clf(_llm_hit("Marketing", 0.75))
     result = await clf.classify(MagicMock())
     assert result.folder == "Marketing"
 
 
+async def test_llm_above_threshold_confidence_preserved():
+    clf, _, _ = _make_clf(_llm_hit("Spam", 0.88))
+    result = await clf.classify(MagicMock())
+    assert result.confidence == 0.88
+
+
 async def test_llm_below_threshold_becomes_needs_review():
-    clf, _, _ = _make_clf(None, _llm_hit("Work", 0.74))
+    clf, _, _ = _make_clf(_llm_hit("Work", 0.74))
     result = await clf.classify(MagicMock())
     assert result.folder == "NeedsReview"
-    assert result.confidence == 0.74
 
 
 async def test_llm_zero_confidence_becomes_needs_review():
-    clf, _, _ = _make_clf(None, _llm_hit("Work", 0.0))
-    result = await clf.classify(MagicMock())
-    assert result.folder == "NeedsReview"
-
-
-async def test_custom_threshold_respected():
-    clf, _, _ = _make_clf(None, _llm_hit("Work", 0.85), threshold=0.90)
+    clf, _, _ = _make_clf(_llm_hit("Work", 0.0))
     result = await clf.classify(MagicMock())
     assert result.folder == "NeedsReview"
 
 
 async def test_needs_review_preserves_original_confidence():
-    clf, _, _ = _make_clf(None, _llm_hit("Work", 0.60))
+    clf, _, _ = _make_clf(_llm_hit("Work", 0.60))
     result = await clf.classify(MagicMock())
     assert result.confidence == 0.60
+
+
+async def test_custom_threshold_respected():
+    clf, _, _ = _make_clf(_llm_hit("Work", 0.85), threshold=0.90)
+    result = await clf.classify(MagicMock())
+    assert result.folder == "NeedsReview"
+
+
+async def test_custom_threshold_high_confidence_passes():
+    clf, _, _ = _make_clf(_llm_hit("Work", 0.95), threshold=0.90)
+    result = await clf.classify(MagicMock())
+    assert result.folder == "Work"
+
+
+# ---------------------------------------------------------------------------
+# Rule context wiring
+# ---------------------------------------------------------------------------
+
+async def test_get_context_always_called():
+    """rule.get_context must be called on every classify call."""
+    clf, rule, _ = _make_clf(_llm_hit("Work", 0.9))
+    email = MagicMock()
+    await clf.classify(email)
+    rule.get_context.assert_called_once_with(email)
+
+
+async def test_llm_receives_context_from_rule():
+    """The dict returned by get_context is forwarded to llm.classify."""
+    ctx = {"sender_history": [{"folder": "Invoices", "hits": 5}], "matched_keywords": []}
+    clf, _, llm = _make_clf(_llm_hit("Invoices", 0.95), context=ctx)
+    email = MagicMock()
+    await clf.classify(email)
+    _, kwargs = llm.classify.call_args
+    assert kwargs.get("context") == ctx
+
+
+async def test_llm_always_called():
+    clf, _, llm = _make_clf(_llm_hit("Work", 0.9))
+    await clf.classify(MagicMock())
+    llm.classify.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# NeedsReview metadata preservation
+# ---------------------------------------------------------------------------
+
+async def test_needs_review_preserves_sender_identity():
+    llm_result = _llm_hit("Work", 0.5)
+    llm_result.sender_type = "company"
+    llm_result.sender_name = "Amazon"
+    clf, _, _ = _make_clf(llm_result)
+    result = await clf.classify(MagicMock())
+    assert result.folder == "NeedsReview"
+    assert result.sender_type == "company"
+    assert result.sender_name == "Amazon"
+
+
+async def test_needs_review_preserves_token_counts():
+    llm_result = _llm_hit("Work", 0.4)
+    llm_result.prompt_tokens = 200
+    llm_result.completion_tokens = 50
+    llm_result.total_tokens = 250
+    clf, _, _ = _make_clf(llm_result)
+    result = await clf.classify(MagicMock())
+    assert result.prompt_tokens == 200
+    assert result.completion_tokens == 50
+    assert result.total_tokens == 250
+
+
+async def test_needs_review_preserves_source():
+    llm_result = _llm_hit("Work", 0.3)
+    llm_result.source = "llm"
+    clf, _, _ = _make_clf(llm_result)
+    result = await clf.classify(MagicMock())
+    assert result.source == "llm"
