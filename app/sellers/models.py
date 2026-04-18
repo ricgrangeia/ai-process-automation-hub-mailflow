@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Integer, String, DateTime, func
+from sqlalchemy import Boolean, Integer, String, DateTime, func
 
 from app.core.database.base import Base
 
@@ -14,5 +14,6 @@ class Seller(Base):
     cae:        Mapped[str | None]   = mapped_column(String(10),  nullable=True)
     address:    Mapped[str | None]   = mapped_column(String(300), nullable=True)
     situation:  Mapped[str | None]   = mapped_column(String(50),  nullable=True)
+    trusted:    Mapped[bool]         = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[DateTime]     = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[DateTime]     = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

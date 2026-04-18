@@ -276,55 +276,23 @@ async def _finalize_email(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Trusted-sender check
+# Trusted-seller check
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _is_trusted_sender(session_factory, email_row: EmailMessage) -> bool:
-    """Return True if this email fully satisfies a learned rule for this sender.
-
-    Rules now include keyword conditions alongside sender_email, so the same
-    sender can have multiple rules for different email types (invoice vs promo).
-    We use the same min_match logic as the rule classifier — first rule that
-    meets its threshold wins.
-    """
-    if not email_row.from_address:
+async def _is_trusted_seller(session_factory, invoice_data: dict) -> bool:
+    """Return True if the seller NIF is in the sellers table with trusted=True."""
+    nif = (invoice_data.get("nif_seller") or "").strip()
+    if not nif:
         return False
 
-    from app.classification.learned_rules import LearnedRule
-    from app.classification.rule_classifier import _condition_matches
-
-    sender = email_row.from_address.lower()
-    domain = sender.split("@")[-1] if "@" in sender else ""
-    subject = (email_row.subject or "").lower()
-    body    = (email_row.body_text or "").lower()
+    from app.sellers.models import Seller
 
     async with session_factory() as session:
-        result = await session.execute(
-            select(LearnedRule).where(
-                LearnedRule.tenant_id == email_row.tenant_id,
-                LearnedRule.active == True,
-            )
-        )
-        for rule in result.scalars():
-            conditions = rule.conditions or []
-            if not conditions:
-                continue
-            # Rule must have a sender_email condition matching this sender
-            has_sender_cond = any(
-                c.get("type") == "sender_email" and c.get("value", "").lower() == sender
-                for c in conditions
-            )
-            if not has_sender_cond:
-                continue
-            # Evaluate full rule (sender + keywords) with min_match threshold
-            min_match = rule.min_match or 1
-            matched = sum(
-                1 for c in conditions
-                if _condition_matches(c, sender, domain, subject, body)
-            )
-            if matched >= min_match:
-                return True
-    return False
+        seller = (await session.execute(
+            select(Seller).where(Seller.nif == nif)
+        )).scalar_one_or_none()
+
+    return bool(seller and seller.trusted)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -444,89 +412,60 @@ async def _process_email_by_id(
         from app.processing.actions.export_pdf import _fetch_pdf_attachments
         att_files = await asyncio.to_thread(_fetch_pdf_attachments, email_row.id)
 
+        if not att_files:
+            logger.info(f"Email {email_id}: no PDF attachments — leaving untouched")
+            return
+
+        # Scan all PDFs — only proceed if one has a valid ATCUD
         invoice_data = None
-        for att_path, _ in att_files:
-            invoice_data = await save_invoice_from_pdf(
+        for att_path, att_name in att_files:
+            data = await save_invoice_from_pdf(
                 session_factory, email_row.id, att_path, settings
             )
-            if invoice_data:
+            if data and _is_confirmed_at(data):
+                invoice_data = data
+                logger.info(f"Email {email_id}: ATCUD found in {att_name}")
                 break
 
-        if not _has_meaningful_data(invoice_data):
-            logger.warning(
-                f"No meaningful invoice data extracted from PDF(s) in email {email_id} "
-                f"— leaving untouched"
+        if not invoice_data:
+            logger.info(
+                f"Email {email_id}: no PDF with ATCUD found — leaving untouched"
             )
             return
 
-        if _is_confirmed_at(invoice_data):
-            # Genuine AT document (ATCUD present)
-            target = _resolve_folder(invoice_data)
-            trusted = await _is_trusted_sender(session_factory, email_row)
+        # Genuine AT document confirmed — resolve folder and act
+        target = _resolve_folder(invoice_data)
+        trusted = await _is_trusted_seller(session_factory, invoice_data)
 
-            if trusted:
-                # Known sender — act immediately
-                logger.info(f"Email {email_id}: trusted sender — processing immediately")
-                await _archive_pdfs(email_row, settings, invoice_data)
-                await _move_email(email_row, acc, settings, target)
-                msg = _build_invoice_message(
-                    email_row, invoice_data,
-                    invoice_data.get("invoice_origin", "pt_at"),
-                    moved_to=target,
-                )
-                await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
-                await _finalize_email(session_factory, email_row.id, target, invoice_data)
-            else:
-                # New sender — ask for human approval before acting
-                logger.info(
-                    f"Email {email_id}: new sender {email_row.from_address!r} — "
-                    "sending review card, waiting for approval"
-                )
-                await _send_invoice_review_card(
-                    settings.telegram_bot_token, settings.telegram_chat_id,
-                    email_row, invoice_data, target,
-                )
-                await _set_pending_review(session_factory, email_id, target)
-        else:
-            # No ATCUD → foreign / unknown PDF — send review card so user can
-            # approve (move + archive) or reject manually.
-            logger.info(
-                f"Email {email_id}: PDF extracted but no ATCUD "
-                f"(international/unknown) — sending review card"
+        if trusted:
+            # Known sender — act immediately
+            logger.info(f"Email {email_id}: trusted sender — processing immediately")
+            await _archive_pdfs(email_row, settings, invoice_data)
+            await _move_email(email_row, acc, settings, target)
+            msg = _build_invoice_message(
+                email_row, invoice_data,
+                invoice_data.get("invoice_origin", "pt_at"),
+                moved_to=target,
             )
-            target = _resolve_folder(invoice_data)
+            await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
+            await _finalize_email(session_factory, email_row.id, target, invoice_data)
+        else:
+            # New sender — ask for human approval before acting
+            logger.info(
+                f"Email {email_id}: new sender {email_row.from_address!r} — "
+                "sending review card, waiting for approval"
+            )
             await _send_invoice_review_card(
                 settings.telegram_bot_token, settings.telegram_chat_id,
                 email_row, invoice_data, target,
             )
             await _set_pending_review(session_factory, email_id, target)
 
-    # ── Financial body path ───────────────────────────────────────────────────
+    # ── Financial body path (temporarily disabled) ────────────────────────────
     elif classification == "financial_body":
-        import os
-        invoice_data = await save_invoice_from_body(
-            session_factory, email_row.id,
-            subject=email_row.subject or "",
-            body_text=email_row.body_text or "",
-            settings=settings,
-            language=os.environ.get("LANGUAGE", "en"),
+        logger.info(
+            f"Email {email_id}: financial_body path is disabled — leaving untouched"
         )
-
-        if _has_meaningful_data(invoice_data):
-            # Body-only extraction: notify for manual review, never auto-move
-            logger.info(
-                f"Email {email_id}: body extraction successful — notifying for manual review"
-            )
-            msg = _build_invoice_message(
-                email_row, invoice_data,
-                invoice_data.get("invoice_origin", "payment_confirmation"),
-                needs_review=True,
-            )
-            await _notify_telegram(settings.telegram_bot_token, settings.telegram_chat_id, msg)
-        else:
-            logger.warning(
-                f"Body extraction returned no meaningful data for email {email_id} — leaving for manual review"
-            )
 
     else:
         logger.error(f"Unknown classification '{classification}' for email {email_id}")

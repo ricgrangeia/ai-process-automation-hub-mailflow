@@ -1398,32 +1398,25 @@ async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Move email
     move_ok = await _do_move(settings, email, account, target_folder)
 
-    # Auto-create sender+keyword rule so future invoices from this sender bypass
-    # the review gate — requires sender_email AND at least 1 keyword (min_match=2).
-    # If no filter keywords matched this email, skip rule creation: the user will
-    # be asked again next time rather than creating a rule that is too broad.
-    if email.from_address:
-        keywords = await _build_rule_keywords(email.subject or "", email.body_text or "", settings)
-        if not keywords:
-            logger.info(
-                f"Skipping auto-rule for {email.from_address!r}: "
-                "no inbox filter keywords matched — rule would be too broad"
-            )
-        else:
-            sender_email = email.from_address.lower()
-            conditions = [{"type": "sender_email", "value": sender_email}]
-            for kw in keywords:
-                conditions.append({"type": "keyword", "value": kw.lower()})
-            await _save_rule(
-                session_factory, email, target_folder,
-                actions=[{"type": "move_folder", "folder": target_folder}],
-                conditions=conditions,
-                min_match=2,
-            )
-            logger.info(
-                f"Auto-created rule for {email.from_address!r} → {target_folder} "
-                f"(conditions={len(conditions)}, min_match=2)"
-            )
+    # Mark seller as trusted so future invoices from this NIF bypass the review gate
+    if inv_row and inv_row.nif_seller:
+        from app.sellers.models import Seller
+        async with session_factory() as session:
+            seller = (await session.execute(
+                select(Seller).where(Seller.nif == inv_row.nif_seller)
+            )).scalar_one_or_none()
+            if seller:
+                seller.trusted = True
+                if inv_row.seller_name and not seller.name:
+                    seller.name = inv_row.seller_name
+            else:
+                session.add(Seller(
+                    nif=inv_row.nif_seller,
+                    name=inv_row.seller_name,
+                    trusted=True,
+                ))
+            await session.commit()
+        logger.info(f"Marked seller NIF {inv_row.nif_seller!r} as trusted")
 
     # Finalize email status
     async with session_factory() as session:
@@ -1451,11 +1444,13 @@ async def handle_inv_approve(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
     folder_line = f"→ `{target_folder}`" if move_ok else "_(move failed — check IMAP)_"
+    seller_line = f"🏢 NIF `{inv_row.nif_seller}` trusted" if (inv_row and inv_row.nif_seller) else ""
     await query.edit_message_text(
         f"✅ *Approved!*\n\n"
         f"📧 `{email.from_address}`\n"
-        f"📁 {folder_line}\n\n"
-        f"📚 Sender rule created — future invoices from this address will be processed automatically.",
+        f"📁 {folder_line}\n"
+        + (f"{seller_line}\n\n" if seller_line else "\n")
+        + f"Future invoices from this seller will be processed automatically.",
         parse_mode="Markdown",
     )
 
